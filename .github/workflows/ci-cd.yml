@@ -1,0 +1,101 @@
+# ==============================================================================
+# BHSPL SCM ERP - GitHub Actions CI/CD Pipeline
+# ==============================================================================
+
+name: CI/CD Quality Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  # --- Job 1: Test & Lint Backend ---
+  backend-validation:
+    name: Backend CI (Python/FastAPI)
+    runs-on: ubuntu-latest
+
+    services:
+      # Mock database for backend integration tests
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: bhspl_scm_test
+        ports:
+          - 3306:3306
+        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-libmysqlclient-dev build-essential
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f backend/requirements.txt ]; then pip install -r backend/requirements.txt; fi
+
+      - name: Verify Backend Project Compilation (Syntax & Imports)
+        run: |
+          python -m compileall backend/app
+
+      - name: Run Backend Tests
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: root
+          DB_PASSWORD: root
+          DB_NAME: bhspl_scm_test
+          JWT_SECRET_KEY: test_secret_key_1234567890_test_secret_key_1234567890
+          JWT_REFRESH_SECRET_KEY: test_refresh_key_1234567890_test_refresh_key_1234567890
+          JWT_ALGORITHM: HS256
+          DEBUG: True
+        run: |
+          cd backend
+          # Run pytest if test files exist
+          if [ -d tests ] || ls test_*.py 1> /dev/null 2>&1; then
+            pytest
+          else
+            echo "No tests found to run. Skipping test phase."
+          fi
+
+  # --- Job 2: Build & Lint Frontend ---
+  frontend-validation:
+    name: Frontend CI (React/Vite)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-python@v5 # Using node setup
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Validate Frontend Production Build
+        run: |
+          cd frontend
+          npm run build
+        env:
+          VITE_API_BASE_URL: "/api/v1"

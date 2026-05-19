@@ -1,0 +1,77 @@
+# ==============================================================================
+# BHSPL SCM ERP - Git Ignore Configuration
+# ==============================================================================
+
+# OS-Specific Files
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
+
+# IDE and Editors
+.idea/
+.vscode/
+*.swp
+*.swo
+.qodo/
+
+# ==============================================================================
+# Backend (Python / FastAPI)
+# ==============================================================================
+
+# Python cache & compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Virtual Environments
+venv/
+.venv/
+env/
+ENV/
+
+# Environment Variables & Sensitive Data
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Local SQLite databases or test DBs
+backend/*.db
+backend/*.sqlite3
+
+# Logs & Run-time files
+backend/*.log
+backend/uploads/
+backend/scratch/
+
+# ==============================================================================
+# Frontend (React / Vite / Node.js)
+# ==============================================================================
+
+# Dependency directories
+frontend/node_modules/
+
+# Production build outputs
+frontend/dist/
+
+# Local env files
+frontend/.env
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+
+# Logs
+frontend/*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Vite runtime/cache config
+frontend/.vite

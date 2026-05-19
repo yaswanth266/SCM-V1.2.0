@@ -1,0 +1,88 @@
+# ==============================================================================
+# BHSPL SCM ERP - Root Docker Compose Configuration
+# ==============================================================================
+
+version: '3.8'
+
+services:
+  # --- 1. Production MySQL Database ---
+  db:
+    image: mysql:8.0
+    container_name: bhspl-mysql-db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-rolex}
+      MYSQL_DATABASE: ${DB_NAME:-bhspl_scm}
+      MYSQL_USER: ${DB_USER:-root}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-rolex}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - bhspl-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u$$DB_USER", "-p$$DB_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # --- 2. FastAPI Backend Application ---
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: bhspl-backend-api
+    restart: always
+    environment:
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_USER=${DB_USER:-root}
+      - DB_PASSWORD=${DB_PASSWORD:-rolex}
+      - DB_NAME=${DB_NAME:-bhspl_scm}
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY:-your-secure-jwt-secret-key-change-in-production-2024}
+      - JWT_REFRESH_SECRET_KEY=${JWT_REFRESH_SECRET_KEY:-your-different-secure-refresh-key-change-in-production-2024}
+      - JWT_ALGORITHM=${JWT_ALGORITHM:-HS256}
+      - DEBUG=False
+      - CORS_ORIGINS=["http://localhost","http://localhost:80"]
+      - UPLOAD_DIR=/app/uploads
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASSWORD=${SMTP_PASSWORD}
+      - SMTP_FROM_EMAIL=${SMTP_FROM_EMAIL}
+      - RATE_LIMIT_STORAGE_URI=memory://
+      - HR_API_KEY=${HR_API_KEY}
+      - HR_EMPLOYEE_API_URL=${HR_EMPLOYEE_API_URL}
+      - HR_API_TIMEOUT=${HR_API_TIMEOUT}
+    volumes:
+      - uploads_data:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - bhspl-network
+
+  # --- 3. React Frontend served via Nginx ---
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: bhspl-frontend-web
+    restart: always
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - bhspl-network
+
+networks:
+  bhspl-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local
+  uploads_data:
+    driver: local

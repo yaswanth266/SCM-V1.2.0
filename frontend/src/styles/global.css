@@ -1,0 +1,3551 @@
+/* ========================================
+   BHSPL SCM ERP - Global Styles
+   "Clinical Concierge" design system — adapted from Stitch spec
+   Headlines: Manrope  ·  Body/UI: Inter
+   ======================================== */
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Barlow:wght@500;600;700;800&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
+
+:root {
+  /* Brand primary (single source of truth) */
+  --bavya-magenta: #b70051;
+  --bavya-magenta-container: #e11668;
+  --bavya-magenta-fixed: #ffd9df;
+  --bavya-magenta-fixed-dim: #ffb1c1;
+  --bavya-secondary: #b51a59;
+  --bavya-tertiary: #006b2a;   /* success-green */
+
+  /* Surface tonal scale — used instead of borders (no-line rule) */
+  --surface: #fcf9f8;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #f6f3f2;
+  --surface-container: #f0eded;
+  --surface-container-high: #eae7e7;
+  --surface-container-highest: #e5e2e1;
+  --surface-dim: #dcd9d9;
+
+  --on-surface: #1b1c1c;       /* primary text */
+  --on-surface-variant: #5b3f45; /* secondary text */
+  --outline: #8f6f75;
+  --outline-variant: #e3bdc3;
+
+  --error: #ba1a1a;
+  --error-container: #ffdad6;
+
+  /* Legacy aliases so existing rules keep working */
+  --bavya-purple: #b51a59;
+  --bavya-orange: #E8752A;
+  --bavya-gold: #F5A623;
+  --bavya-dark: #1b1c1c;
+  --bavya-bg: var(--surface);
+
+  /* Radius — "Clinical Concierge" leans into larger radii */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+
+  /* Tonal elevation — no drop shadows, just soft ambient */
+  --elev-1: 0 1px 2px rgba(27, 28, 28, 0.04);
+  --elev-2: 0 8px 20px rgba(27, 28, 28, 0.05);
+  --elev-3: 0 20px 40px rgba(27, 28, 28, 0.06);
+}
+
+/* Reset & Base */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: var(--surface);
+  color: var(--on-surface);
+  line-height: 1.55;
+  min-height: 100vh;
+  -webkit-font-feature-settings: 'cv11', 'ss01';
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+h1, h2, h3, h4, .headline, .ant-page-header-heading-title {
+  font-family: 'Manrope', 'Inter', sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--on-surface);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ========================================
+   Custom Scrollbar
+   ======================================== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Firefox scrollbar */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #c1c1c1 #f1f1f1;
+}
+
+/* ========================================
+   Layout Overrides
+   ======================================== */
+
+/* Sidebar */
+.erp-sider {
+  box-shadow: 2px 0 16px rgba(15, 10, 24, 0.2);
+  z-index: 10;
+  overflow: auto;
+  height: 100vh;
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: linear-gradient(180deg, #1a1025 0%, #2d1640 100%) !important;
+}
+
+.erp-sider .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Sidebar Logo */
+.sider-logo {
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.sider-logo h1 {
+  color: #ffffff;
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: linear-gradient(135deg, #F5A623, #D42B6E);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.sider-logo-collapsed h1 {
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+/* Sidebar Menu */
+.erp-sider .ant-menu {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  border-right: none;
+}
+
+.erp-sider .ant-menu-item,
+.erp-sider .ant-menu-submenu-title {
+  margin: 2px 8px;
+  border-radius: 6px;
+}
+
+.erp-sider .ant-menu-item:hover,
+.erp-sider .ant-menu-submenu-title:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.erp-sider .ant-menu-item-selected {
+  background: linear-gradient(135deg, #D42B6E, #6B2FA0) !important;
+  box-shadow: 0 2px 8px rgba(212, 43, 110, 0.3);
+}
+
+/* Header */
+.erp-header {
+  background: #ffffff;
+  padding: 0 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  z-index: 9;
+  position: sticky;
+  top: 0;
+  height: 64px;
+  line-height: 64px;
+}
+
+.erp-header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.erp-header-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.erp-header .trigger-btn {
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.2s;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.erp-header .trigger-btn:hover {
+  background: #f5f5f5;
+  color: #eb2f96;
+}
+
+/* Content Area */
+.erp-content {
+  padding: 24px;
+  min-height: calc(100vh - 64px);
+  background: #f0f2f5;
+}
+
+/* ========================================
+   Breadcrumb
+   ======================================== */
+.erp-breadcrumb {
+  margin: 0;
+}
+
+.erp-breadcrumb .ant-breadcrumb-link {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.erp-breadcrumb .ant-breadcrumb-link:last-child {
+  color: rgba(0, 0, 0, 0.85);
+  font-weight: 500;
+}
+
+/* =========================================================================
+   Bavya design system — Phase 1 visual refresh (2026-04-22)
+   Plum/wine app bar, harmonized sidebar, brand gradient logo.
+   Layered as overrides so legacy structure stays intact.
+   ========================================================================= */
+
+
+:root {
+  --bavya-plum: #3A0F40;
+  --bavya-plum-deep: #2A0E2F;
+  --bavya-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --bavya-plum-app: linear-gradient(90deg, #481238 0%, #3A0F40 55%, #481238 100%);
+  --bavya-grad-brand: linear-gradient(90deg, #900078 0%, #D80048 45%, #F09000 100%);
+  --bavya-sb-bg: #2A0E2F;
+  --bavya-sb-bg-hover: #3a1740;
+  --bavya-sb-bg-active: #4a1e52;
+  --bavya-sb-fg: #F4EEEA;
+  --bavya-sb-fg-muted: #B49AA8;
+  --bavya-sb-accent: #F09000;
+  --bavya-display: 'Barlow', 'Manrope', -apple-system, sans-serif;
+  --bavya-body: 'Figtree', 'Inter', -apple-system, sans-serif;
+}
+
+/* Display font for headings — keep body font for prose */
+h1, h2, h3, h4, .headline, .ant-page-header-heading-title {
+  font-family: var(--bavya-display) !important;
+  letter-spacing: -0.005em;
+}
+
+/* ----- Top app bar — plum/wine gradient ----- */
+.erp-header {
+  background: var(--bavya-plum-app) !important;
+  height: 56px !important;
+  line-height: 56px !important;
+  padding: 0 16px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.15) !important;
+}
+
+.erp-header .trigger-btn {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+.erp-header .trigger-btn:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+}
+
+.erp-header .erp-breadcrumb,
+.erp-header .erp-breadcrumb .ant-breadcrumb-link,
+.erp-header .erp-breadcrumb .ant-breadcrumb-separator {
+  color: rgba(255, 255, 255, 0.78) !important;
+  font-family: var(--bavya-body) !important;
+  font-weight: 500;
+}
+.erp-header .erp-breadcrumb .ant-breadcrumb-link:hover {
+  color: #fff !important;
+  background: transparent !important;
+}
+.erp-header .erp-breadcrumb .ant-breadcrumb-link:last-child {
+  color: #fff !important;
+  font-weight: 600;
+}
+
+/* App bar mark + wordmark (added inline by MainLayout) */
+.erp-header .bavya-mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: 14px;
+  padding: 0 6px 0 0;
+}
+.erp-header .bavya-mark img {
+  height: 30px;
+  width: 30px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.25));
+}
+.erp-header .bavya-mark .wm {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+.erp-header .bavya-mark .wm b {
+  font-family: var(--bavya-display);
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  background: var(--bavya-grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.erp-header .bavya-mark .wm > span {
+  font-family: var(--bavya-body);
+  font-weight: 600;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.65);
+  text-transform: uppercase;
+  margin-top: 1px;
+}
+@media (max-width: 640px) {
+  .erp-header .bavya-mark .wm { display: none; }
+}
+
+/* Search input on dark header */
+.erp-header .global-search .ant-input-affix-wrapper,
+.erp-header .global-search .ant-input-search-button,
+.erp-header .global-search .ant-input {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border-color: rgba(255, 255, 255, 0.18) !important;
+  color: #fff !important;
+}
+.erp-header .global-search .ant-input::placeholder {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+.erp-header .global-search .ant-input-search-button .anticon {
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+
+/* Notifications + user dropdown icons */
+.erp-header .anticon,
+.erp-header .ant-badge-count {
+  color: rgba(255, 255, 255, 0.92) !important;
+}
+.erp-header .ant-badge-count {
+  background: var(--bavya-sb-accent) !important;
+  color: #1a1220 !important;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+/* ----- Sidebar — harmonized plum dark ----- */
+.erp-sider {
+  background: var(--bavya-sb-bg) !important;
+  box-shadow: 2px 0 16px rgba(72, 24, 48, 0.25) !important;
+}
+.sider-logo {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06) !important;
+}
+.sider-logo h1 {
+  background: var(--bavya-grad-brand) !important;
+  -webkit-background-clip: text !important;
+  background-clip: text !important;
+  -webkit-text-fill-color: transparent !important;
+  font-family: var(--bavya-display) !important;
+}
+.erp-sider .ant-menu-item,
+.erp-sider .ant-menu-submenu-title {
+  color: var(--bavya-sb-fg) !important;
+  font-family: var(--bavya-body) !important;
+  font-weight: 500;
+}
+.erp-sider .ant-menu-item:hover,
+.erp-sider .ant-menu-submenu-title:hover {
+  background: var(--bavya-sb-bg-hover) !important;
+  color: #fff !important;
+}
+.erp-sider .ant-menu-item-selected {
+  background: var(--bavya-sb-bg-active) !important;
+  box-shadow: inset 3px 0 0 var(--bavya-sb-accent) !important;
+  color: #fff !important;
+}
+.erp-sider .ant-menu-item-selected .anticon,
+.erp-sider .ant-menu-item-selected a {
+  color: #fff !important;
+}
+
+/* Content area shrink to match new header */
+.erp-content {
+  min-height: calc(100vh - 56px) !important;
+}
+
+/* Body font upgrade — pages keep their own typography otherwise */
+body {
+  font-family: var(--bavya-body), 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+}
+
+/* =========================================================================
+   Bavya Login — two-pane layout (brand + form)
+   Replaces the legacy `.login-card` block; AuthLayout still wraps in
+   `.login-page`, which we use to stretch full viewport.
+   ========================================================================= */
+.login-page {
+  min-height: 100vh;
+  background: var(--bavya-plum-deep);
+  color: #1A1220;
+}
+.login-page .login-card,
+.login-page .login-card--visible {
+  /* Hide legacy AntD card if any old build is still cached. */
+  display: contents;
+}
+
+.bavya-login {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  background: #FBF7F4;
+  font-family: var(--bavya-body);
+  color: #1A1220;
+}
+
+/* ----- Brand pane (left) ----- */
+.bavya-login-brand {
+  position: relative;
+  background: linear-gradient(135deg, #2A0E2F 0%, #481238 40%, #3A0F40 100%);
+  color: #fff;
+  padding: 40px 56px 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+  isolation: isolate;
+  text-align: center;
+}
+.bavya-login-brand::before {
+  content: "";
+  position: absolute;
+  top: -140px;
+  right: -120px;
+  width: 500px;
+  height: 500px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(240, 144, 0, 0.22) 0%, rgba(216, 0, 72, 0.14) 40%, transparent 70%);
+  filter: blur(20px);
+  z-index: -1;
+}
+.bavya-login-brand::after {
+  content: "";
+  position: absolute;
+  bottom: -180px;
+  left: -100px;
+  width: 520px;
+  height: 520px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(144, 0, 120, 0.35) 0%, rgba(72, 24, 144, 0.18) 40%, transparent 70%);
+  filter: blur(24px);
+  z-index: -1;
+}
+.bavya-login-brand .grid-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+  background-size: 48px 48px;
+  -webkit-mask-image: radial-gradient(ellipse at 30% 40%, #000 20%, transparent 75%);
+          mask-image: radial-gradient(ellipse at 30% 40%, #000 20%, transparent 75%);
+}
+
+.bavya-login-brand .brand-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 28px;
+  margin-bottom: 48px;
+}
+.bavya-login-brand .brand-header img {
+  width: 168px;
+  height: 168px;
+  filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.35));
+}
+.bavya-login-brand .brand-header .wm {
+  font-family: var(--bavya-display);
+  line-height: 1;
+}
+.bavya-login-brand .brand-header .wm b {
+  display: block;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  font-size: 36px;
+  background: var(--bavya-grad-brand);
+  -webkit-background-clip: text;
+          background-clip: text;
+  color: transparent;
+}
+.bavya-login-brand .brand-header .wm > span {
+  font-size: 13px;
+  letter-spacing: 0.32em;
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 600;
+  margin-top: 10px;
+  display: block;
+}
+
+.bavya-login-brand .brand-hero {
+  margin: 0;
+  max-width: 560px;
+}
+.bavya-login-brand .brand-hero h1 {
+  font-family: var(--bavya-display);
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  font-size: 40px;
+  line-height: 1.15;
+  margin: 0 0 18px;
+  /* `text-wrap: pretty` was causing line balancing that visually overlapped
+     the gradient <em>. Plain `balance` falls back gracefully and behaves. */
+  text-wrap: balance;
+  position: relative;
+  z-index: 1;
+}
+.bavya-login-brand .brand-hero h1 em {
+  font-style: normal;
+  display: inline;
+  background: linear-gradient(90deg, #FFD7A6 0%, #FF8FA8 60%, #FFB8D8 100%);
+  -webkit-background-clip: text;
+          background-clip: text;
+  color: transparent;
+  /* Solid color fallback that shows on top of the gradient if background-clip
+     fails — keeps the line legible everywhere. */
+  -webkit-text-fill-color: transparent;
+}
+.bavya-login-brand .brand-hero p {
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.72);
+  margin: 0 auto;
+  max-width: 480px;
+}
+
+/* ----- Form pane (right) ----- */
+.bavya-login-form-pane {
+  position: relative;
+  padding: 40px 48px 32px;
+  display: flex;
+  flex-direction: column;
+  background: #FBF7F4;
+}
+.bavya-login-form-pane .form-top {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+  color: #54463F;
+}
+.bavya-login-form-pane .form-top .lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid #E8DFD9;
+  border-radius: 8px;
+  background: #fff;
+  color: #3A2D27;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: var(--bavya-body);
+}
+.bavya-login-form-pane .form-top .lang:hover { border-color: #D4C7BF; }
+
+.bavya-login-form-pane .form-body {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.bavya-login-form-pane .form-card { width: 100%; max-width: 400px; }
+.bavya-login-form-pane .form-card h2 {
+  font-family: var(--bavya-display);
+  font-weight: 700;
+  font-size: 30px;
+  line-height: 1.1;
+  margin: 0 0 8px;
+  letter-spacing: -0.01em;
+  color: #1A1220;
+}
+.bavya-login-form-pane .form-card h2 em {
+  font-style: normal;
+  background: var(--bavya-grad-brand);
+  -webkit-background-clip: text;
+          background-clip: text;
+  color: transparent;
+}
+
+/* Auth tabs */
+.bavya-login-form-pane .auth-tabs {
+  display: inline-flex;
+  padding: 3px;
+  background: #F4EEEA;
+  border-radius: 10px;
+  margin: 24px 0 24px;
+  gap: 2px;
+}
+.bavya-login-form-pane .auth-tabs button {
+  border: 0;
+  background: transparent;
+  padding: 7px 14px;
+  border-radius: 8px;
+  font-family: var(--bavya-body);
+  font-weight: 600;
+  font-size: 13px;
+  color: #7A6D66;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.bavya-login-form-pane .auth-tabs button.active {
+  background: #fff;
+  color: #1A1220;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+/* Error banner */
+.bavya-login-error {
+  background: #FDE6EC;
+  color: #8A0030;
+  border: 1px solid #FBC8D7;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 14px;
+  line-height: 1.4;
+}
+
+/* Floating-label fields */
+.bavya-login-form-pane .field {
+  position: relative;
+  margin-bottom: 14px;
+}
+.bavya-login-form-pane .field > label {
+  position: absolute;
+  left: 42px;
+  top: 14px;
+  font-size: 14px;
+  color: #A89A92;
+  pointer-events: none;
+  transition: all 0.16s ease;
+  background: transparent;
+  padding: 0 4px;
+  font-family: var(--bavya-body);
+}
+.bavya-login-form-pane .field input {
+  width: 100%;
+  border: 1.5px solid #E8DFD9;
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px 16px 16px 42px;
+  font-size: 14px;
+  color: #1A1220;
+  font-family: var(--bavya-body);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.bavya-login-form-pane .field input:focus {
+  outline: none;
+  border-color: #D80048;
+  box-shadow: 0 0 0 3px rgba(216, 0, 72, 0.18);
+}
+.bavya-login-form-pane .field input:focus ~ label,
+.bavya-login-form-pane .field input:not(:placeholder-shown) ~ label {
+  top: -8px;
+  left: 34px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #D80048;
+  background: #FBF7F4;
+}
+.bavya-login-form-pane .field .pfx {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #A89A92;
+  pointer-events: none;
+  display: inline-flex;
+}
+.bavya-login-form-pane .field .sfx {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  gap: 4px;
+}
+.bavya-login-form-pane .field .sfx button {
+  border: 0;
+  background: transparent;
+  padding: 8px;
+  border-radius: 6px;
+  color: #7A6D66;
+  cursor: pointer;
+  display: inline-flex;
+}
+.bavya-login-form-pane .field .sfx button:hover {
+  background: #F4EEEA;
+  color: #1A1220;
+}
+
+.bavya-login-form-pane .row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  margin: 8px 2px 22px;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.bavya-login-form-pane .check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #3A2D27;
+  cursor: pointer;
+  user-select: none;
+  font-family: var(--bavya-body);
+}
+.bavya-login-form-pane .check input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 1.5px solid #D4C7BF;
+  border-radius: 5px;
+  cursor: pointer;
+  position: relative;
+  margin: 0;
+  background: #fff;
+  transition: all 0.15s;
+}
+.bavya-login-form-pane .check input:checked {
+  background: #D80048;
+  border-color: #D80048;
+}
+.bavya-login-form-pane .check input:checked::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 1px;
+  width: 5px;
+  height: 10px;
+  border: 2px solid #fff;
+  border-top: 0;
+  border-left: 0;
+  transform: rotate(45deg);
+}
+.bavya-login-form-pane .forgot { font-weight: 600; }
+
+/* Primary submit */
+.bavya-login-form-pane .btn-primary {
+  width: 100%;
+  border: 0;
+  background: var(--bavya-grad-brand);
+  color: #fff;
+  padding: 14px;
+  border-radius: 10px;
+  font-family: var(--bavya-body);
+  font-weight: 700;
+  font-size: 14.5px;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(216, 0, 72, 0.25);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: transform 0.08s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  letter-spacing: 0.01em;
+}
+.bavya-login-form-pane .btn-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(216, 0, 72, 0.32);
+}
+.bavya-login-form-pane .btn-primary:active { transform: translateY(0); }
+.bavya-login-form-pane .btn-primary:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Help card */
+.bavya-login-form-pane .help-card {
+  margin-top: 26px;
+  padding: 14px 16px;
+  border: 1px solid #E8DFD9;
+  border-radius: 12px;
+  background: #fff;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.bavya-login-form-pane .help-card .ic {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #F4EEEA;
+  color: #900078;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.bavya-login-form-pane .help-card .body {
+  flex: 1;
+  font-size: 12.5px;
+  color: #54463F;
+  line-height: 1.5;
+}
+.bavya-login-form-pane .help-card .body b {
+  color: #1A1220;
+  font-weight: 700;
+  display: block;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+.bavya-login-form-pane .help-card a {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: #D80048;
+  display: inline-block;
+  margin-top: 4px;
+}
+.bavya-login-form-pane .help-card a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* Form footer */
+.bavya-login-form-pane .form-footer {
+  margin-top: 40px;
+  padding-top: 18px;
+  border-top: 1px solid #EEE6E0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+  color: #A89A92;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.bavya-login-form-pane .form-footer .links {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.bavya-login-form-pane .form-footer .links a {
+  color: #7A6D66;
+  font-weight: 600;
+}
+.bavya-login-form-pane .form-footer .links a:hover {
+  color: #241A17;
+  text-decoration: none;
+}
+.bavya-login-form-pane .form-footer .env {
+  font-family: var(--bavya-mono);
+  letter-spacing: 0.03em;
+}
+
+/* Responsive collapse — stack panes on tablets and phones */
+@media (max-width: 980px) {
+  .bavya-login { grid-template-columns: 1fr; }
+  .bavya-login-brand { padding: 28px 28px 32px; min-height: auto; }
+  .bavya-login-brand .brand-header { gap: 18px; margin-bottom: 28px; }
+  .bavya-login-brand .brand-header img { width: 110px; height: 110px; }
+  .bavya-login-brand .brand-hero { margin: 16px 0 20px; }
+  .bavya-login-brand .brand-hero h1 { font-size: 30px; }
+  .bavya-login-form-pane { padding: 28px 24px; }
+}
+@media (max-width: 520px) {
+  .bavya-login-brand { padding: 24px 20px; }
+  .bavya-login-brand .brand-header img { width: 88px; height: 88px; }
+  .bavya-login-brand .brand-header .wm b { font-size: 28px; }
+  .bavya-login-brand .brand-hero h1 { font-size: 24px; }
+  .bavya-login-form-pane { padding: 24px 18px; }
+  .bavya-login-form-pane .form-card h2 { font-size: 24px; }
+}
+
+/* =========================================================================
+   Bavya App Launcher (home page)
+   ========================================================================= */
+.bavya-launcher {
+  position: relative;
+  min-height: calc(100vh - 56px);
+  padding: 48px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(216, 0, 72, 0.08) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 100%, rgba(240, 144, 0, 0.06) 0%, transparent 50%),
+    #FBF7F4;
+}
+.bavya-launcher-logo {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  margin: 0 auto 20px;
+  display: block;
+  filter: drop-shadow(0 8px 20px rgba(144, 0, 120, 0.15));
+}
+.bavya-launcher-topbar {
+  width: 100%;
+  max-width: 1100px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin: -24px 0 16px;
+}
+.bavya-launcher-profile {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 14px 4px 4px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #EEE6E0;
+  box-shadow: 0 2px 8px rgba(72, 24, 144, 0.06);
+  cursor: pointer;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+.bavya-launcher-profile:hover {
+  box-shadow: 0 4px 16px rgba(72, 24, 144, 0.12);
+  transform: translateY(-1px);
+}
+.bavya-launcher-profile-name {
+  font-family: var(--bavya-body);
+  font-weight: 600;
+  font-size: 13px;
+  color: #1A1220;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bavya-lms-topbar {
+  width: 100%;
+  padding: 16px 32px 0;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+}
+.bavya-lms-back {
+  background: #fff !important;
+  border: 1px solid #E8DFD9 !important;
+  font-family: var(--bavya-body) !important;
+  font-weight: 500 !important;
+  color: #481890 !important;
+}
+.bavya-lms-back:hover {
+  border-color: #481890 !important;
+  background: #F8F4FD !important;
+}
+.bavya-launcher h1 {
+  font-family: var(--bavya-display) !important;
+  font-weight: 700;
+  font-size: 34px;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  margin: 0 0 8px;
+  text-align: center;
+  color: #1A1220;
+}
+.bavya-launcher h1 em {
+  font-style: italic;
+  background: var(--bavya-grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.bavya-launcher-sub {
+  color: #7A6D66;
+  margin-bottom: 36px;
+  font-size: 15px;
+  font-family: var(--bavya-body);
+}
+.bavya-launcher-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 20px;
+  width: 100%;
+  max-width: 1100px;
+}
+.bavya-tile {
+  background: #fff;
+  border-radius: 16px;
+  padding: 24px 20px;
+  cursor: pointer;
+  border: 1px solid #E8DFD9;
+  box-shadow: 0 1px 2px rgba(72, 24, 48, 0.06);
+  transition: all 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: relative;
+  overflow: hidden;
+}
+.bavya-tile::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--tile-color, #D80048);
+  opacity: 0.9;
+}
+.bavya-tile:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 28px rgba(72, 24, 48, 0.10), 0 4px 8px rgba(72, 24, 48, 0.06);
+  border-color: var(--tile-color, #D80048);
+}
+.bavya-tile-ico {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: var(--tile-bg, #FDE6EC);
+  color: var(--tile-color, #D80048);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+}
+.bavya-tile-title {
+  font-family: var(--bavya-display);
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1.2;
+  color: #1A1220;
+}
+.bavya-tile-desc {
+  font-size: 12px;
+  color: #7A6D66;
+  line-height: 1.4;
+}
+.bavya-tile-count {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  font-family: var(--bavya-body);
+  font-weight: 700;
+  font-size: 10px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+@media (max-width: 768px) {
+  .bavya-launcher { padding: 28px 16px; }
+  .bavya-launcher h1 { font-size: 24px; }
+  .bavya-launcher-logo { width: 88px; height: 88px; margin-bottom: 14px; }
+  .bavya-launcher-grid { grid-template-columns: repeat(2, 1fr); gap: 12px; }
+  .bavya-tile { padding: 14px 12px; }
+  .bavya-tile-ico { width: 36px; height: 36px; }
+}
+
+/* Launcher is a full-screen home — hide the AntD sider AND the plum app bar
+   so the user lands on a clean Bavya welcome with just the logo + tiles. */
+.bavya-launcher-mode .erp-sider {
+  display: none !important;
+}
+.bavya-launcher-mode .ant-layout {
+  margin-left: 0 !important;
+}
+.bavya-launcher-mode .erp-content {
+  padding: 0 !important;
+  background: transparent !important;
+  min-height: 100vh !important;
+}
+.bavya-launcher-mode .erp-header {
+  display: none !important;
+}
+/* Reclaim the height the hidden header would have taken */
+.bavya-launcher-mode .bavya-launcher {
+  min-height: 100vh !important;
+}
+
+/* =========================================================================
+   Bavya module-aware horizontal top nav
+   When a module has multiple tabs, we render a horizontal nav strip below
+   the app bar and hide the legacy left sidebar entirely.
+   ========================================================================= */
+.bavya-topnav {
+  display: flex;
+  align-items: stretch;
+  height: 44px;
+  background: #fff;
+  border-bottom: 1px solid #E8DFD9;
+  box-shadow: 0 1px 0 rgba(72, 24, 48, 0.04);
+  padding: 0 16px;
+  gap: 0;
+  position: sticky;
+  top: 56px;
+  z-index: 8;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+.bavya-topnav-modlabel {
+  display: flex;
+  align-items: center;
+  font-family: var(--bavya-display);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--mod-color, #481890);
+  padding: 0 18px 0 0;
+  margin-right: 14px;
+  border-right: 1px solid #EEE6E0;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.bavya-topnav-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.bavya-topnav-tabs button {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0 14px;
+  font-family: var(--bavya-body);
+  font-weight: 500;
+  font-size: 13.5px;
+  color: #54463F;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  height: 44px;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+  margin-bottom: -1px; /* overlap the strip border */
+}
+.bavya-topnav-tabs button:hover {
+  color: var(--mod-color, #481890);
+  background: rgba(216, 0, 72, 0.03);
+}
+.bavya-topnav-tabs button.active {
+  color: var(--mod-color, #481890);
+  border-bottom-color: var(--mod-color, #481890);
+  font-weight: 600;
+}
+
+/* When topnav is shown, hide the AntD sider + reset margin */
+.bavya-topnav-mode .erp-sider {
+  display: none !important;
+}
+.bavya-topnav-mode > .ant-layout {
+  margin-left: 0 !important;
+}
+.bavya-topnav-mode .erp-content {
+  padding: 16px 24px 24px !important;
+}
+
+/* Universal sider-hide whenever we're in a known module (topnav OR single-page) */
+.bavya-no-sider .erp-sider { display: none !important; }
+.bavya-no-sider > .ant-layout { margin-left: 0 !important; }
+.bavya-no-sider .erp-content { padding: 20px 24px 28px !important; }
+.bavya-no-sider .trigger-btn { display: none !important; }
+
+@media (max-width: 768px) {
+  .bavya-topnav {
+    padding: 0 12px;
+    height: 40px;
+    top: 56px;
+  }
+  .bavya-topnav-modlabel {
+    font-size: 11px;
+    padding-right: 10px;
+    margin-right: 8px;
+  }
+  .bavya-topnav-tabs button {
+    height: 40px;
+    padding: 0 10px;
+    font-size: 12.5px;
+  }
+}
+
+/* =========================================================================
+   Bavya KPI / card refresh — applies the design's tile aesthetic to every
+   AntD Card + Statistic (dashboard, stat cards, list pages).
+   ========================================================================= */
+.bavya-topnav-mode .ant-card,
+.bavya-launcher-mode .ant-card,
+.erp-content .ant-card {
+  border-radius: 16px !important;
+  border: 1px solid #E8DFD9 !important;
+  box-shadow: 0 1px 2px rgba(72, 24, 48, 0.06) !important;
+  transition: box-shadow 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.erp-content .ant-card:hover {
+  box-shadow: 0 4px 10px rgba(72, 24, 48, 0.08), 0 2px 4px rgba(72, 24, 48, 0.05) !important;
+}
+.erp-content .ant-card-head {
+  border-bottom: 1px solid #EEE6E0 !important;
+  font-family: var(--bavya-display) !important;
+}
+.erp-content .ant-card-head-title {
+  font-family: var(--bavya-display) !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.005em;
+}
+
+/* Statistic — Bavya KPI feel */
+.erp-content .ant-statistic-title {
+  font-family: var(--bavya-body) !important;
+  font-weight: 600 !important;
+  font-size: 11px !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.08em !important;
+  color: #7A6D66 !important;
+  margin-bottom: 6px !important;
+}
+.erp-content .ant-statistic-content {
+  font-family: var(--bavya-display) !important;
+}
+.erp-content .ant-statistic-content-value {
+  font-family: var(--bavya-display) !important;
+  font-weight: 700 !important;
+  font-variant-numeric: tabular-nums;
+  color: #1A1220 !important;
+  letter-spacing: -0.01em;
+}
+
+/* Page header — Bavya display font */
+.erp-content .ant-page-header,
+.erp-content .ant-page-header-heading-title,
+.erp-content .ant-page-header-heading-sub-title {
+  font-family: var(--bavya-display) !important;
+}
+.erp-content h1,
+.erp-content h2,
+.erp-content h3 {
+  font-family: var(--bavya-display) !important;
+}
+
+/* Buttons — primary matches Bavya crimson */
+.erp-content .ant-btn-primary {
+  background: #D80048 !important;
+  border-color: #D80048 !important;
+}
+.erp-content .ant-btn-primary:hover,
+.erp-content .ant-btn-primary:focus {
+  background: #b00038 !important;
+  border-color: #b00038 !important;
+  box-shadow: 0 0 0 3px rgba(216, 0, 72, 0.18) !important;
+}
+.erp-content .ant-btn-link {
+  color: #D80048 !important;
+}
+
+/* Tag / Badge primary tint */
+.erp-content .ant-tag-magenta,
+.erp-content .ant-tag-pink,
+.erp-content .ant-tag-red {
+  background: #FDE6EC !important;
+  color: #D80048 !important;
+  border-color: #FBC8D7 !important;
+}
+.erp-content .ant-tag-purple,
+.erp-content .ant-tag-blue {
+  background: #EEE6F7 !important;
+  color: #481890 !important;
+  border-color: #D8C4EE !important;
+}
+.erp-content .ant-tag-green,
+.erp-content .ant-tag-success {
+  background: #E6F4EC !important;
+  color: #2E7D52 !important;
+  border-color: #C4E8D2 !important;
+}
+.erp-content .ant-tag-orange,
+.erp-content .ant-tag-gold,
+.erp-content .ant-tag-warning {
+  background: #FFEAD2 !important;
+  color: #B87A00 !important;
+  border-color: #F8D7A8 !important;
+}
+
+/* =========================================================================
+   Bavya Kanban — reusable board with brand-themed columns + drag/drop
+   ========================================================================= */
+.bavya-kanban {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(280px, 1fr);
+  gap: 14px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 4px 16px;
+  align-items: stretch;
+  min-height: calc(100vh - 200px);
+}
+.bavya-kanban-col {
+  display: flex;
+  flex-direction: column;
+  background: #FBF7F4;
+  border: 1px solid #EEE6E0;
+  border-radius: 14px;
+  min-width: 280px;
+  overflow: hidden;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.bavya-kanban-col.drop-active {
+  background: #FDE6EC;
+  border-color: var(--col-color, #D80048);
+}
+.bavya-kanban-col-hdr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  background: #fff;
+  border-bottom: 1px solid #EEE6E0;
+  font-family: var(--bavya-body);
+  font-weight: 600;
+  font-size: 13px;
+  color: #1A1220;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.bavya-kanban-col-hdr .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--col-color, #7A6D66);
+  flex-shrink: 0;
+}
+.bavya-kanban-col-hdr .lbl {
+  flex: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11.5px;
+  color: #54463F;
+}
+.bavya-kanban-col-hdr .cnt {
+  font-family: var(--bavya-display);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--col-color, #7A6D66);
+  background: rgba(0, 0, 0, 0.04);
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+.bavya-kanban-col-body {
+  flex: 1;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  min-height: 80px;
+}
+.bavya-kanban-empty {
+  text-align: center;
+  padding: 24px 8px;
+  color: #A89A92;
+  font-size: 12px;
+  font-style: italic;
+}
+.bavya-kanban-card {
+  background: #fff;
+  border: 1px solid #EEE6E0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  cursor: grab;
+  box-shadow: 0 1px 2px rgba(72, 24, 48, 0.04);
+  transition: box-shadow 150ms ease, transform 150ms ease, border-color 150ms ease;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bavya-kanban-card:active { cursor: grabbing; }
+.bavya-kanban-card:hover {
+  box-shadow: 0 4px 10px rgba(72, 24, 48, 0.08), 0 2px 4px rgba(72, 24, 48, 0.05);
+  transform: translateY(-1px);
+  border-color: var(--col-color, #D8C4EE);
+}
+.bavya-kanban-card.dragging {
+  opacity: 0.4;
+  transform: rotate(1deg);
+}
+.bavya-kanban-card .ref {
+  font-family: var(--bavya-mono);
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--col-color, #1A1220);
+  font-variant-numeric: tabular-nums;
+}
+.bavya-kanban-card .title {
+  font-family: var(--bavya-body);
+  font-weight: 500;
+  font-size: 13px;
+  color: #241A17;
+  line-height: 1.35;
+}
+.bavya-kanban-card .meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 11.5px;
+  color: #7A6D66;
+}
+.bavya-kanban-card .meta .pill {
+  background: #F4EEEA;
+  color: #54463F;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+}
+.bavya-kanban-card .meta .pill.urgent {
+  background: #FDE6EC;
+  color: #D80048;
+}
+
+/* =========================================================================
+   Bavya Dashboard — design-driven Operations Snapshot layout
+   ========================================================================= */
+.bavya-dash {
+  padding: 4px 4px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 1500px;
+  margin: 0 auto;
+  width: 100%;
+}
+.bavya-dash-hdr {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.bavya-dash-hdr .left { min-width: 0; flex: 1 1 auto; }
+.bavya-dash-hdr .left .eyebrow {
+  font-family: var(--bavya-body);
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #D80048;
+  line-height: 1;
+}
+.bavya-dash-hdr .left h2 {
+  margin: 6px 0 0;
+  font-family: var(--bavya-display);
+  font-weight: 700;
+  font-size: 26px;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: #1A1220;
+}
+.bavya-dash-hdr .actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* Bavya buttons (used inside the dashboard so we don't fight AntD) */
+.bv-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-family: var(--bavya-body);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all 150ms ease;
+  background: #fff;
+  color: #1A1220;
+  white-space: nowrap;
+}
+.bv-btn.sm { padding: 4px 10px; font-size: 12px; }
+.bv-btn.primary {
+  background: #D80048;
+  color: #fff;
+  border-color: #D80048;
+}
+.bv-btn.primary:hover { background: #b00038; border-color: #b00038; }
+.bv-btn.ghost {
+  background: transparent;
+  border-color: #E8DFD9;
+  color: #54463F;
+}
+.bv-btn.ghost:hover { background: #FBF7F4; border-color: #D4C7BF; color: #1A1220; }
+
+/* Quick actions strip — create-flow shortcuts above the KPIs */
+.bavya-quickactions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+.bavya-quick-btn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #fff;
+  border: 1px solid #E8DFD9;
+  border-radius: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+  text-align: left;
+  font-family: var(--bavya-body);
+  transition: all 200ms cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 1px 2px rgba(72, 24, 48, 0.04);
+}
+.bavya-quick-btn:hover {
+  transform: translateY(-2px);
+  border-color: var(--qa-color, #D80048);
+  box-shadow: 0 8px 18px rgba(72, 24, 48, 0.08);
+}
+.bavya-quick-plus {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--qa-color, #D80048);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex-shrink: 0;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
+}
+.bavya-quick-text { display: flex; flex-direction: column; min-width: 0; }
+.bavya-quick-text .lbl {
+  font-family: var(--bavya-display);
+  font-weight: 700;
+  font-size: 14px;
+  color: #1A1220;
+  line-height: 1.2;
+}
+.bavya-quick-text .desc {
+  font-size: 12px;
+  color: #7A6D66;
+  margin-top: 2px;
+}
+
+/* KPI grid */
+.bavya-kpigrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+.bavya-kpi {
+  background: #fff;
+  border-radius: 16px;
+  padding: 16px 18px;
+  border: 1px solid #E8DFD9;
+  box-shadow: 0 1px 2px rgba(72, 24, 48, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.bavya-kpi:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 28px rgba(72, 24, 48, 0.10), 0 4px 8px rgba(72, 24, 48, 0.06);
+  border-color: var(--kpi-color, #D80048);
+}
+.bavya-kpi::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--kpi-color, #D80048);
+  opacity: 0.85;
+}
+.bavya-kpi .lbl {
+  font-family: var(--bavya-body);
+  font-weight: 600;
+  font-size: 11px;
+  line-height: 1;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #7A6D66;
+  margin-top: 2px;
+}
+.bavya-kpi .val {
+  font-family: var(--bavya-display);
+  font-weight: 700;
+  font-size: 28px;
+  line-height: 1;
+  color: #1A1220;
+  font-variant-numeric: tabular-nums;
+  margin-top: 2px;
+}
+.bavya-kpi .delta {
+  font-size: 12px;
+  color: #7A6D66;
+}
+.bavya-kpi .ico {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  color: var(--kpi-color, #D80048);
+  opacity: 0.5;
+  font-size: 22px;
+}
+
+/* Two-column row: chart + activity */
+.bavya-dashrow {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+}
+.bavya-dashrow > .bavya-card { min-width: 0; }
+@media (max-width: 1100px) {
+  .bavya-dashrow { grid-template-columns: 1fr; }
+}
+
+.bavya-card {
+  background: #fff;
+  border-radius: 16px;
+  border: 1px solid #E8DFD9;
+  box-shadow: 0 1px 2px rgba(72, 24, 48, 0.06);
+  overflow: hidden;
+}
+.bavya-card-hdr {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 18px 0;
+  flex-wrap: wrap;
+}
+.bavya-card-hdr h3 {
+  margin: 0 0 2px;
+  font-family: var(--bavya-display);
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1.3;
+  color: #1A1220;
+}
+.bavya-card-hdr .sub {
+  font-size: 12px;
+  color: #7A6D66;
+}
+.bavya-card-hdr .legend {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: #7A6D66;
+  flex-shrink: 0;
+}
+.bavya-card-hdr .legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.bavya-card-hdr .legend .sw {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.bavya-card-body { padding: 16px 18px; }
+
+/* Bar chart */
+.bavya-bars {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 18px;
+  height: 180px;
+  padding: 0 4px;
+}
+.bavya-bars .bar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  height: 100%;
+}
+.bavya-bars .bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  width: 100%;
+  height: 100%;
+}
+.bavya-bars .bar {
+  flex: 1;
+  border-radius: 3px 3px 0 0;
+  min-height: 2px;
+  transition: opacity 150ms ease, transform 150ms ease;
+}
+.bavya-bars .bar:hover { opacity: 0.85; transform: translateY(-2px); }
+.bavya-bars .bar-col > .lbl {
+  font-family: var(--bavya-body);
+  font-size: 11px;
+  color: #7A6D66;
+  font-weight: 500;
+}
+.bavya-bars-summary {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #EEE6E0;
+}
+.bavya-bars-summary > div { text-align: center; }
+.bavya-bars-summary .num {
+  font-family: var(--bavya-display);
+  font-weight: 700;
+  font-size: 18px;
+  line-height: 1;
+  color: #1A1220;
+}
+.bavya-bars-summary .lbl {
+  font-size: 11px;
+  color: #7A6D66;
+  margin-top: 3px;
+}
+
+/* Activity feed */
+.bavya-activity { padding: 6px 0 6px; max-height: 360px; overflow-y: auto; }
+.bavya-activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 18px;
+  border-top: 1px solid #F4EEEA;
+}
+.bavya-activity-item:first-child { border-top: 0; }
+.bavya-activity-item .dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--bavya-body);
+  font-weight: 700;
+  font-size: 11px;
+  color: #fff;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.bavya-activity-item .body { flex: 1; min-width: 0; }
+.bavya-activity-item .title {
+  font-size: 13px;
+  color: #241A17;
+  line-height: 1.4;
+}
+.bavya-activity-item .meta {
+  font-size: 11px;
+  color: #A89A92;
+  margin-top: 2px;
+}
+.bavya-activity-empty {
+  padding: 24px 18px;
+  font-size: 12px;
+  color: #A89A92;
+  font-style: italic;
+  text-align: center;
+}
+
+/* Urgent items */
+.bavya-urgent {}
+.bavya-urgent-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-top: 1px solid #F4EEEA;
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+.bavya-urgent-row:first-child { border-top: 0; }
+.bavya-urgent-row:hover { background: #FFF9F3; }
+.bavya-urgent-row .t { flex: 1; min-width: 0; }
+.bavya-urgent-row .title {
+  font-family: var(--bavya-body);
+  font-weight: 600;
+  font-size: 13.5px;
+  line-height: 1.3;
+  color: #1A1220;
+}
+.bavya-urgent-row .meta {
+  font-size: 12px;
+  color: #7A6D66;
+  margin-top: 2px;
+}
+.bavya-urgent-row .ref {
+  font-family: var(--bavya-mono);
+  font-weight: 600;
+  font-size: 12px;
+  color: #D80048;
+  flex-shrink: 0;
+}
+.bavya-tag {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-family: var(--bavya-body);
+  font-weight: 700;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.bavya-tag.warn { background: #FFEAD2; color: #B87A00; }
+.bavya-tag.danger { background: #FDE6EC; color: #D80048; }
+.bavya-tag.info { background: #EEE6F7; color: #481890; }
+
+/* Tables — softer borders, Bavya body font */
+.erp-content .ant-table {
+  font-family: var(--bavya-body) !important;
+}
+.erp-content .ant-table-thead > tr > th {
+  background: #FBF7F4 !important;
+  color: #54463F !important;
+  font-family: var(--bavya-body) !important;
+  font-weight: 600 !important;
+  font-size: 12.5px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid #E8DFD9 !important;
+}
+.erp-content .ant-table-tbody > tr:hover > td {
+  background: #FDE6EC !important;
+}
+.erp-content .ant-table-tbody > tr > td {
+  border-bottom: 1px solid #F4EEEA !important;
+}
+
+/* ========================================
+   Page Header
+   ======================================== */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.page-header-title h2 {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0;
+  color: rgba(0, 0, 0, 0.85);
+  line-height: 1.3;
+}
+
+.page-header-title p {
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.45);
+  margin: 4px 0 0 0;
+}
+
+.page-header-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ========================================
+   Stat Cards
+   ======================================== */
+.stat-card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 1px 4px rgba(15, 10, 24, 0.06);
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  height: 100%;
+  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+.stat-card:hover {
+  box-shadow: 0 8px 24px rgba(15, 10, 24, 0.1);
+  transform: translateY(-2px);
+  border-color: rgba(212, 43, 110, 0.12);
+}
+
+.stat-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.stat-card-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+}
+
+.stat-card-trend {
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.stat-card-trend.up {
+  color: #52c41a;
+}
+
+.stat-card-trend.down {
+  color: #f5222d;
+}
+
+.stat-card-value {
+  font-size: 30px;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.85);
+  line-height: 1.2;
+  margin-bottom: 4px;
+}
+
+.stat-card-label {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.55);
+  font-weight: 500;
+}
+
+/* Alert stat cards (red border-left for action-required KPIs) */
+.stat-card--alert {
+  border-left: 3px solid #f5222d;
+}
+
+.stat-card--alert .stat-card-value {
+  color: #f5222d;
+}
+
+/* ========================================
+   Global Search
+   ======================================== */
+.global-search {
+  width: 280px;
+  transition: width 0.3s;
+}
+
+.global-search:focus-within {
+  width: 360px;
+}
+
+.global-search .ant-input-affix-wrapper {
+  border-radius: 20px;
+  background: #f5f5f5;
+  border: 1px solid transparent;
+  padding: 6px 16px;
+}
+
+.global-search .ant-input-affix-wrapper:hover,
+.global-search .ant-input-affix-wrapper-focused {
+  background: #fff;
+  border-color: var(--bavya-magenta);
+}
+
+/* ========================================
+   Table Action Buttons (larger touch targets)
+   ======================================== */
+.ant-table-tbody .ant-btn-link,
+.ant-table-tbody .ant-btn-text {
+  min-width: 32px;
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ========================================
+   Status Tags in Tables
+   ======================================== */
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.status-dot--active { background: #52c41a; }
+.status-dot--inactive { background: #d9d9d9; }
+.status-dot--draft { background: #1890ff; }
+.status-dot--pending { background: #fa8c16; }
+.status-dot--approved { background: #52c41a; }
+.status-dot--rejected { background: #f5222d; }
+
+/* ========================================
+   Empty State with illustration
+   ======================================== */
+.ant-empty {
+  padding: 40px 0;
+}
+
+.ant-empty-description {
+  color: rgba(0, 0, 0, 0.35);
+  font-size: 14px;
+}
+
+/* ========================================
+   Mobile Sidebar Overlay
+   ======================================== */
+@media (max-width: 992px) {
+  .erp-sider {
+    position: fixed !important;
+    z-index: 100 !important;
+  }
+
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 99;
+    transition: opacity 0.3s;
+  }
+}
+
+/* ========================================
+   Item name emphasis in tables
+   ======================================== */
+.ant-table-tbody .item-name-cell {
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+/* ========================================
+   Data Table Wrapper
+   ======================================== */
+.data-table-wrapper {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.data-table-toolbar {
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.data-table-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.data-table-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.data-table-wrapper .ant-table {
+  border-radius: 0;
+}
+
+.data-table-wrapper .ant-table-thead > tr > th {
+  background: #fafafa;
+  font-weight: 600;
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.65);
+  text-transform: none;
+  letter-spacing: 0.2px;
+  border-bottom: 1px solid #f0f0f0;
+  padding: 12px 16px;
+}
+
+.data-table-wrapper .ant-table-tbody > tr > td {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.data-table-wrapper .ant-table-tbody > tr:hover > td {
+  background: #e6f7ff;
+}
+
+.data-table-wrapper .ant-table-tbody > tr:last-child > td {
+  border-bottom: none;
+}
+
+.data-table-footer {
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid #f0f0f0;
+}
+
+/* ========================================
+   Cards & Panels
+   ======================================== */
+.ant-card {
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.ant-card-head {
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.ant-card-head-title {
+  font-weight: 600;
+}
+
+/* ========================================
+   Forms
+   ======================================== */
+.ant-form-item-label > label {
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.ant-input,
+.ant-input-number,
+.ant-select-selector,
+.ant-picker {
+  border-radius: 6px !important;
+}
+
+.ant-input:focus,
+.ant-input-focused,
+.ant-input-number:focus,
+.ant-input-number-focused,
+.ant-select-focused .ant-select-selector {
+  border-color: var(--bavya-magenta) !important;
+  box-shadow: 0 0 0 3px rgba(212, 43, 110, 0.08) !important;
+}
+
+/* ========================================
+   Buttons
+   ======================================== */
+.ant-btn {
+  border-radius: 6px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s;
+}
+
+.ant-btn-primary {
+  box-shadow: 0 2px 4px rgba(24, 144, 255, 0.3);
+}
+
+.ant-btn-primary:hover {
+  box-shadow: 0 4px 8px rgba(24, 144, 255, 0.4);
+}
+
+/* ========================================
+   Tags & Badges
+   ======================================== */
+.ant-tag {
+  border-radius: 4px;
+  font-weight: 500;
+  padding: 2px 8px;
+  font-size: 12px;
+  border: none;
+}
+
+/* ========================================
+   Modal
+   ======================================== */
+.ant-modal-content {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.ant-modal-header {
+  border-bottom: 1px solid #f0f0f0;
+  padding: 16px 24px;
+}
+
+.ant-modal-title {
+  font-weight: 600;
+  font-size: 16px;
+}
+
+/* ========================================
+   Tabs
+   ======================================== */
+.ant-tabs-tab {
+  font-weight: 500;
+  padding: 12px 16px;
+}
+
+.ant-tabs-tab-active .ant-tabs-tab-btn {
+  font-weight: 600;
+}
+
+/* ========================================
+   Timeline
+   ======================================== */
+.approval-timeline .ant-timeline-item-content {
+  padding-bottom: 16px;
+}
+
+.approval-timeline-step {
+  padding: 12px 16px;
+  background: #fafafa;
+  border-radius: 8px;
+  border-left: 3px solid transparent;
+}
+
+.approval-timeline-step.approved {
+  border-left-color: #52c41a;
+  background: #f6ffed;
+}
+
+.approval-timeline-step.rejected {
+  border-left-color: #f5222d;
+  background: #fff2f0;
+}
+
+.approval-timeline-step.pending {
+  border-left-color: #eb2f96;
+  background: #e6f7ff;
+}
+
+.approval-timeline-step-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.approval-timeline-step-title {
+  font-weight: 600;
+  color: rgba(0, 0, 0, 0.85);
+}
+
+.approval-timeline-step-time {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.approval-timeline-step-user {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.65);
+}
+
+.approval-timeline-step-remark {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.45);
+  margin-top: 4px;
+  font-style: italic;
+}
+
+/* ========================================
+   Login Page
+   ======================================== */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0f0a18;
+  background-image:
+    radial-gradient(ellipse 80% 60% at 20% 80%, rgba(212, 43, 110, 0.18) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 50% at 80% 20%, rgba(107, 47, 160, 0.15) 0%, transparent 60%),
+    radial-gradient(ellipse 40% 40% at 50% 50%, rgba(245, 166, 35, 0.06) 0%, transparent 50%);
+  padding: 24px;
+  position: relative;
+  overflow: hidden;
+}
+
+.login-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='0.015'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  pointer-events: none;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 440px;
+  background: rgba(255, 255, 255, 0.97);
+  border-radius: 20px;
+  box-shadow:
+    0 25px 80px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  padding: 52px 44px;
+  backdrop-filter: blur(20px);
+  opacity: 0;
+  transform: translateY(20px) scale(0.98);
+  transition: opacity 0.6s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.login-card--visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.login-logo {
+  text-align: center;
+  margin-bottom: 40px;
+}
+
+.login-logo-icon {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 20px;
+  animation: logoFloat 3s ease-in-out infinite;
+}
+
+@keyframes logoFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.login-logo h1 {
+  font-size: 28px;
+  font-weight: 800;
+  color: #1a1025;
+  margin: 0;
+  letter-spacing: 3px;
+  background: linear-gradient(135deg, #D42B6E, #6B2FA0);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+
+.login-card .ant-form-item {
+  margin-bottom: 22px;
+}
+
+/* Login input — generous 56px height so the field never feels cropped */
+.login-card .ant-input-affix-wrapper,
+.login-card .ant-input {
+  min-height: 56px !important;
+  padding: 14px 18px !important;
+  border-radius: 14px !important;
+  border: 1.5px solid rgba(143, 111, 117, 0.18) !important;
+  background: #ffffff !important;
+  font-size: 15px;
+  transition: all 0.25s;
+  box-sizing: border-box;
+}
+
+.login-card .ant-input-affix-wrapper .ant-input {
+  min-height: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+.login-card .ant-input-affix-wrapper .ant-input-prefix {
+  margin-right: 12px;
+  font-size: 18px;
+}
+
+.login-card .ant-input-affix-wrapper:hover {
+  border-color: #b70051 !important;
+  background: #fffafc !important;
+}
+
+.login-card .ant-input-affix-wrapper-focused {
+  border-color: #b70051 !important;
+  background: #ffffff !important;
+  box-shadow: 0 0 0 4px rgba(183, 0, 81, 0.1) !important;
+}
+
+.login-submit-btn.ant-btn-primary {
+  height: 56px !important;
+  font-size: 16px;
+  border-radius: 14px !important;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  background: linear-gradient(135deg, #e11668 0%, #b70051 100%) !important;
+  border: none;
+  box-shadow: 0 6px 18px rgba(183, 0, 81, 0.3);
+  transition: all 0.3s;
+}
+
+.login-submit-btn.ant-btn-primary:hover {
+  background: linear-gradient(135deg, #ff2a7d 0%, #c4005a 100%) !important;
+  box-shadow: 0 10px 26px rgba(183, 0, 81, 0.42);
+  transform: translateY(-1px);
+}
+
+.login-submit-btn.ant-btn-primary:active {
+  transform: translateY(0);
+}
+
+.login-error {
+  margin-bottom: 20px;
+  border-radius: 10px;
+}
+
+.login-footer {
+  text-align: center;
+  margin-top: 28px;
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.3);
+  letter-spacing: 0.3px;
+}
+
+/* ========================================
+   Barcode Scanner
+   ======================================== */
+.barcode-scanner-input {
+  border: 2px dashed #d9d9d9;
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+  transition: border-color 0.3s;
+}
+
+.barcode-scanner-input:focus-within {
+  border-color: #eb2f96;
+  background: #e6f7ff;
+}
+
+.barcode-scanner-input .ant-input {
+  font-size: 18px;
+  text-align: center;
+  font-weight: 600;
+  letter-spacing: 2px;
+  border: none;
+  box-shadow: none !important;
+  background: transparent;
+}
+
+/* ========================================
+   Barcode Display
+   ======================================== */
+.barcode-display {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+}
+
+.barcode-display-label {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+  text-align: center;
+}
+
+/* ========================================
+   Print Label
+   ======================================== */
+.print-label-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.print-label-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.print-label-subtitle {
+  font-size: 10px;
+  color: rgba(0, 0, 0, 0.45);
+  margin-top: 4px;
+}
+
+/* ========================================
+   File Upload
+   ======================================== */
+.file-upload-wrapper .ant-upload-drag {
+  border-radius: 8px;
+  border: 2px dashed #d9d9d9;
+  transition: border-color 0.3s;
+}
+
+.file-upload-wrapper .ant-upload-drag:hover {
+  border-color: #eb2f96;
+}
+
+/* ========================================
+   Notifications Dropdown
+   ======================================== */
+.notification-dropdown {
+  width: 360px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.notification-item {
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f0f0;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.notification-item:hover {
+  background: #f5f5f5;
+}
+
+.notification-item:last-child {
+  border-bottom: none;
+}
+
+.notification-item-title {
+  font-weight: 500;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.notification-item-desc {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.notification-item-time {
+  font-size: 11px;
+  color: rgba(0, 0, 0, 0.35);
+  margin-top: 4px;
+}
+
+/* ========================================
+   Empty States
+   ======================================== */
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+}
+
+.empty-state-icon {
+  font-size: 64px;
+  color: #d9d9d9;
+  margin-bottom: 16px;
+}
+
+.empty-state-title {
+  font-size: 18px;
+  font-weight: 500;
+  color: rgba(0, 0, 0, 0.65);
+  margin-bottom: 8px;
+}
+
+.empty-state-desc {
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* ========================================
+   Print Styles
+   ======================================== */
+@media print {
+  .erp-sider,
+  .erp-header,
+  .no-print,
+  .ant-btn,
+  .data-table-toolbar {
+    display: none !important;
+  }
+
+  .erp-content {
+    margin: 0 !important;
+    padding: 0 !important;
+    min-height: auto;
+  }
+
+  .ant-table-wrapper {
+    page-break-inside: auto;
+  }
+
+  .ant-table-row {
+    page-break-inside: avoid;
+  }
+
+  body {
+    background: #ffffff;
+  }
+}
+
+/* ========================================
+   Responsive — Mobile (< 768px)
+   Fixes: MOB-01 through MOB-15
+   ======================================== */
+@media (max-width: 768px) {
+  /* MOB-01: Sidebar — hide by default, show as overlay via JS toggle */
+  .erp-sider--mobile {
+    position: fixed !important;
+    z-index: 1000 !important;
+    height: 100vh;
+    transition: all 0.25s ease;
+  }
+
+  .erp-sider--mobile.ant-layout-sider-collapsed {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    flex: 0 0 0px !important;
+    overflow: hidden;
+  }
+
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 999;
+    transition: opacity 0.25s;
+  }
+
+  /* MOB-02: Tables — horizontal scroll */
+  .ant-table-wrapper,
+  .data-table-wrapper .ant-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .ant-table {
+    min-width: 600px;
+  }
+
+  /* MOB-03: Forms — stack columns vertically */
+  .ant-row {
+    flex-direction: column !important;
+  }
+
+  .ant-row > .ant-col,
+  .ant-row > .ant-col-8,
+  .ant-row > .ant-col-12,
+  .ant-row > .ant-col-6 {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* MOB-04: Dashboard KPI cards */
+  .stat-card {
+    padding: 16px;
+  }
+
+  .stat-card-value {
+    font-size: 22px;
+  }
+
+  .stat-card-icon {
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+  }
+
+  /* MOB-05: Touch targets — minimum 44px */
+  .ant-table-tbody .ant-btn-link,
+  .ant-table-tbody .ant-btn-text,
+  .ant-table-tbody .ant-btn-icon-only {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 8px;
+  }
+
+  .ant-menu-item,
+  .ant-menu-submenu-title {
+    min-height: 44px !important;
+    line-height: 44px !important;
+  }
+
+  /* MOB-06: Header — compact for mobile */
+  .erp-header {
+    padding: 0 12px;
+    height: 56px;
+    line-height: 56px;
+  }
+
+  .erp-header-right {
+    gap: 12px;
+  }
+
+  .erp-content {
+    padding: 12px;
+    min-height: calc(100vh - 56px);
+  }
+
+  /* MOB-07: Tabs — horizontal scroll for many tabs */
+  .ant-tabs-nav-list {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    flex-wrap: nowrap !important;
+  }
+
+  .ant-tabs-tab {
+    padding: 8px 12px;
+    font-size: 13px;
+    flex-shrink: 0;
+  }
+
+  .ant-tabs-nav-wrap {
+    overflow: visible !important;
+  }
+
+  .ant-tabs > .ant-tabs-nav {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* MOB-08: Filter bar — stack vertically */
+  .data-table-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .data-table-toolbar-left {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .data-table-toolbar-left .ant-input-search,
+  .data-table-toolbar-left .ant-select {
+    width: 100% !important;
+  }
+
+  .data-table-toolbar-right {
+    justify-content: flex-end;
+    width: 100%;
+  }
+
+  /* MOB-09: Breadcrumb — hide on mobile (replaced by back nav) */
+  .erp-breadcrumb {
+    display: none;
+  }
+
+  /* MOB-10: Modals/Drawers — fullscreen on mobile */
+  .ant-modal {
+    max-width: calc(100vw - 16px) !important;
+    margin: 8px auto !important;
+    top: 8px !important;
+  }
+
+  .ant-modal-body {
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+  }
+
+  .ant-drawer-content-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* MOB-11: Pagination — compact on mobile */
+  .data-table-footer {
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 12px;
+  }
+
+  .ant-pagination {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .ant-pagination-options {
+    display: none;
+  }
+
+  .ant-pagination-total-text {
+    display: block;
+    width: 100%;
+    text-align: center;
+    font-size: 12px;
+  }
+
+  /* MOB-12: Wide tables (Stock Balance etc.) — hide non-essential columns */
+  /* Handled by overflow-x: auto from MOB-02 above */
+
+  /* MOB-13: Typography — responsive scaling */
+  html {
+    font-size: 14px;
+  }
+
+  .ant-table-thead > tr > th,
+  .ant-table-tbody > tr > td {
+    font-size: 13px;
+    padding: 8px 10px !important;
+  }
+
+  .page-header-title h2 {
+    font-size: 18px;
+  }
+
+  .page-header-title p {
+    font-size: 12px;
+  }
+
+  /* MOB-14: Export button — compact */
+  .page-header-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .page-header-actions .ant-btn {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .page-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  /* MOB-15: Empty states — scale down */
+  .empty-state {
+    padding: 24px 16px;
+  }
+
+  .empty-state-icon {
+    font-size: 48px;
+  }
+
+  .empty-state-title {
+    font-size: 16px;
+  }
+
+  .ant-empty {
+    padding: 24px 0;
+  }
+
+  /* Login — already responsive, minor tuning */
+  .login-card {
+    padding: 32px 24px;
+    border-radius: 16px;
+  }
+
+  .login-logo h1 {
+    font-size: 22px;
+    letter-spacing: 2px;
+  }
+
+  /* Notification dropdown — fit mobile */
+  .notification-dropdown {
+    width: 100%;
+    max-width: 300px;
+  }
+
+  /* Global search (hidden on mobile via JS, but fallback) */
+  .global-search {
+    display: none;
+  }
+}
+
+/* ========================================
+   Responsive — Tablet (768px–992px)
+   ======================================== */
+@media (min-width: 769px) and (max-width: 992px) {
+  .ant-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .global-search {
+    width: 200px;
+  }
+
+  .global-search:focus-within {
+    width: 280px;
+  }
+
+  .stat-card-value {
+    font-size: 26px;
+  }
+
+  .erp-content {
+    padding: 16px;
+  }
+}
+
+/* ========================================
+   Utilities
+   ======================================== */
+.text-ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.text-center {
+  text-align: center;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.font-mono {
+  font-family: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
+}
+
+.cursor-pointer {
+  cursor: pointer;
+}
+
+.w-full {
+  width: 100%;
+}
+
+.mt-8 { margin-top: 8px; }
+.mt-16 { margin-top: 16px; }
+.mt-24 { margin-top: 24px; }
+.mb-8 { margin-bottom: 8px; }
+.mb-16 { margin-bottom: 16px; }
+.mb-24 { margin-bottom: 24px; }
+.ml-8 { margin-left: 8px; }
+.mr-8 { margin-right: 8px; }
+.p-16 { padding: 16px; }
+.p-24 { padding: 24px; }
+
+/* ========================================
+   "Clinical Concierge" polish — adapted from Stitch vitalcore_scm
+   ======================================== */
+
+/* Cards: tonal layering, no 1px borders */
+.ant-card {
+  border: 0 !important;
+  background: var(--surface-container-lowest);
+  box-shadow: var(--elev-1);
+  transition: box-shadow 0.2s ease;
+}
+.ant-card:hover {
+  box-shadow: var(--elev-2);
+}
+.ant-card-head {
+  border-bottom: 0 !important;
+  padding-top: 20px;
+}
+.ant-card-head-title {
+  font-family: 'Manrope', 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.01em;
+}
+
+/* Statistic (dashboard big-numbers) — editorial display */
+.ant-statistic-title {
+  font-family: 'Inter';
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--on-surface-variant);
+}
+.ant-statistic-content {
+  font-family: 'Manrope', sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--on-surface);
+}
+
+/* Drawer & Modal — glassmorphism */
+.ant-drawer-content {
+  background: rgba(255, 255, 255, 0.92) !important;
+  backdrop-filter: saturate(180%) blur(12px);
+  -webkit-backdrop-filter: saturate(180%) blur(12px);
+}
+.ant-drawer-header {
+  border-bottom: 0 !important;
+  padding-top: 24px;
+  padding-bottom: 20px;
+}
+.ant-drawer-title {
+  font-family: 'Manrope', sans-serif;
+  font-weight: 700;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+}
+.ant-modal-content {
+  border-radius: 20px !important;
+  background: rgba(255, 255, 255, 0.96) !important;
+  backdrop-filter: saturate(180%) blur(10px);
+}
+.ant-modal-header {
+  border-bottom: 0 !important;
+  background: transparent !important;
+}
+.ant-modal-title {
+  font-family: 'Manrope', sans-serif;
+  font-weight: 700;
+  font-size: 20px;
+}
+
+/* Status pill tags — high letter-spacing clinical look */
+.ant-tag {
+  border: 0 !important;
+  border-radius: 999px !important;
+  padding: 4px 12px;
+  font-family: 'Inter';
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Primary button — gradient for tactile feel */
+.ant-btn-primary {
+  background: linear-gradient(135deg, #e11668 0%, #b70051 100%) !important;
+  border: 0 !important;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.ant-btn-primary:hover {
+  background: linear-gradient(135deg, #ff2a7d 0%, #c4005a 100%) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(183, 0, 81, 0.22) !important;
+}
+.ant-btn {
+  font-weight: 600;
+}
+
+/* Tables — no split borders, generous cells */
+.ant-table {
+  border-radius: 16px;
+  overflow: hidden;
+}
+.ant-table-thead > tr > th {
+  border-bottom: 0 !important;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--on-surface-variant) !important;
+  font-weight: 600;
+}
+.ant-table-tbody > tr > td {
+  border-bottom: 1px solid rgba(143, 111, 117, 0.06) !important;
+}
+
+/* Layout sider — rounded brand corner */
+.ant-layout-sider {
+  border-radius: 0 24px 24px 0;
+  overflow: hidden;
+}
+.ant-menu-dark .ant-menu-item-selected {
+  background: linear-gradient(135deg, #e11668 0%, #b70051 100%) !important;
+  box-shadow: 0 6px 20px rgba(183, 0, 81, 0.3);
+}
+
+/* Page header — editorial oversized title */
+.page-header, .ant-page-header-heading-title {
+  font-family: 'Manrope', sans-serif !important;
+  font-weight: 800 !important;
+  font-size: 32px !important;
+  letter-spacing: -0.02em !important;
+}
+
+/* Inputs — no hard border, soft focus */
+.ant-input, .ant-input-affix-wrapper, .ant-select-selector, .ant-input-number {
+  background: var(--surface-container-low) !important;
+  border: 1px solid rgba(143, 111, 117, 0.1) !important;
+}
+.ant-input:focus, .ant-input-affix-wrapper-focused,
+.ant-select-focused .ant-select-selector, .ant-input-number-focused {
+  background: #ffffff !important;
+  border-color: #b70051 !important;
+  box-shadow: 0 0 0 4px rgba(183, 0, 81, 0.08) !important;
+}
+
+/* ============================================================
+   Bavya Learning Center (LMS) — matches launcher design system
+   ============================================================ */
+.bavya-lms {
+  min-height: calc(100vh - 56px);
+  padding: 0 0 60px;
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(216, 0, 72, 0.07) 0%, transparent 55%),
+    radial-gradient(ellipse at 80% 0%, rgba(46, 125, 82, 0.06) 0%, transparent 55%),
+    #FBF7F4;
+}
+.bavya-lms-hero {
+  position: relative;
+  padding: 48px 48px 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+.bavya-lms-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: linear-gradient(135deg, #481890 0%, #2E7D52 100%);
+  color: #fff;
+  font-family: var(--bavya-body);
+  font-weight: 600;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 6px 14px;
+  border-radius: 999px;
+  margin-bottom: 18px;
+  box-shadow: 0 4px 14px rgba(72, 24, 144, 0.18);
+}
+.bavya-lms h1 {
+  font-family: var(--bavya-display) !important;
+  font-weight: 700;
+  font-size: 38px;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  margin: 0 0 10px;
+  color: #1A1220;
+}
+.bavya-lms h1 em {
+  font-style: italic;
+  background: var(--bavya-grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.bavya-lms-sub {
+  color: #7A6D66;
+  font-family: var(--bavya-body);
+  font-size: 15px;
+  margin-bottom: 28px;
+}
+.bavya-lms-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+.bavya-lms-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  border: 1px solid #E8DFD9;
+  border-radius: 999px;
+  padding: 8px 16px;
+  width: 320px;
+  max-width: 100%;
+  box-shadow: 0 1px 2px rgba(72, 24, 48, 0.04);
+}
+.bavya-lms-search:focus-within {
+  border-color: #b70051;
+  box-shadow: 0 0 0 4px rgba(183, 0, 81, 0.08);
+}
+.bavya-lms-search .anticon { color: #7A6D66; }
+.bavya-lms-search input {
+  border: none;
+  outline: none;
+  background: transparent;
+  flex: 1;
+  font-size: 14px;
+  font-family: var(--bavya-body);
+}
+
+/* Tile grid */
+.bavya-lms-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 22px;
+  padding: 8px 48px 0;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+.bavya-lms-tile {
+  background: #fff;
+  border: 1px solid #E8DFD9;
+  border-radius: 16px;
+  cursor: pointer;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: all 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 1px 2px rgba(72, 24, 48, 0.05);
+}
+.bavya-lms-tile:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 32px rgba(72, 24, 48, 0.12),
+              0 4px 10px rgba(72, 24, 48, 0.06);
+  border-color: var(--tile-color);
+}
+.bavya-lms-tile-thumb {
+  position: relative;
+  height: 140px;
+  background: linear-gradient(
+    135deg,
+    var(--tile-color) 0%,
+    color-mix(in srgb, var(--tile-color) 70%, #000) 100%
+  );
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+}
+.bavya-lms-tile-thumb .anticon-play-circle {
+  font-size: 64px;
+  filter: drop-shadow(0 4px 12px rgba(0,0,0,0.22));
+  opacity: 0.95;
+  transition: transform 220ms ease;
+}
+.bavya-lms-tile:hover .bavya-lms-tile-thumb .anticon-play-circle {
+  transform: scale(1.08);
+}
+.bavya-lms-tile-num {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  font-family: var(--bavya-display);
+  font-weight: 700;
+  font-size: 12px;
+  color: #fff;
+  background: rgba(255,255,255,0.18);
+  backdrop-filter: blur(4px);
+  padding: 3px 9px;
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+}
+.bavya-lms-tile-body { padding: 16px 18px 18px; }
+.bavya-lms-tile-mod {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--tile-color);
+  font-family: var(--bavya-body);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.bavya-lms-tile-modico {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  background: var(--tile-bg);
+  color: var(--tile-color);
+  font-size: 12px;
+}
+.bavya-lms-tile-title {
+  font-family: var(--bavya-display);
+  font-weight: 700;
+  font-size: 16px;
+  line-height: 1.25;
+  color: #1A1220;
+  margin-bottom: 6px;
+}
+.bavya-lms-tile-desc {
+  font-size: 13px;
+  line-height: 1.45;
+  color: #7A6D66;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Modal player */
+.bavya-lms-modal .ant-modal {
+  padding-bottom: 24px;
+}
+.bavya-lms-modal .ant-modal-content {
+  border-radius: 18px !important;
+  padding: 0 !important;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.bavya-lms-modal .ant-modal-header {
+  padding: 14px 22px !important;
+  border-bottom: 1px solid #F1E9E3;
+  background: #FBF7F4;
+  flex: 0 0 auto;
+}
+.bavya-lms-modal .ant-modal-title {
+  font-family: var(--bavya-display) !important;
+  font-weight: 700;
+}
+.bavya-lms-modal .ant-modal-body {
+  padding: 0 !important;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.bavya-lms-modal .bavya-lms-modal-desc {
+  margin: 0;
+  padding: 12px 24px 12px;
+  background: #FBF7F4;
+  border-bottom: 1px solid #F1E9E3;
+}
+.bavya-lms-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 18px;
+  color: #1A1220;
+}
+.bavya-lms-modal-num {
+  background: var(--bavya-grad-brand);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-weight: 800;
+}
+.bavya-lms-modal-desc {
+  margin: 0 0 14px;
+  color: #7A6D66;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.bavya-lms-modal-meta {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #7A6D66;
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 768px) {
+  .bavya-lms-hero { padding: 32px 18px 24px; }
+  .bavya-lms h1 { font-size: 26px; }
+  .bavya-lms-grid { padding: 8px 18px 0; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+  .bavya-lms-tile-thumb { height: 110px; }
+  .bavya-lms-tile-thumb .anticon-play-circle { font-size: 50px; }
+  .bavya-lms-bucket { padding: 18px 14px 22px; margin: 16px 12px; }
+  .bavya-lms-bucket-title { font-size: 18px; }
+}
+
+/* === LMS upgrade: buckets, timeline, step badges, resume banner === */
+.bavya-lms-buckets {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 0 40px;
+}
+.bavya-lms-bucket {
+  background: var(--bucket-bg, #F4EEEA);
+  border: 1px solid #E8DFD9;
+  border-left: 4px solid var(--bucket-accent, #7A6D66);
+  border-radius: 16px;
+  margin: 22px 32px;
+  padding: 22px 22px 28px;
+  box-shadow: 0 1px 2px rgba(72, 24, 48, 0.04);
+}
+.bavya-lms-bucket-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.bavya-lms-bucket-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--bucket-accent, #481830);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+.bavya-lms-bucket-count {
+  font-size: 12px;
+  color: #7A6D66;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.bavya-lms-bucket-steps {
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 10px;
+  padding: 14px 18px 6px;
+  margin: 6px 0 18px;
+  border: 1px solid rgba(232, 223, 217, 0.6);
+}
+.bavya-lms-bucket-steps .ant-steps-item-title {
+  font-size: 12px !important;
+  font-weight: 600;
+}
+.bavya-lms-bucket-steps .ant-steps-item-description {
+  font-size: 11px !important;
+  max-width: 140px !important;
+}
+.bavya-lms-bucket-steps .ant-steps-item-process .ant-steps-item-icon > .ant-steps-icon-dot {
+  background: var(--bucket-accent, #481890) !important;
+  box-shadow: 0 0 0 4px rgba(72, 24, 144, 0.14);
+}
+.bavya-lms-bucket .bavya-lms-grid {
+  padding: 4px 0 0;
+  max-width: none;
+}
+
+.bavya-lms-step-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #fff;
+  color: var(--tile-color, #481890);
+  border: 2px solid var(--tile-color, #481890);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 14px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+  z-index: 2;
+}
+
+.bavya-lms-tile.is-seen { opacity: 0.86; }
+.bavya-lms-tile.is-seen .bavya-lms-tile-thumb { filter: saturate(0.85); }
+.bavya-lms-seen-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  z-index: 2;
+}
+
+.bavya-lms-tile-roles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.bavya-lms-next {
+  margin-top: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  background: linear-gradient(90deg, #FFEAD2 0%, #FDE6EC 100%);
+  border: 1px solid #F0C094;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+  font-size: 14px;
+  color: #481830;
+}
+.bavya-lms-next:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(216, 0, 72, 0.14);
+}
+.bavya-lms-next-label {
+  font-weight: 600;
+  color: #D80048;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+}
+.bavya-lms-next-title { font-weight: 600; }
+
+.bavya-lms-allroles {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #5A4A42;
+  padding: 0 8px;
+}
+
+.bavya-lms-media-fallback {
+  padding: 60px 32px;
+  background: #FFFBE6;
+  border: 1px dashed #F0C094;
+  border-radius: 12px;
+  text-align: center;
+  color: #5A4A42;
+}
+.bavya-lms-media-fallback-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-top: 10px;
+  color: #481830;
+}
+.bavya-lms-media-fallback-desc {
+  font-size: 14px;
+  margin-top: 6px;
+  color: #7A6D66;
+}

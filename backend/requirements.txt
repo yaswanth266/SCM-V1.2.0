@@ -1,0 +1,32 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+sqlalchemy[asyncio]==2.0.36
+aiomysql==0.2.0
+pydantic==2.10.3
+pydantic-settings==2.7.0
+PyJWT[crypto]==2.9.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.2.1
+python-multipart==0.0.20
+python-barcode==0.15.1
+qrcode[pil]==8.0
+Pillow==11.1.0
+aiofiles==24.1.0
+python-dotenv==1.0.1
+email-validator==2.2.0
+openpyxl==3.1.5
+httpx==0.28.1
+slowapi==0.1.9
+
+# Wave 5 — background scheduler for notification cron jobs
+# (expiring batches/licenses, low-stock, recall ack reminders, batch-expire).
+APScheduler==3.10.4
+
+# Migrations
+alembic==1.14.1
+pymysql==1.1.1
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
+aiosqlite==0.20.0
