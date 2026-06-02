@@ -632,18 +632,21 @@ class UserItemPermission(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
-class EmployeeItemPermission(Base):
-    __tablename__ = "employee_item_permissions"
+class RoleItemPermission(Base):
+    __tablename__ = "role_item_permissions"
     __table_args__ = (
-        UniqueConstraint("employee_id", "entity_type", "entity_id", "action", name="uq_employee_item_permissions_scope"),
+        UniqueConstraint("role_id", "entity_type", "entity_id", "action", name="uq_role_item_permissions_scope"),
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    employee_id = Column(BigInteger, ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    role_id = Column(BigInteger, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False)
     entity_type = Column(String(50), nullable=False)
     entity_id = Column(BigInteger, nullable=True)
     action = Column(String(50), default="view", nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    role = relationship("Role")
+
 
 
 class Office(Base):

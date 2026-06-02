@@ -36,7 +36,7 @@ class AuditMiddleware(BaseHTTPMiddleware):
     # module token after the version segment.
     _KNOWN_MODULES = {
         "auth", "users", "settings", "masters", "procurement", "warehouse",
-        "inventory", "indents", "indent", "consumption", "logistics",
+        "inventory", "indents", "indent", "consumption",
         "approvals", "accounts", "assets", "barcode", "reports", "dashboard",
         "notifications", "healthcare", "outbound", "rules", "compliance",
         "documents", "mrp", "lineage", "alerts", "rate-contracts",

@@ -56,20 +56,21 @@ async def get_stock_balances(
     )
     count_query = select(func.count(StockBalance.id))
 
-    # 2026-05-06: vehicle model — virtual warehouses (vehicles / mobile
-    # units) never hold persistent inventory. Always exclude them from
-    # stock balance queries to prevent confusing zero-rows. The Vehicle
-    # Kits view (separate page) shows what's been issued to a vehicle.
-    from app.models.warehouse import Warehouse as _Wh
-    real_wh_subq = select(_Wh.id).where(_Wh.type != "virtual").subquery()
-    query = query.where(StockBalance.warehouse_id.in_(select(real_wh_subq)))
-    count_query = count_query.where(StockBalance.warehouse_id.in_(select(real_wh_subq)))
-
-    # R-005: warehouse-scope isolation. Non-managerial users only see stock
-    # in warehouses assigned to them. Specific warehouse_id query param must
-    # also be in their assigned set.
     from app.utils.dependencies import user_is_managerial, user_warehouse_ids
-    if not await user_is_managerial(db, current_user.id):
+    is_managerial = await user_is_managerial(db, current_user.id)
+
+    if is_managerial:
+        # 2026-05-06: vehicle model — virtual warehouses (vehicles / mobile
+        # units) never hold persistent inventory. Always exclude them from
+        # stock balance queries to prevent confusing zero-rows for managers.
+        from app.models.warehouse import Warehouse as _Wh
+        real_wh_subq = select(_Wh.id).where(_Wh.type != "virtual").subquery()
+        query = query.where(StockBalance.warehouse_id.in_(select(real_wh_subq)))
+        count_query = count_query.where(StockBalance.warehouse_id.in_(select(real_wh_subq)))
+    else:
+        # R-005: warehouse-scope isolation. Non-managerial users only see stock
+        # in warehouses assigned to them (including virtual ones). Specific
+        # warehouse_id query param must also be in their assigned set.
         scoped_wh = await user_warehouse_ids(db, current_user.id)
         print(f"DEBUG: user_id={current_user.id}, warehouse_id={warehouse_id}, scoped_wh={scoped_wh}")
         if not scoped_wh:
@@ -148,6 +149,42 @@ async def get_stock_balances(
         )
         batch_exp_map = {r.id: r.expiry_date for r in b_rows.all()}
 
+    # Gather balances with has_serial = True
+    serial_tracked_keys = []
+    for b in balances:
+        if b.item and b.item.has_serial:
+            serial_tracked_keys.append((b.item_id, b.warehouse_id, b.bin_id, b.batch_id))
+    
+    serials_map = {}
+    if serial_tracked_keys:
+        from sqlalchemy import and_, or_
+        from app.models.warehouse import SerialNumber
+        
+        # Build composite filter
+        conditions = []
+        for (item_id, wh_id, bin_id, batch_id) in serial_tracked_keys:
+            cond = and_(
+                SerialNumber.item_id == item_id,
+                SerialNumber.warehouse_id == wh_id,
+                SerialNumber.status == "available"
+            )
+            cond = and_(
+                cond,
+                SerialNumber.bin_id == bin_id if bin_id is not None else SerialNumber.bin_id.is_(None),
+                SerialNumber.batch_id == batch_id if batch_id is not None else SerialNumber.batch_id.is_(None)
+            )
+            conditions.append(cond)
+            
+        s_query = select(SerialNumber).where(or_(*conditions))
+        s_result = await db.execute(s_query)
+        serials = s_result.scalars().all()
+        
+        for s in serials:
+            key = (s.item_id, s.warehouse_id, s.bin_id, s.batch_id)
+            if key not in serials_map:
+                serials_map[key] = []
+            serials_map[key].append(s.serial_number)
+
     response_items = []
     for b in balances:
         # BUG-FIX: Manually construct dict to avoid Pydantic ValidationError 
@@ -161,15 +198,17 @@ async def get_stock_balances(
             "batch_id": b.batch_id,
             "available_qty": b.available_qty,
             "reserved_qty": b.reserved_qty,
-            "committed_qty": b.committed_qty,
+            "transit_qty": b.transit_qty,
             "total_qty": b.total_qty,
             "valuation_rate": b.valuation_rate,
             "stock_value": b.stock_value,
             "last_updated": b.last_updated.isoformat() if b.last_updated else None,
+            "serial_numbers": serials_map.get((b.item_id, b.warehouse_id, b.bin_id, b.batch_id), []),
         }
         if hasattr(b, 'item') and b.item:
             data["item_name"] = b.item.name
             data["item_code"] = b.item.item_code
+            data["has_serial"] = bool(b.item.has_serial)
             # Include uom_id + uom_name so Stock Audit and Material Issue
             # forms can pre-fill UOM when auto-loading from stock.
             data["uom_id"] = b.item.primary_uom_id
@@ -181,6 +220,7 @@ async def get_stock_balances(
         else:
             data["item_name"] = None
             data["item_code"] = None
+            data["has_serial"] = False
             data["uom_id"] = None
             data["is_below_reorder"] = False
             data["is_low_stock"] = False
@@ -308,6 +348,8 @@ async def get_stock_ledger(
     # Bulk lookup metadata for the page
     user_ids = {e.created_by for e in entries if e.created_by}
     mi_ids = {e.reference_id for e in entries if e.reference_type == "material_issue" and e.reference_id}
+    do_ids = {e.reference_id for e in entries if e.reference_type == "dispatch_order" and e.reference_id}
+    ack_ids = {e.reference_id for e in entries if e.reference_type == "dispatch_acknowledgement" and e.reference_id}
     po_ids = {e.reference_id for e in entries if e.reference_type == "putaway_order" and e.reference_id}
 
     users_map = {}
@@ -317,17 +359,53 @@ async def get_stock_ledger(
             name = f"{u.first_name} {u.last_name or ''}".strip() or u.username
             users_map[u.id] = name
 
+    # Map dispatch orders to material issues
+    do_to_mi = {}
+    if do_ids:
+        from app.models.dispatch import DispatchOrder
+        do_rows = await db.execute(
+            select(DispatchOrder.id, DispatchOrder.material_issue_id)
+            .where(DispatchOrder.id.in_(list(do_ids)))
+        )
+        for r in do_rows.mappings().all():
+            if r["material_issue_id"]:
+                do_to_mi[r["id"]] = r["material_issue_id"]
+
+    # Map dispatch acknowledgements to material issues
+    ack_to_mi = {}
+    if ack_ids:
+        from app.models.dispatch import DispatchDeliveryAcknowledgement, DispatchOrder
+        ack_rows = await db.execute(
+            select(DispatchDeliveryAcknowledgement.id, DispatchOrder.material_issue_id)
+            .join(DispatchOrder, DispatchDeliveryAcknowledgement.dispatch_id == DispatchOrder.id)
+            .where(DispatchDeliveryAcknowledgement.id.in_(list(ack_ids)))
+        )
+        for r in ack_rows.mappings().all():
+            if r["material_issue_id"]:
+                ack_to_mi[r["id"]] = r["material_issue_id"]
+
+    # Collect all material issue IDs (direct + resolved via dispatch/ack)
+    all_mi_ids = set(mi_ids)
+    all_mi_ids.update(do_to_mi.values())
+    all_mi_ids.update(ack_to_mi.values())
+
     mi_map = {}
-    if mi_ids:
+    if all_mi_ids:
         from app.models.issue import MaterialIssue
-        m_rows = await db.execute(select(MaterialIssue.id, MaterialIssue.issue_number).where(MaterialIssue.id.in_(list(mi_ids))))
+        m_rows = await db.execute(
+            select(MaterialIssue.id, MaterialIssue.issue_number)
+            .where(MaterialIssue.id.in_(list(all_mi_ids)))
+        )
         for r in m_rows.mappings().all():
             mi_map[r["id"]] = r["issue_number"]
 
     po_map = {}
     if po_ids:
         from app.models.grn import PutawayOrder
-        p_rows = await db.execute(select(PutawayOrder.id, PutawayOrder.putaway_number).where(PutawayOrder.id.in_(list(po_ids))))
+        p_rows = await db.execute(
+            select(PutawayOrder.id, PutawayOrder.putaway_number)
+            .where(PutawayOrder.id.in_(list(po_ids)))
+        )
         for r in p_rows.mappings().all():
             po_map[r["id"]] = r["putaway_number"]
 
@@ -341,6 +419,12 @@ async def get_stock_ledger(
         # Human-readable reference
         if e.reference_type == "material_issue":
             data["reference"] = mi_map.get(e.reference_id)
+        elif e.reference_type == "dispatch_order":
+            mi_id = do_to_mi.get(e.reference_id)
+            data["reference"] = mi_map.get(mi_id) if mi_id else str(e.reference_id)
+        elif e.reference_type == "dispatch_acknowledgement":
+            mi_id = ack_to_mi.get(e.reference_id)
+            data["reference"] = mi_map.get(mi_id) if mi_id else str(e.reference_id)
         elif e.reference_type == "putaway_order":
             data["reference"] = po_map.get(e.reference_id)
         else:

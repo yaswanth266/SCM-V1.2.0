@@ -30,7 +30,7 @@ const { TextArea } = Input;
 const { Text, Title } = Typography;
 
 const RECEIPT_TYPES = [
-  { label: 'PO Based', value: 'po_based' },
+  { label: 'Inward Based', value: 'inward_based' },
   { label: 'Direct', value: 'direct' },
   { label: 'Return', value: 'return' },
   { label: 'Transfer', value: 'transfer' },
@@ -64,7 +64,7 @@ const GRN = () => {
   const [filterDateRange, setFilterDateRange] = useState(null);
 
   // Drawer state
-  const [receiptType, setReceiptType] = useState('po_based');
+  const [receiptType, setReceiptType] = useState('inward_based');
   const [grnItems, setGrnItems] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
@@ -72,6 +72,9 @@ const GRN = () => {
   const [selectedPO, setSelectedPO] = useState(null);
   const [selectedVendor, setSelectedVendor] = useState(null);
   const [loadingPO, setLoadingPO] = useState(false);
+  const [inwardOptions, setInwardOptions] = useState([]);
+  const [loadingInwards, setLoadingInwards] = useState(false);
+  const [selectedInward, setSelectedInward] = useState(null);
 
   // --- Lookups ---
   const loadLookups = useCallback(async () => {
@@ -126,6 +129,7 @@ const GRN = () => {
   useEffect(() => {
     loadLookups();
     loadPOOptions();
+    loadInwardOptions();
   }, []);
 
   // --- Fetch GRNs ---
@@ -346,6 +350,131 @@ const GRN = () => {
     }
   };
 
+  // --- Inward Options and Selection ---
+  const loadInwardOptions = useCallback(async (search = '') => {
+    setLoadingInwards(true);
+    try {
+      const res = await api.get('/warehouse/inwards', {
+        params: { page_size: 100, search, status: 'received' },
+      });
+      const data = res.data;
+      const items = data.items || data.data || data || [];
+      setInwardOptions(
+        items.map((inw) => ({
+          label: `${inw.inward_number} - ${inw.vendor_name || inw.vendor_name_manual || ''}`,
+          value: inw.id,
+          inward: inw,
+        }))
+      );
+    } catch {
+      // silent
+    } finally {
+      setLoadingInwards(false);
+    }
+  }, []);
+
+  const handleInwardSelect = async (inwardId) => {
+    if (!inwardId) {
+      setSelectedInward(null);
+      setSelectedPO(null);
+      setGrnItems([createEmptyItem()]);
+      form.setFieldsValue({ po_number: null });
+      return;
+    }
+    setLoadingPO(true);
+    try {
+      const res = await api.get(`/warehouse/inwards/${inwardId}`);
+      const inwardData = res.data;
+      setSelectedInward(inwardData);
+
+      // Auto-fill vendor
+      if (inwardData.vendor_id) {
+        form.setFieldsValue({ vendor_id: inwardData.vendor_id });
+        const found = vendors.find((v) => v.value === inwardData.vendor_id);
+        setSelectedVendor(found ? found.vendor : null);
+        if (!found && inwardData.vendor_name) {
+          setVendors((prev) => [
+            ...prev,
+            { label: `[${inwardData.vendor_code || inwardData.vendor_id}] ${inwardData.vendor_name}`, value: inwardData.vendor_id, vendor: { id: inwardData.vendor_id, name: inwardData.vendor_name } }
+          ]);
+        }
+      }
+
+      // Auto-fill warehouse
+      if (inwardData.warehouse_id) {
+        form.setFieldsValue({ warehouse_id: inwardData.warehouse_id });
+      }
+
+      // Auto-fill PO number from inward
+      form.setFieldsValue({ po_number: inwardData.po_number || null });
+
+      // Auto-fill vehicle number
+      if (inwardData.vehicle_number) {
+        form.setFieldsValue({ vehicle_number: inwardData.vehicle_number });
+      }
+
+      // If inward is PO-linked, fetch PO to get rates and po_item_id mapping
+      let poItemsMap = {};
+      if (inwardData.po_id) {
+        try {
+          const poRes = await api.get(`/procurement/purchase-orders/${inwardData.po_id}`);
+          const poData = poRes.data;
+          setSelectedPO(poData);
+          form.setFieldsValue({ po_id: inwardData.po_id });
+
+          if (poData.items) {
+            poData.items.forEach((item) => {
+              poItemsMap[item.item_id] = item;
+            });
+          }
+        } catch (poErr) {
+          console.error('Failed to fetch related PO', poErr);
+        }
+      } else {
+        setSelectedPO(null);
+        form.setFieldsValue({ po_id: undefined });
+      }
+
+      // Auto-fill items
+      const items = (inwardData.items || []).map((item, idx) => {
+        const poItem = poItemsMap[item.item_id];
+        const rate = poItem ? (poItem.rate || poItem.unit_price || 0) : 0;
+        const po_item_id = poItem ? poItem.id : null;
+        const ordered_qty = poItem ? (poItem.qty || poItem.quantity || 0) : (item.ordered_qty || 0);
+
+        const row = {
+          key: item.id || Date.now() + idx,
+          item_id: item.item_id,
+          item_name: item.item_name || item.item_name_manual || '',
+          item_code: item.item_code || '',
+          uom: item.uom_name || item.uom_manual || '',
+          uom_id: item.uom_id,
+          ordered_qty: ordered_qty,
+          pending_qty: Math.max(0, ordered_qty - (item.received_qty || 0)),
+          received_qty: item.received_qty || 0,
+          accepted_qty: item.received_qty || 0,
+          rejected_qty: 0,
+          shortage_qty: Math.max(0, ordered_qty - (item.received_qty || 0)),
+          excess_qty: Math.max(0, (item.received_qty || 0) - ordered_qty),
+          damaged_qty: 0,
+          batch_number: '',
+          manufacturing_date: null,
+          expiry_date: null,
+          rate: rate,
+          amount: Number(((item.received_qty || 0) * rate).toFixed(2)),
+          po_item_id: po_item_id,
+        };
+        return row;
+      });
+      setGrnItems(items.length > 0 ? items : [createEmptyItem()]);
+      message.success('Material Inward items loaded successfully');
+    } catch (err) {
+      message.error(getErrorMessage(err));
+    } finally {
+      setLoadingPO(false);
+    }
+  };
+
   // --- Totals ---
   const calcTotalQty = () => grnItems.reduce((s, i) => s + (i.received_qty || 0), 0);
   const calcAcceptedQty = () => grnItems.reduce((s, i) => s + (i.accepted_qty || 0), 0);
@@ -358,15 +487,17 @@ const GRN = () => {
     setEditingGRN(null);
     setSelectedVendor(null);
     setSelectedPO(null);
-    setReceiptType('po_based');
+    setSelectedInward(null);
+    setReceiptType('inward_based');
     form.resetFields();
     form.setFieldsValue({
-      receipt_type: 'po_based',
+      receipt_type: 'inward_based',
       grn_date: dayjs(),
     });
     setGrnItems([createEmptyItem()]);
     loadLookups();
     loadPOOptions();
+    loadInwardOptions();
     setScannerVisible(false);
     setDrawerOpen(true);
   };
@@ -407,6 +538,9 @@ const GRN = () => {
 
       const payload = {
         ...values,
+        po_id: selectedPO?.id || values.po_id || null,
+        po_number: selectedPO?.po_number || selectedInward?.po_number || null,
+        inward_id: selectedInward?.id || values.inward_id || null,
         receipt_type: receiptType,
         grn_date: formatDateForAPI(values.grn_date),
         supplier_invoice_date: formatDateForAPI(values.supplier_invoice_date),
@@ -460,6 +594,7 @@ const GRN = () => {
       setGrnItems([]);
       setSelectedVendor(null);
       setSelectedPO(null);
+      setSelectedInward(null);
       setRefreshKey((k) => k + 1);
     } catch (err) {
       if (err.errorFields) return;
@@ -649,7 +784,7 @@ const GRN = () => {
     {
       title: '', width: 35,
       render: (_, record) =>
-        receiptType !== 'po_based' && grnItems.length > 1 ? (
+        receiptType !== 'inward_based' && grnItems.length > 1 ? (
           <MinusCircleOutlined
             style={{ color: '#ff4d4f', cursor: 'pointer' }}
             onClick={() => removeGrnItemRow(record.key)}
@@ -687,6 +822,13 @@ const GRN = () => {
       render: (v) => v || '-',
     },
     {
+      title: 'Inward Reference',
+      dataIndex: 'inward_number',
+      key: 'inward_number',
+      width: 140,
+      render: (v) => v || '-',
+    },
+    {
       title: 'Warehouse',
       dataIndex: 'warehouse_name',
       key: 'warehouse',
@@ -717,7 +859,7 @@ const GRN = () => {
       key: 'receipt_type',
       width: 110,
       render: (v) => {
-        const typeMap = { po_based: 'PO Based', direct: 'Direct', return: 'Return', transfer: 'Transfer' };
+        const typeMap = { inward_based: 'Inward Based', po_based: 'PO Based', direct: 'Direct', return: 'Return', transfer: 'Transfer' };
         return <Tag>{typeMap[v] || v || '-'}</Tag>;
       },
     },
@@ -944,7 +1086,7 @@ const GRN = () => {
                   options={RECEIPT_TYPES}
                   onChange={(v) => {
                     setReceiptType(v);
-                    if (v !== 'po_based') {
+                    if (v !== 'inward_based') {
                       setSelectedPO(null);
                       form.setFieldsValue({ po_id: undefined });
                       setGrnItems([createEmptyItem()]);
@@ -953,23 +1095,30 @@ const GRN = () => {
                 />
               </Form.Item>
             </Col>
-            {receiptType === 'po_based' && (
-              <Col span={10}>
-                <Form.Item name="po_id" label="Purchase Order" rules={[{ required: true, message: 'Select a PO' }]}>
+            {receiptType === 'inward_based' && (
+              <Col span={8}>
+                <Form.Item name="inward_id" label="Material Inward" rules={[{ required: true, message: 'Select a Material Inward' }]}>
                   <Select
-                    options={poOptions}
-                    placeholder="Search and select PO..."
+                    options={inwardOptions}
+                    placeholder="Search and select Material Inward..."
                     showSearch
                     optionFilterProp="label"
                     allowClear
-                    onChange={handlePOSelect}
-                    onSearch={(v) => loadPOOptions(v)}
-                    loading={loadingPO}
+                    onChange={handleInwardSelect}
+                    onSearch={(v) => loadInwardOptions(v)}
+                    loading={loadingInwards}
                   />
                 </Form.Item>
               </Col>
             )}
-            <Col span={receiptType === 'po_based' ? 8 : 6}>
+            {receiptType === 'inward_based' && (
+              <Col span={4}>
+                <Form.Item name="po_number" label="PO Number">
+                  <Input disabled placeholder="Auto from Inward" />
+                </Form.Item>
+              </Col>
+            )}
+            <Col span={receiptType === 'inward_based' ? 6 : 6}>
               <Form.Item name="grn_date" label="GRN Date" rules={[{ required: true, message: 'Required' }]}>
                 <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
               </Form.Item>
@@ -984,7 +1133,7 @@ const GRN = () => {
                   options={vendors}
                   placeholder="Select vendor"
                   optionFilterProp="label"
-                  disabled={receiptType === 'po_based' && !!selectedPO}
+                  disabled={receiptType === 'inward_based' && !!selectedPO}
                   onChange={(vendorId) => {
                     const found = vendors.find((v) => v.value === vendorId);
                     setSelectedVendor(found ? found.vendor : null);
@@ -1059,12 +1208,12 @@ const GRN = () => {
           scroll={{ x: 1650 }}
           loading={loadingPO}
           footer={() => (
-            // BUG-INV-130: also surface Add Item for po_based receipts so
+            // BUG-INV-130: also surface Add Item for inward_based receipts so
             // operators can add substitute items the vendor shipped (out-of-
             // stock alternates). The backend allows extra items not on the PO
             // — the frontend was the only blocker.
             <Button type="dashed" onClick={addGrnItemRow} icon={<PlusOutlined />} block>
-              {receiptType === 'po_based' ? 'Add Substitute / Extra Item' : 'Add Item'}
+              {receiptType === 'inward_based' ? 'Add Substitute / Extra Item' : 'Add Item'}
             </Button>
           )}
         />
@@ -1134,6 +1283,7 @@ const GRN = () => {
               </Descriptions.Item>
               <Descriptions.Item label="Vendor">{viewData.vendor_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="PO Reference">{viewData.po_number || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Inward Reference">{viewData.inward_number || '-'}</Descriptions.Item>
               <Descriptions.Item label="Warehouse">{viewData.warehouse_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="GRN Date">{formatDate(viewData.grn_date)}</Descriptions.Item>
               <Descriptions.Item label="Supplier Invoice">{viewData.supplier_invoice || '-'}</Descriptions.Item>

@@ -14,8 +14,7 @@ import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
 import StatusTag from '../../components/StatusTag';
 import BarcodeScanner from '../../components/BarcodeScanner';
-import WarehouseTree from '../../components/WarehouseTree';
-import BinPickerModal from '../../components/BinPickerModal';
+import SerialNumbersModal from '../../components/SerialNumbersModal';
 import api from '../../config/api';
 import {
   formatDate, formatNumber, getErrorMessage, formatDateTime,
@@ -45,8 +44,6 @@ const Putaway = () => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [scannerActive, setScannerActive] = useState(false);
   const [activeScanItemKey, setActiveScanItemKey] = useState(null);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerItemKey, setPickerItemKey] = useState(null);
 
   // Filters
   const [filterStatus, setFilterStatus] = useState(undefined);
@@ -108,6 +105,8 @@ const Putaway = () => {
         status: item.status || 'pending',
         scanned_at: item.scanned_at || null,
         scan_confirmed: !!item.scanned_at,
+        has_serial: item.has_serial || false,
+        serial_numbers: item.serial_numbers || [],
       }));
       setPutawayItems(items);
     } catch (err) {
@@ -119,23 +118,23 @@ const Putaway = () => {
   };
 
   // --- Update Item Bin ---
-  // WarehouseTree returns value strings like "bin-23"; the backend column
-  // is bigint, so parse out the integer id. Keep the original label in
-  // actual_bin for display continuity.
-  const updatePutawayItemBin = (key, binValue, binCode) => {
-    const match = typeof binValue === 'string' ? binValue.match(/^bin-(\d+)$/) : null;
-    const numericId = match ? parseInt(match[1], 10) : (typeof binValue === 'number' ? binValue : null);
+  // Keep typed bin text in actual_bin_id until the backend resolves or creates
+  // the matching warehouse bin. Existing numeric selections still work.
+  const updatePutawayItemBin = (key, binValue) => {
+    const trimmedValue = typeof binValue === 'string' ? binValue.trim() : binValue;
+    const match = typeof trimmedValue === 'string' ? trimmedValue.match(/^bin-(\d+)$/) : null;
+    const resolvedValue = match ? parseInt(match[1], 10) : trimmedValue || null;
     setPutawayItems((prev) =>
       prev.map((item) => {
         if (item.key !== key) return item;
-        return { ...item, actual_bin: binCode || binValue, actual_bin_id: numericId };
+        return { ...item, actual_bin: trimmedValue || '', actual_bin_id: resolvedValue };
       })
     );
     if (viewData) {
       setViewData((prev) => ({
         ...prev,
         items: (prev?.items || []).map((i) =>
-          i.key === key ? { ...i, actual_bin: binCode || binValue, actual_bin_id: numericId } : i
+          i.key === key ? { ...i, actual_bin: trimmedValue || '', actual_bin_id: resolvedValue } : i
         ),
       }));
     }
@@ -172,11 +171,21 @@ const Putaway = () => {
       return;
     }
 
+    if (item.has_serial) {
+      const needed = parseInt(item.qty || 0, 10);
+      const filled = (item.serial_numbers || []).filter(s => s && s.trim()).length;
+      if (filled !== needed) {
+        message.error(`Item "${item.item_name}" requires ${needed} serial numbers. Please fill them in the table before scanning to confirm.`);
+        return;
+      }
+    }
+
     try {
       await api.put(`/warehouse/putaways/${viewData.id}/items/${item.id}/confirm`, {
         actual_bin_id: item.actual_bin_id,
         scanned_at: timestamp,
         barcode: scannedValue,
+        serial_numbers: item.serial_numbers || [],
       });
 
       setPutawayItems((prev) =>
@@ -229,11 +238,21 @@ const Putaway = () => {
       return;
     }
 
+    if (matchingItem.has_serial) {
+      const needed = parseInt(matchingItem.qty || 0, 10);
+      const filled = (matchingItem.serial_numbers || []).filter(s => s && s.trim()).length;
+      if (filled !== needed) {
+        message.warning(`Item "${matchingItem.item_name}" requires ${needed} serial numbers. Please enter them in the table before scanning to confirm.`);
+        return;
+      }
+    }
+
     try {
       await api.put(`/warehouse/putaways/${viewData.id}/items/${matchingItem.id}/confirm`, {
         actual_bin_id: matchingItem.actual_bin_id,
         scanned_at: timestamp,
         barcode: scannedValue,
+        serial_numbers: matchingItem.serial_numbers || [],
       });
 
       setPutawayItems((prev) => {
@@ -318,6 +337,8 @@ const Putaway = () => {
           status: item.status || 'pending',
           scanned_at: item.scanned_at || null,
           scan_confirmed: !!item.scanned_at,
+          has_serial: item.has_serial || false,
+          serial_numbers: item.serial_numbers || [],
         }));
         setPutawayItems(items);
         message.success('Bins re-suggested by system based on availability');
@@ -403,15 +424,15 @@ const Putaway = () => {
           return <Tag icon={<EnvironmentOutlined />} color="green">{val || record.suggested_bin || '-'}</Tag>;
         }
         return (
-          <Button
+          <Input
             size="small"
-            icon={<EnvironmentOutlined />}
+            prefix={<EnvironmentOutlined />}
+            placeholder="Enter bin..."
+            value={record.actual_bin || ''}
             disabled={record.status === 'done' || record.status === 'skipped'}
-            onClick={() => { setPickerItemKey(record.key); setPickerOpen(true); }}
+            onChange={(e) => updatePutawayItemBin(record.key, e.target.value)}
             style={{ width: '100%', textAlign: 'left' }}
-          >
-            {record.actual_bin || (record.actual_bin_id ? `Bin #${record.actual_bin_id}` : 'Pick bin...')}
-          </Button>
+          />
         );
       },
     },
@@ -433,6 +454,31 @@ const Putaway = () => {
       ) : '-',
     },
     {
+      title: 'Serial Numbers',
+      width: 150,
+      render: (_, record) => {
+        const isReadOnly = record.status === 'done' || record.status === 'skipped';
+        return (
+          <SerialNumbersModal
+            value={record.serial_numbers || []}
+            onChange={(updated) => {
+              setPutawayItems((prev) =>
+                prev.map((item) =>
+                  item.key === record.key ? { ...item, serial_numbers: updated } : item
+                )
+              );
+            }}
+            itemName={record.item_name}
+            itemCode={record.item_code}
+            quantity={parseInt(record.qty || 0, 10)}
+            hasSerial={record.has_serial}
+            readOnly={isReadOnly}
+            size="small"
+          />
+        );
+      },
+    },
+    {
       title: 'Actions', width: 180,
       render: (_, record) => {
         if (record.status === 'done') {
@@ -451,10 +497,19 @@ const Putaway = () => {
                     message.warning('Pick a bin in "Actual Bin" before confirming.');
                     return;
                   }
+                  if (record.has_serial) {
+                    const needed = parseInt(record.qty || 0, 10);
+                    const filled = (record.serial_numbers || []).filter(s => s && s.trim()).length;
+                    if (filled !== needed) {
+                      message.warning(`Please enter all ${needed} serial numbers before confirming.`);
+                      return;
+                    }
+                  }
                   try {
                     await api.put(`/warehouse/putaways/${viewData.id}/items/${record.id}/confirm`, {
                       actual_bin_id: record.actual_bin_id,
                       scanned_at: new Date().toISOString(),
+                      serial_numbers: record.serial_numbers || [],
                     });
                     setPutawayItems((prev) =>
                       prev.map((i) => i.key === record.key
@@ -834,19 +889,6 @@ const Putaway = () => {
         )}
       </Drawer>
 
-      <BinPickerModal
-        open={pickerOpen}
-        onClose={() => { setPickerOpen(false); setPickerItemKey(null); }}
-        warehouseId={viewData?.warehouse_id}
-        selectedBinId={
-          pickerItemKey
-            ? (viewData?.items || []).find((i) => i.key === pickerItemKey)?.actual_bin_id
-            : null
-        }
-        onSelect={(binId, binCode) => {
-          if (pickerItemKey) updatePutawayItemBin(pickerItemKey, binId, binCode);
-        }}
-      />
     </div>
   );
 };

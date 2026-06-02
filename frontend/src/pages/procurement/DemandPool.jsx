@@ -3,15 +3,85 @@ import { useNavigate } from 'react-router-dom';
 import {
   Button, Table, Tag, Space, message, Select, Popconfirm, Input,
   Modal, Empty, Statistic, Row, Col, Card, Typography, Tooltip,
+  Progress, Badge,
 } from 'antd';
 import {
   ReloadOutlined, CheckCircleOutlined, FundOutlined, ExportOutlined,
+  ClockCircleOutlined, CheckOutlined, SyncOutlined, HourglassOutlined,
 } from '@ant-design/icons';
 import PageHeader from '../../components/PageHeader';
 import api from '../../config/api';
 import { formatNumber, getErrorMessage, formatDate } from '../../utils/helpers';
 
 const { Text } = Typography;
+
+/* ── per-source status badge config ──────────────────────────────────────── */
+const IDENT_STATUS_CONFIG = {
+  pending:         { color: 'default',   icon: <HourglassOutlined />, label: 'Pending Issue' },
+  in_mr:           { color: 'blue',      icon: <SyncOutlined />,      label: 'In MR' },
+  issued:          { color: 'geekblue',  icon: <ClockCircleOutlined />, label: 'Issued — Awaiting Ack' },
+  partially_acked: { color: 'orange',    icon: <SyncOutlined />,      label: 'Partially Acked' },
+};
+
+function IdentStatusTag({ status }) {
+  const cfg = IDENT_STATUS_CONFIG[status] || IDENT_STATUS_CONFIG.pending;
+  return <Tag color={cfg.color} icon={cfg.icon} style={{ fontSize: 11 }}>{cfg.label}</Tag>;
+}
+
+/* ── expanded source-indent rows ─────────────────────────────────────────── */
+function SourcesPanel({ sources, uomName }) {
+  return (
+    <div style={{ padding: '4px 0' }}>
+      {sources.map((s) => {
+        const pct = s.qty > 0 ? Math.round((s.acknowledged_qty / s.qty) * 100) : 0;
+        return (
+          <div
+            key={s.indent_item_id}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              padding: '6px 0', borderBottom: '1px solid #f0f0f0',
+              flexWrap: 'wrap',
+            }}
+          >
+            {/* Indent number */}
+            <Text strong style={{ fontSize: 12, minWidth: 110 }}>{s.indent_number}</Text>
+
+            {/* Status badge */}
+            <IdentStatusTag status={s.ident_status} />
+
+            {/* Qty breakdown */}
+            <span style={{ fontSize: 11, color: '#595959', minWidth: 200 }}>
+              Approved:&nbsp;<Text strong>{formatNumber(s.qty)}</Text>&nbsp;
+              Issued:&nbsp;<Text style={{ color: '#1677ff' }}>{formatNumber(s.issued_qty ?? 0)}</Text>&nbsp;
+              Acked:&nbsp;<Text style={{ color: '#52c41a' }}>{formatNumber(s.acknowledged_qty ?? 0)}</Text>&nbsp;
+              <Text type="danger">Remaining: {formatNumber(s.remaining_qty ?? s.qty)}</Text>
+              &nbsp;{uomName}
+            </span>
+
+            {/* Acknowledgement progress */}
+            <div style={{ minWidth: 120, flex: 1, maxWidth: 200 }}>
+              <Progress
+                percent={pct}
+                size="small"
+                strokeColor={pct >= 100 ? '#52c41a' : pct > 0 ? '#fa8c16' : '#d9d9d9'}
+                format={(p) => <span style={{ fontSize: 10 }}>{p}% ack</span>}
+              />
+            </div>
+
+            {/* Required date */}
+            {s.required_date && (
+              <Text type="secondary" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
+                Due: {formatDate(s.required_date)}
+              </Text>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────────── */
 
 const DemandPool = () => {
   const navigate = useNavigate();
@@ -57,10 +127,14 @@ const DemandPool = () => {
     [groups, selectedKeys]
   );
 
-  // All indents covered by the selected group rows
+  // Only pending/unissued sources can be consolidated into an MR
   const selectedIndentIds = useMemo(() => {
     const ids = new Set();
-    selectedRows.forEach((g) => g.sources.forEach((s) => ids.add(s.indent_id)));
+    selectedRows.forEach((g) =>
+      g.sources
+        .filter((s) => s.ident_status !== 'in_mr' && s.qty > (s.issued_qty ?? 0))
+        .forEach((s) => ids.add(s.indent_id))
+    );
     return [...ids];
   }, [selectedRows]);
 
@@ -69,9 +143,18 @@ const DemandPool = () => {
     [selectedRows]
   );
 
+  /* aggregate pool-wide status counts */
+  const statusCounts = useMemo(() => {
+    const counts = { pending: 0, in_mr: 0, issued: 0, partially_acked: 0 };
+    groups.forEach((g) => g.sources?.forEach((s) => {
+      counts[s.ident_status] = (counts[s.ident_status] || 0) + 1;
+    }));
+    return counts;
+  }, [groups]);
+
   const handleConsolidate = async () => {
     if (selectedIndentIds.length === 0) {
-      message.warning('Pick at least one item group first');
+      message.warning('No pending indents in selected rows. Already-issued items must be acknowledged before re-consolidation.');
       return;
     }
     setSubmitting(true);
@@ -114,12 +197,19 @@ const DemandPool = () => {
       ellipsis: true,
     },
     {
-      title: 'Total Demand',
+      title: 'Outstanding Demand',
       dataIndex: 'total_qty',
-      width: 130,
+      width: 160,
       align: 'right',
       sorter: (a, b) => (a.total_qty || 0) - (b.total_qty || 0),
-      render: (v, r) => <Text strong>{formatNumber(v)} <Text type="secondary" style={{ fontSize: 11 }}>{r.uom_name || ''}</Text></Text>,
+      render: (v, r) => (
+        <Space direction="vertical" size={0} style={{ textAlign: 'right' }}>
+          <Text strong style={{ color: '#cf1322' }}>{formatNumber(v)}</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            outstanding {r.uom_name || ''}
+          </Text>
+        </Space>
+      ),
     },
     {
       title: '# Indents',
@@ -129,19 +219,28 @@ const DemandPool = () => {
       render: (v) => <Tag>{v}</Tag>,
     },
     {
-      title: 'Source Indents',
+      title: 'Source Indents & Status',
       dataIndex: 'sources',
-      ellipsis: true,
-      render: (sources) => (
-        <Tooltip
-          title={sources.map((s) => `${s.indent_number} → ${formatNumber(s.qty)}`).join('  ·  ')}
-        >
-          <span style={{ fontSize: 12 }}>
-            {sources.slice(0, 3).map((s) => s.indent_number).join(', ')}
-            {sources.length > 3 ? `  +${sources.length - 3} more` : ''}
-          </span>
-        </Tooltip>
-      ),
+      ellipsis: false,
+      render: (sources, r) => {
+        // Show a summary with status badges
+        const byStatus = {};
+        (sources || []).forEach((s) => {
+          byStatus[s.ident_status] = (byStatus[s.ident_status] || 0) + 1;
+        });
+        return (
+          <Space wrap size={4}>
+            {Object.entries(byStatus).map(([st, cnt]) => {
+              const cfg = IDENT_STATUS_CONFIG[st] || IDENT_STATUS_CONFIG.pending;
+              return (
+                <Tag key={st} color={cfg.color} icon={cfg.icon} style={{ fontSize: 11 }}>
+                  {cnt}× {cfg.label}
+                </Tag>
+              );
+            })}
+          </Space>
+        );
+      },
     },
     {
       title: 'Earliest Required',
@@ -174,17 +273,26 @@ const DemandPool = () => {
       title: 'Action',
       width: 130,
       render: (_, r) => {
-        if (r.stock_status === 'in_stock' && r.sources?.length === 1) {
+        const eligibleSource = r.sources?.find((s) => s.qty > (s.issued_qty ?? 0));
+        if (eligibleSource && (r.stock_status === 'in_stock' || r.stock_status === 'partial')) {
           return (
             <Tooltip title="Stock available — go to Material Issue prefilled from this indent">
               <Button
                 size="small"
                 type="link"
                 icon={<ExportOutlined />}
-                onClick={() => navigate(`/warehouse/material-issues?indent_id=${r.sources[0].indent_id}`)}
+                onClick={() => navigate(`/warehouse/material-issues?indent_id=${eligibleSource.indent_id}`)}
               >
                 Issue Now
               </Button>
+            </Tooltip>
+          );
+        }
+        const awaitingAck = r.sources?.some((s) => (s.issued_qty ?? 0) > (s.acknowledged_qty ?? 0));
+        if (awaitingAck) {
+          return (
+            <Tooltip title="Material has been issued — waiting for raiser to acknowledge receipt">
+              <Tag color="geekblue" icon={<ClockCircleOutlined />} style={{ fontSize: 11 }}>Awaiting Ack</Tag>
             </Tooltip>
           );
         }
@@ -197,7 +305,7 @@ const DemandPool = () => {
     <div>
       <PageHeader
         title="Demand Pool"
-        subtitle="Approved indents waiting to be consolidated into bulk MRs (many → one)"
+        subtitle="Outstanding indent demand — indents stay here until the raiser acknowledges full receipt"
       >
         <Space>
           <Select
@@ -223,24 +331,29 @@ const DemandPool = () => {
       </PageHeader>
 
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={6}>
+        <Col span={5}>
           <Card size="small">
             <Statistic title="Item groups in pool" value={groupCount} prefix={<FundOutlined />} />
           </Card>
         </Col>
-        <Col span={6}>
+        <Col span={5}>
           <Card size="small">
-            <Statistic title="Source indents waiting" value={indentCount} />
+            <Statistic title="Source indents" value={indentCount} />
           </Card>
         </Col>
-        <Col span={6}>
-          <Card size="small">
-            <Statistic title="Selected groups" value={selectedKeys.length} />
+        <Col span={4}>
+          <Card size="small" style={{ borderColor: '#d9d9d9' }}>
+            <Statistic title="Pending Issue" value={statusCounts.pending || 0} valueStyle={{ color: '#595959' }} />
           </Card>
         </Col>
-        <Col span={6}>
-          <Card size="small">
-            <Statistic title="Selected total qty" value={selectedTotalQty} precision={2} />
+        <Col span={5}>
+          <Card size="small" style={{ borderColor: '#1677ff' }}>
+            <Statistic title="Issued — Awaiting Ack" value={statusCounts.issued || 0} valueStyle={{ color: '#1677ff' }} />
+          </Card>
+        </Col>
+        <Col span={5}>
+          <Card size="small" style={{ borderColor: '#fa8c16' }}>
+            <Statistic title="Partially Acknowledged" value={statusCounts.partially_acked || 0} valueStyle={{ color: '#fa8c16' }} />
           </Card>
         </Col>
       </Row>
@@ -256,8 +369,20 @@ const DemandPool = () => {
         rowSelection={{
           selectedRowKeys: selectedKeys,
           onChange: setSelectedKeys,
+          getCheckboxProps: (record) => ({
+            // Disable selection for rows that are fully issued/acked (no pending indents)
+            disabled: record.sources?.every((s) => 
+              s.ident_status === 'in_mr' || s.qty <= (s.issued_qty ?? 0)
+            ),
+          }),
         }}
-        locale={{ emptyText: <Empty description="Pool is empty — no approved indents waiting" /> }}
+        expandable={{
+          expandedRowRender: (r) => (
+            <SourcesPanel sources={r.sources || []} uomName={r.uom_name || ''} />
+          ),
+          rowExpandable: (r) => (r.sources?.length || 0) > 0,
+        }}
+        locale={{ emptyText: <Empty description="Pool is empty — all indents have been acknowledged" /> }}
       />
 
       <Modal

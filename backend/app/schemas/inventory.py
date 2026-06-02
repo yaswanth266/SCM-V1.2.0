@@ -13,7 +13,7 @@ class StockBalanceResponse(BaseModel):
     batch_id: Optional[int] = None
     available_qty: Decimal
     reserved_qty: Decimal
-    committed_qty: Decimal
+    transit_qty: Decimal
     total_qty: Decimal
     valuation_rate: Decimal
     stock_value: Decimal

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Button, Card, Col, Descriptions, Empty, message, Popconfirm, Row, Select,
-  Space, Spin, Table, Tag, Tooltip, Typography,
+  Space, Spin, Table, Tag, Tooltip, Typography, Checkbox, InputNumber, Collapse,
 } from 'antd';
 import {
   ArrowLeftOutlined, ReloadOutlined, ShoppingCartOutlined, StarFilled,
@@ -17,7 +17,7 @@ const { Text, Title } = Typography;
 /**
  * QuotationComparison
  * --------------------
- * Side-by-side decision tool: pick an MR -> load all its quotations ->
+ * Side-by-side decision tool: pick an RFQ -> load all supplier quotations ->
  * matrix of items (rows) x vendors (columns) with lowest-price highlight,
  * a manual "best technical" flag, and an "Award to Vendor" action that
  * creates a PO via /procurement/purchase-orders/from-quotation
@@ -28,11 +28,11 @@ const QuotationComparison = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [mrList, setMrList] = useState([]);
-  const [mrListLoading, setMrListLoading] = useState(false);
+  const [rfqList, setRfqList] = useState([]);
+  const [rfqListLoading, setRfqListLoading] = useState(false);
 
-  const [selectedMrId, setSelectedMrId] = useState(null);
-  const [mr, setMr] = useState(null);
+  const [selectedRfqNumber, setSelectedRfqNumber] = useState(null);
+  const [rfq, setRfq] = useState(null);
   const [quotations, setQuotations] = useState([]);
   const [loading, setLoading] = useState(false);
   const [awardingId, setAwardingId] = useState(null);
@@ -40,58 +40,176 @@ const QuotationComparison = () => {
   // Manual "best technical" flag — keyed by quotation id.
   const [bestTechnicalId, setBestTechnicalId] = useState(null);
 
-  // ---------- loaders ----------
-  const loadMRList = useCallback(async () => {
-    setMrListLoading(true);
-    try {
-      const res = await api.get('/procurement/material-requests', {
-        params: { page_size: 100, status: 'approved' },
+  // Split PO awarding selections and quantities
+  const [awardedItems, setAwardedItems] = useState({});
+  const [splitAwardLoading, setSplitAwardLoading] = useState(false);
+
+  const handleAwardCheck = (itemId, vendorId, checked, maxQty, rate, quotationId) => {
+    setAwardedItems((prev) => {
+      const itemAwards = prev[itemId] ? { ...prev[itemId] } : {};
+      if (checked) {
+        itemAwards[vendorId] = {
+          checked: true,
+          qty: maxQty,
+          rate: rate,
+          quotation_id: quotationId,
+        };
+      } else {
+        delete itemAwards[vendorId];
+      }
+      return { ...prev, [itemId]: itemAwards };
+    });
+  };
+
+  const handleAwardQtyChange = (itemId, vendorId, qty) => {
+    setAwardedItems((prev) => {
+      const itemAwards = prev[itemId] ? { ...prev[itemId] } : {};
+      if (itemAwards[vendorId]) {
+        itemAwards[vendorId] = {
+          ...itemAwards[vendorId],
+          qty: qty,
+        };
+      }
+      return { ...prev, [itemId]: itemAwards };
+    });
+  };
+
+  const totalSelectedCount = useMemo(() => {
+    let count = 0;
+    Object.values(awardedItems).forEach((itemAwards) => {
+      Object.values(itemAwards).forEach((award) => {
+        if (award.checked) count++;
       });
+    });
+    return count;
+  }, [awardedItems]);
+
+  const autoAllocateL1 = () => {
+    const newAwards = {};
+    rows.forEach((row) => {
+      let bestVendor = null;
+      let bestQ = null;
+      quotations.forEach((q) => {
+        const qi = (q.items || []).find((x) => x.item_id === row.item_id);
+        const rate = qi ? Number(qi.rate ?? qi.unit_price ?? 0) : null;
+        if (rate !== null && rate === row._minRate) {
+          bestVendor = q.vendor_id;
+          bestQ = q;
+        }
+      });
+
+      if (bestVendor && bestQ) {
+        const qi = bestQ.items.find((x) => x.item_id === row.item_id);
+        const bidQty = qi ? Number(qi.qty || 0) : row.qty;
+        newAwards[row.item_id] = {
+          [bestVendor]: {
+            checked: true,
+            qty: bidQty,
+            rate: row._minRate,
+            quotation_id: bestQ.id,
+          },
+        };
+      }
+    });
+    setAwardedItems(newAwards);
+    message.success('Auto-allocated all items to L1 suppliers at their full bid quantity.');
+  };
+
+  const submitSplitAward = async () => {
+    setSplitAwardLoading(true);
+    try {
+      // Validate that total awarded quantity for each item does not exceed required quantity
+      if (rfq && rfq.items) {
+        for (const mi of rfq.items) {
+          const itemId = mi.item_id || mi.id;
+          const requiredQty = Number(mi.qty || mi.quantity || 0);
+          
+          let totalAwarded = 0;
+          const itemAwards = awardedItems[itemId] || {};
+          Object.values(itemAwards).forEach((award) => {
+            if (award.checked) {
+              totalAwarded += Number(award.qty || 0);
+            }
+          });
+
+          if (totalAwarded > requiredQty + 0.0001) {
+            message.error(
+              `Total awarded quantity for item "${mi.item_name || 'Item'}" (${totalAwarded}) exceeds the required quantity (${requiredQty}). Please adjust your awards.`
+            );
+            setSplitAwardLoading(false);
+            return;
+          }
+        }
+      }
+
+      const awardsList = [];
+      Object.entries(awardedItems).forEach(([itemId, itemAwards]) => {
+        Object.entries(itemAwards).forEach(([vendorId, award]) => {
+          if (award.checked && award.qty > 0) {
+            awardsList.push({
+              item_id: Number(itemId),
+              vendor_id: Number(vendorId),
+              qty: Number(award.qty),
+              rate: Number(award.rate),
+              quotation_id: Number(award.quotation_id),
+            });
+          }
+        });
+      });
+
+      const payload = {
+        rfq_number: rfq.rfq_number,
+        mr_id: rfq.mr_id,
+        awards: awardsList,
+      };
+
+      const res = await api.post('/procurement/purchase-orders/consolidate-split', payload);
+      const data = res.data || {};
+      message.success(data.message || 'Successfully created split Purchase Orders!');
+      setAwardedItems({});
+      navigate('/procurement/purchase-orders');
+    } catch (err) {
+      message.error(getErrorMessage(err));
+    } finally {
+      setSplitAwardLoading(false);
+    }
+  };
+
+  // ---------- loaders ----------
+  const loadRFQList = useCallback(async () => {
+    setRfqListLoading(true);
+    try {
+      const res = await api.get('/procurement/rfqs', { params: { page_size: 100 } });
       const data = res.data;
       const items = data.items || data.data || data || [];
-      setMrList(items.map((m) => ({
-        label: `${m.mr_number} — ${m.department_name || m.request_type || ''}`,
-        value: m.id,
-        mr: m,
+      setRfqList(items.map((r) => ({
+        label: `${r.rfq_number}${r.mr_number ? ` - ${r.mr_number}` : ''}`,
+        value: r.rfq_number,
+        rfq: r,
       })));
     } catch (err) {
       message.error(getErrorMessage(err));
     } finally {
-      setMrListLoading(false);
+      setRfqListLoading(false);
     }
   }, []);
 
-  const loadComparison = useCallback(async (mrId) => {
-    if (!mrId) {
-      setMr(null);
+  const loadComparison = useCallback(async (rfqNumber) => {
+    if (!rfqNumber) {
+      setRfq(null);
       setQuotations([]);
       setBestTechnicalId(null);
       return;
     }
     setLoading(true);
     try {
-      const [mrRes, quotRes] = await Promise.all([
-        api.get(`/procurement/material-requests/${mrId}`),
-        api.get('/procurement/quotations', {
-          params: { mr_id: mrId, page_size: 100 },
-        }),
-      ]);
-      setMr(mrRes.data);
-
-      const list = quotRes.data.items || quotRes.data.data || quotRes.data || [];
-      // Some list responses omit nested items — fall back to detail fetch.
-      const enriched = await Promise.all(
-        list.map(async (q) => {
-          if (q.items && q.items.length > 0) return q;
-          try {
-            const det = await api.get(`/procurement/quotations/${q.id}`);
-            return det.data;
-          } catch {
-            return q;
-          }
-        }),
-      );
-      setQuotations(enriched);
+      const res = await api.get(`/procurement/rfqs/${encodeURIComponent(rfqNumber)}`);
+      const data = res.data;
+      setRfq({
+        ...data,
+        items: data.quotations?.[0]?.items || [],
+      });
+      setQuotations(data.quotations || []);
       setBestTechnicalId(null);
     } catch (err) {
       message.error(getErrorMessage(err));
@@ -102,23 +220,22 @@ const QuotationComparison = () => {
 
   // ---------- effects ----------
   useEffect(() => {
-    loadMRList();
-  }, [loadMRList]);
+    loadRFQList();
+  }, [loadRFQList]);
 
-  // Allow deep-linking via ?mr_id=123 (e.g. from MR detail "Compare Quotations" button)
+  // Allow deep-linking via ?rfq_number=RFQ-123.
   useEffect(() => {
-    const qsMr = searchParams.get('mr_id');
-    if (qsMr) {
-      const id = Number(qsMr);
-      setSelectedMrId(id);
-      loadComparison(id);
+    const qsRfq = searchParams.get('rfq_number');
+    if (qsRfq) {
+      setSelectedRfqNumber(qsRfq);
+      loadComparison(qsRfq);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleSelectMR = (val) => {
-    setSelectedMrId(val);
+  const handleSelectRFQ = (val) => {
+    setSelectedRfqNumber(val);
     if (val) {
-      setSearchParams({ mr_id: String(val) });
+      setSearchParams({ rfq_number: String(val) });
     } else {
       setSearchParams({});
     }
@@ -152,8 +269,8 @@ const QuotationComparison = () => {
 
   // ---------- table model ----------
   const rows = useMemo(() => {
-    if (!mr || quotations.length === 0) return [];
-    const mrItems = mr.items || [];
+    if (!rfq || quotations.length === 0) return [];
+    const mrItems = rfq.items || [];
 
     return mrItems.map((mi) => {
       const row = {
@@ -179,7 +296,7 @@ const QuotationComparison = () => {
       row._minRate = minRate === Infinity ? null : minRate;
       return row;
     });
-  }, [mr, quotations]);
+  }, [rfq, quotations]);
 
   // Per-vendor aggregates (bottom summary row).
   const vendorTotals = useMemo(() => {
@@ -237,6 +354,15 @@ const QuotationComparison = () => {
               )}
             </Space>
             <div style={{ fontSize: 11, color: '#888' }}>{q.quotation_number}</div>
+            <div style={{ fontSize: 11, marginTop: 4 }}>
+              {q.with_vehicle ? (
+                <Tag color="blue" style={{ margin: 0 }}>
+                  Logistics: {formatCurrency(q.vehicle_cost)}
+                </Tag>
+              ) : (
+                <Tag color="default" style={{ margin: 0 }}>No Vehicle</Tag>
+              )}
+            </div>
           </div>
         ),
         children: [
@@ -244,33 +370,115 @@ const QuotationComparison = () => {
             title: 'Unit Price',
             dataIndex: `v_${q.id}_rate`,
             key: `v_${q.id}_rate`,
-            width: 130,
+            width: 120,
             align: 'right',
             render: (val, record) => {
               if (val == null) return <Text type="secondary">N/A</Text>;
               const isLowest = val === record._minRate && record._minRate > 0;
+              
+              const qi = q.items.find((x) => x.item_id === record.item_id);
+              let taxText = '';
+              if (qi) {
+                const cg = Number(qi.cgst_rate || 0);
+                const sg = Number(qi.sgst_rate || 0);
+                const ig = Number(qi.igst_rate || 0);
+                const tx = Number(qi.tax_rate || 0);
+                const disc = Number(qi.discount_pct || 0);
+                
+                const parts = [];
+                if (ig > 0) {
+                  parts.push(`IGST ${ig}%`);
+                } else if (cg > 0 || sg > 0) {
+                  parts.push(`CGST ${cg}% + SGST ${sg}%`);
+                } else if (tx > 0) {
+                  parts.push(`Tax ${tx}%`);
+                }
+                
+                if (disc > 0) {
+                  parts.push(`Disc ${disc}%`);
+                }
+                
+                if (parts.length > 0) {
+                  taxText = parts.join(' · ');
+                }
+              }
+
               return (
-                <span
-                  style={isLowest ? {
-                    background: '#f6ffed',
-                    color: '#389e0d',
-                    fontWeight: 600,
-                    padding: '2px 6px',
-                    borderRadius: 4,
-                    display: 'inline-block',
-                  } : {}}
-                >
-                  {formatCurrency(val)}
-                  {isLowest && <TrophyOutlined style={{ marginLeft: 4, color: '#52c41a' }} />}
-                </span>
+                <Space direction="vertical" size={0} style={{ textAlign: 'right', width: '100%' }}>
+                  <span
+                    style={isLowest ? {
+                      background: '#f6ffed',
+                      color: '#389e0d',
+                      fontWeight: 600,
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      display: 'inline-block',
+                    } : {}}
+                  >
+                    {formatCurrency(val)}
+                    {isLowest && <TrophyOutlined style={{ marginLeft: 4, color: '#52c41a' }} />}
+                  </span>
+                  {taxText && (
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: 2 }}>
+                      {taxText}
+                    </div>
+                  )}
+                </Space>
               );
             },
+          },
+          {
+            title: 'Award Qty',
+            key: `v_${q.id}_award`,
+            width: 160,
+            align: 'center',
+            render: (_, record) => {
+              const qi = q.items.find(x => x.item_id === record.item_id);
+              if (!qi) return <Text type="secondary">—</Text>;
+              const bidQty = Number(qi.qty || 0);
+              const awardState = awardedItems[record.item_id]?.[q.vendor_id] || { checked: false, qty: 0 };
+              
+              return (
+                <Space size={4} align="center">
+                  <Checkbox
+                    checked={awardState.checked}
+                    onChange={(e) => handleAwardCheck(
+                      record.item_id,
+                      q.vendor_id,
+                      e.target.checked,
+                      bidQty,
+                      qi.rate,
+                      q.id
+                    )}
+                  />
+                  {awardState.checked && (
+                    <InputNumber
+                      value={awardState.qty}
+                      min={0.001}
+                      max={bidQty}
+                      step={0.01}
+                      size="small"
+                      style={{ width: 70 }}
+                      onChange={(val) => {
+                        let num = parseFloat(val);
+                        if (isNaN(num)) num = 0;
+                        if (num > bidQty) num = bidQty;
+                        handleAwardQtyChange(record.item_id, q.vendor_id, num);
+                      }}
+                    />
+                  )}
+                  <span style={{ fontSize: '11px', color: '#888' }}>
+                    /{bidQty}
+                  </span>
+                </Space>
+              );
+            }
           },
           {
             title: 'Line Total',
             dataIndex: `v_${q.id}_total`,
             key: `v_${q.id}_total`,
-            width: 130,
+            width: 120,
             align: 'right',
             render: (val) => (val == null ? <Text type="secondary">N/A</Text> : formatCurrency(val)),
           },
@@ -278,7 +486,7 @@ const QuotationComparison = () => {
       });
     });
     return base;
-  }, [quotations, lowestTotalId, bestTechnicalId]);
+  }, [quotations, lowestTotalId, bestTechnicalId, awardedItems]);
 
   // Footer summary row spanning fixed cols + each vendor pair.
   const summaryRow = () => {
@@ -365,9 +573,47 @@ const QuotationComparison = () => {
                 {q.status && <Tag>{q.status}</Tag>}
               </Space>
               <Descriptions size="small" column={1} bordered>
-                <Descriptions.Item label="Total">
-                  <Text strong style={isLowestTotal ? { color: '#389e0d' } : {}}>
-                    {formatCurrency(total)}
+                <Descriptions.Item label="Subtotal">
+                  <Text style={{ fontFamily: 'monospace' }}>
+                    {formatCurrency(q.subtotal || q.total_amount || 0)}
+                  </Text>
+                </Descriptions.Item>
+                {(Number(q.cgst_amount || 0) > 0 || Number(q.sgst_amount || 0) > 0) && (
+                  <>
+                    <Descriptions.Item label="CGST">
+                      <Text style={{ fontFamily: 'monospace' }}>
+                        {formatCurrency(q.cgst_amount || 0)}
+                      </Text>
+                    </Descriptions.Item>
+                    <Descriptions.Item label="SGST">
+                      <Text style={{ fontFamily: 'monospace' }}>
+                        {formatCurrency(q.sgst_amount || 0)}
+                      </Text>
+                    </Descriptions.Item>
+                  </>
+                )}
+                {Number(q.igst_amount || 0) > 0 && (
+                  <Descriptions.Item label="IGST">
+                    <Text style={{ fontFamily: 'monospace' }}>
+                      {formatCurrency(q.igst_amount || 0)}
+                    </Text>
+                  </Descriptions.Item>
+                )}
+                {Number(q.tax_amount || 0) > 0 && Number(q.cgst_amount || 0) === 0 && Number(q.igst_amount || 0) === 0 && (
+                  <Descriptions.Item label="Tax">
+                    <Text style={{ fontFamily: 'monospace' }}>
+                      {formatCurrency(q.tax_amount || 0)}
+                    </Text>
+                  </Descriptions.Item>
+                )}
+                <Descriptions.Item label="Logistics Fee">
+                  <Text style={{ fontFamily: 'monospace' }}>
+                    {q.with_vehicle ? formatCurrency(q.vehicle_cost || 0) : '— (Excluded)'}
+                  </Text>
+                </Descriptions.Item>
+                <Descriptions.Item label="Grand Total">
+                  <Text strong style={isLowestTotal ? { color: '#389e0d', fontFamily: 'monospace' } : { fontFamily: 'monospace' }}>
+                    {formatCurrency(q.grand_total || total)}
                   </Text>
                 </Descriptions.Item>
                 <Descriptions.Item label="Lead Time">
@@ -396,14 +642,14 @@ const QuotationComparison = () => {
   return (
     <div>
       <PageHeader
-        title="Quotation Comparison"
-        subtitle="Side-by-side vendor evaluation against a Material Request"
+        title="RFQ Comparison"
+        subtitle="Side-by-side supplier evaluation against an RFQ"
       >
         <Space>
           <Button
             icon={<ReloadOutlined />}
-            onClick={() => loadComparison(selectedMrId)}
-            disabled={!selectedMrId || loading}
+            onClick={() => loadComparison(selectedRfqNumber)}
+            disabled={!selectedRfqNumber || loading}
           >
             Refresh
           </Button>
@@ -411,7 +657,7 @@ const QuotationComparison = () => {
             icon={<ArrowLeftOutlined />}
             onClick={() => navigate('/procurement/quotations')}
           >
-            Back to Quotations
+            Back to RFQs
           </Button>
         </Space>
       </PageHeader>
@@ -419,25 +665,25 @@ const QuotationComparison = () => {
       <Card style={{ marginBottom: 16 }}>
         <Row gutter={16} align="middle">
           <Col xs={24} md={10}>
-            <Text strong>Material Request</Text>
+            <Text strong>RFQ</Text>
             <Select
               style={{ width: '100%', marginTop: 6 }}
-              placeholder="Select an approved MR to compare quotations"
-              options={mrList}
-              value={selectedMrId || undefined}
-              onChange={handleSelectMR}
-              loading={mrListLoading}
+              placeholder="Select an RFQ to compare supplier quotations"
+              options={rfqList}
+              value={selectedRfqNumber || undefined}
+              onChange={handleSelectRFQ}
+              loading={rfqListLoading}
               showSearch
               optionFilterProp="label"
               allowClear
             />
           </Col>
-          {mr && (
+          {rfq && (
             <Col xs={24} md={14}>
               <Descriptions size="small" column={2} style={{ marginTop: 8 }}>
-                <Descriptions.Item label="MR #">{mr.mr_number}</Descriptions.Item>
-                <Descriptions.Item label="Type">{mr.request_type}</Descriptions.Item>
-                <Descriptions.Item label="Required">{formatDate(mr.required_date)}</Descriptions.Item>
+                <Descriptions.Item label="RFQ #">{rfq.rfq_number}</Descriptions.Item>
+                <Descriptions.Item label="MR #">{rfq.mr_number || '-'}</Descriptions.Item>
+                <Descriptions.Item label="Valid Until">{formatDate(rfq.valid_until)}</Descriptions.Item>
                 <Descriptions.Item label="Quotations">{quotations.length}</Descriptions.Item>
               </Descriptions>
             </Col>
@@ -447,42 +693,285 @@ const QuotationComparison = () => {
 
       {loading && (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 80 }}>
-          <Spin size="large" tip="Loading comparison..." />
+          <Spin size="large" tip="Loading RFQ comparison..." />
         </div>
       )}
 
-      {!loading && mr && quotations.length === 0 && (
+      {!loading && rfq && quotations.length === 0 && (
         <Card>
-          <Empty description={`No quotations found for ${mr.mr_number}`} />
+          <Empty description={`No supplier quotations found for ${rfq.rfq_number}`} />
         </Card>
       )}
 
       {!loading && quotations.length > 0 && (
         <>
-          <Card style={{ marginBottom: 16 }} title="Item-by-Item Comparison">
+          {/* Card 1: RFQ Requested Items */}
+          <Card style={{ marginBottom: 16 }} title="RFQ Requested Items">
             <Table
-              dataSource={rows}
-              columns={columns}
-              rowKey="key"
+              dataSource={rfq.items.map((line, idx) => ({ ...line, key: line.id || idx }))}
               pagination={false}
               size="small"
               bordered
-              scroll={{ x: 540 + quotations.length * 260 }}
-              summary={summaryRow}
+              columns={[
+                { title: '#', width: 50, render: (_, __, idx) => idx + 1 },
+                { title: 'Item Code', dataIndex: 'item_code', width: 150 },
+                { title: 'Item Name', dataIndex: 'item_name' },
+                { title: 'Required Qty', dataIndex: 'qty', width: 150, align: 'right', render: (val) => Number(val).toLocaleString('en-IN') },
+                { title: 'UOM', dataIndex: 'uom', width: 120 }
+              ]}
             />
-            <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-              <TrophyOutlined style={{ color: '#52c41a' }} /> indicates the lowest unit price for that line.
-              Use the "Mark Tech" button on a vendor card to flag the best technical match (manual override).
-            </Text>
           </Card>
 
-          <Card title="Vendor Summary & Award">{renderVendorCards()}</Card>
+          {/* Card 2: Vendor Summary & Award */}
+          <Card title="Vendor Summary & Award" style={{ marginBottom: 16 }}>
+            {renderVendorCards()}
+          </Card>
+
+          {/* Card 3: Collapsible Item-by-Item RFQ Comparison */}
+          <Card title="Item-by-Item Sourcing Matrix (Bids & Split Awarding)">
+            <div style={{
+              marginBottom: 16,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: '#f9f9f9',
+              padding: '12px 16px',
+              borderRadius: '8px',
+              border: '1px solid #e8e8e8',
+              flexWrap: 'wrap',
+              gap: '12px'
+            }}>
+              <Space>
+                <Button
+                  type="primary"
+                  ghost
+                  icon={<TrophyOutlined />}
+                  onClick={autoAllocateL1}
+                >
+                  Auto-Select L1 Rates
+                </Button>
+                <Button
+                  onClick={() => setAwardedItems({})}
+                  disabled={Object.keys(awardedItems).length === 0}
+                >
+                  Clear Selection
+                </Button>
+              </Space>
+              <Space size={16}>
+                <Text strong>Selected Items for Split Award: <Tag color="blue" style={{ fontSize: '14px', margin: 0 }}>{totalSelectedCount}</Tag></Text>
+                <Button
+                  type="primary"
+                  icon={<ShoppingCartOutlined />}
+                  onClick={submitSplitAward}
+                  disabled={totalSelectedCount === 0}
+                  loading={splitAwardLoading}
+                >
+                  Confirm Split Award
+                </Button>
+              </Space>
+            </div>
+
+            <Collapse defaultActiveKey={rfq.items.map((mi) => String(mi.item_id || mi.id))}>
+              {rfq.items.map((mi) => {
+                const itemId = mi.item_id || mi.id;
+                
+                // Find all bids for this item across all suppliers
+                const supplierBids = quotations.map((q) => {
+                  const qi = (q.items || []).find((x) => x.item_id === itemId);
+                  return {
+                    quotation: q,
+                    bidItem: qi,
+                    rate: qi ? Number(qi.rate ?? qi.unit_price ?? 0) : null,
+                  };
+                }).filter(b => b.bidItem !== undefined);
+
+                // Identify L1 price for this item
+                const validRates = supplierBids.map(b => b.rate).filter(r => r !== null && r > 0);
+                const minRate = validRates.length > 0 ? Math.min(...validRates) : null;
+
+                const header = (
+                  <Row style={{ width: '100%' }} align="middle">
+                    <Col span={6}>
+                      <Text strong style={{ color: '#0284c7' }}>{mi.item_code}</Text>
+                    </Col>
+                    <Col span={10}>
+                      <Text strong>{mi.item_name}</Text>
+                    </Col>
+                    <Col span={8} style={{ textAlign: 'right', paddingRight: '24px' }}>
+                      <Text type="secondary">Required: </Text>
+                      <Text strong>{Number(mi.qty).toLocaleString('en-IN')} {mi.uom}</Text>
+                    </Col>
+                  </Row>
+                );
+
+                return (
+                  <Collapse.Panel header={header} key={String(itemId)}>
+                    <Table
+                      dataSource={supplierBids}
+                      rowKey={(b) => b.quotation.id}
+                      pagination={false}
+                      size="small"
+                      bordered
+                      columns={[
+                        {
+                          title: 'Supplier',
+                          key: 'supplier',
+                          render: (_, b) => (
+                            <Space direction="vertical" size={0}>
+                              <Text strong>{b.quotation.vendor_name || `Vendor ${b.quotation.vendor_id}`}</Text>
+                              <Text type="secondary" style={{ fontSize: '11px' }}>{b.quotation.quotation_number}</Text>
+                            </Space>
+                          )
+                        },
+                        {
+                          title: 'Delivery Days',
+                          key: 'delivery',
+                          width: 120,
+                          render: (_, b) => (
+                            <Text>{b.quotation.delivery_days ? `${b.quotation.delivery_days} days` : '—'}</Text>
+                          )
+                        },
+                        {
+                          title: 'Logistics Cost',
+                          key: 'logistics',
+                          width: 180,
+                          render: (_, b) => (
+                            b.quotation.with_vehicle ? (
+                              <Tag color="blue">Logistics: {formatCurrency(b.quotation.vehicle_cost)}</Tag>
+                            ) : (
+                              <Tag color="default">No Vehicle</Tag>
+                            )
+                          )
+                        },
+                        {
+                          title: 'Unit Price',
+                          key: 'unit_price',
+                          width: 140,
+                          align: 'right',
+                          render: (_, b) => {
+                            const val = b.rate;
+                            if (val == null) return <Text type="secondary">N/A</Text>;
+                            const isLowest = val === minRate && minRate > 0;
+                            
+                            let taxText = '';
+                            if (b.bidItem) {
+                              const cg = Number(b.bidItem.cgst_rate || 0);
+                              const sg = Number(b.bidItem.sgst_rate || 0);
+                              const ig = Number(b.bidItem.igst_rate || 0);
+                              const tx = Number(b.bidItem.tax_rate || 0);
+                              const disc = Number(b.bidItem.discount_pct || 0);
+                              
+                              const parts = [];
+                              if (ig > 0) {
+                                parts.push(`IGST ${ig}%`);
+                              } else if (cg > 0 || sg > 0) {
+                                parts.push(`CGST ${cg}% + SGST ${sg}%`);
+                              } else if (tx > 0) {
+                                parts.push(`Tax ${tx}%`);
+                              }
+                              
+                              if (disc > 0) {
+                                parts.push(`Disc ${disc}%`);
+                              }
+                              
+                              if (parts.length > 0) {
+                                taxText = parts.join(' · ');
+                              }
+                            }
+
+                            return (
+                              <Space direction="vertical" size={0} style={{ textAlign: 'right', width: '100%' }}>
+                                <span
+                                  style={isLowest ? {
+                                    background: '#f6ffed',
+                                    color: '#389e0d',
+                                    fontWeight: 600,
+                                    padding: '2px 6px',
+                                    borderRadius: 4,
+                                    display: 'inline-block',
+                                  } : {}}
+                                >
+                                  {formatCurrency(val)}
+                                  {isLowest && <TrophyOutlined style={{ marginLeft: 4, color: '#52c41a' }} />}
+                                </span>
+                                {taxText && (
+                                  <div style={{ fontSize: '11px', color: '#64748b', marginTop: 2 }}>
+                                    {taxText}
+                                  </div>
+                                )}
+                              </Space>
+                            );
+                          }
+                        },
+                        {
+                          title: 'Award Quantity',
+                          key: 'award_qty',
+                          width: 200,
+                          align: 'center',
+                          render: (_, b) => {
+                            const bidQty = Number(b.bidItem?.qty || 0);
+                            const awardState = awardedItems[itemId]?.[b.quotation.vendor_id] || { checked: false, qty: 0 };
+                            return (
+                              <Space size={8} align="center">
+                                <Checkbox
+                                  checked={awardState.checked}
+                                  onChange={(e) => handleAwardCheck(
+                                    itemId,
+                                    b.quotation.vendor_id,
+                                    e.target.checked,
+                                    bidQty,
+                                    b.rate,
+                                    b.quotation.id
+                                  )}
+                                />
+                                {awardState.checked && (
+                                  <InputNumber
+                                    value={awardState.qty}
+                                    min={0.001}
+                                    max={bidQty}
+                                    step={0.01}
+                                    size="small"
+                                    style={{ width: 80 }}
+                                    onChange={(val) => {
+                                      let num = parseFloat(val);
+                                      if (isNaN(num)) num = 0;
+                                      if (num > bidQty) num = bidQty;
+                                      handleAwardQtyChange(itemId, b.quotation.vendor_id, num);
+                                    }}
+                                  />
+                                )}
+                                <span style={{ fontSize: '11px', color: '#888' }}>
+                                  /{bidQty}
+                                </span>
+                              </Space>
+                            );
+                          }
+                        },
+                        {
+                          title: 'Award Line Total',
+                          key: 'line_total',
+                          width: 150,
+                          align: 'right',
+                          render: (_, b) => {
+                            const awardState = awardedItems[itemId]?.[b.quotation.vendor_id];
+                            if (!awardState || !awardState.checked) return <Text type="secondary">—</Text>;
+                            const total = Number(awardState.qty || 0) * Number(b.rate || 0);
+                            return <Text strong>{formatCurrency(total)}</Text>;
+                          }
+                        }
+                      ]}
+                    />
+                  </Collapse.Panel>
+                );
+              })}
+            </Collapse>
+          </Card>
         </>
       )}
 
-      {!loading && !mr && (
+      {!loading && !rfq && (
         <Card>
-          <Empty description="Select a Material Request above to load its quotations for comparison" />
+          <Empty description="Select an RFQ above to load supplier quotations for comparison" />
         </Card>
       )}
     </div>

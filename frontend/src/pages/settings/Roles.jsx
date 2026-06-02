@@ -5,6 +5,7 @@ import {
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, SaveOutlined, CheckOutlined,
+  RightOutlined, DownOutlined,
 } from '@ant-design/icons';
 import PageHeader from '../../components/PageHeader';
 import api from '../../config/api';
@@ -14,7 +15,7 @@ import { MODULE_NAVS } from '../../utils/moduleNavs';
 const { Title, Text } = Typography;
 
 const MODULE_ORDER = [
-  'masters', 'procurement', 'warehouse', 'inventory', 'outbound', 'logistics',
+  'masters', 'procurement', 'warehouse', 'inventory', 'logistics', 'outbound',
   'indent', 'consumption', 'approvals', 'accounts', 'assets', 'reports',
   'settings', 'healthcare', 'compliance', 'documents', 'mrp', 'alerts', 'dashboard',
 ];
@@ -84,6 +85,19 @@ const Roles = () => {
   const [editingRole, setEditingRole] = useState(null);
   const [form] = Form.useForm();
   const [permissionsLoading, setPermissionsLoading] = useState(false);
+  const [expandedModules, setExpandedModules] = useState({});
+
+  const toggleModule = (moduleKey) => {
+    setExpandedModules((prev) => ({
+      ...prev,
+      [moduleKey]: !prev[moduleKey],
+    }));
+  };
+
+  const visibleRows = PERMISSION_ROWS.filter((row) => {
+    if (row.level === 0) return true;
+    return !!expandedModules[row.parentKey];
+  });
 
   useEffect(() => {
     fetchRoles();
@@ -386,15 +400,15 @@ const Roles = () => {
             <Spin spinning={permissionsLoading}>
               {selectedRole ? (
                 <div style={{ overflowX: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <table className="permissions-table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
                     <thead>
                       <tr>
-                        <th style={{ textAlign: 'left', padding: '8px 12px', borderBottom: '2px solid #f0f0f0', width: 260, fontWeight: 600 }}>
+                        <th style={{ textAlign: 'left', padding: '12px 12px', borderBottom: '2px solid #f0f0f0', width: 260, fontWeight: 600 }}>
                           Module / Tab
                         </th>
                         {PERMISSION_ACTIONS.map((act) => (
-                          <th key={act.key} style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '2px solid #f0f0f0', fontWeight: 600, minWidth: 80 }}>
-                            <div style={{ marginBottom: 4 }}>{act.label}</div>
+                          <th key={act.key} style={{ textAlign: 'center', padding: '12px 12px', borderBottom: '2px solid #f0f0f0', fontWeight: 600, minWidth: 80 }}>
+                            <div style={{ marginBottom: 6 }}>{act.label}</div>
                             <Checkbox
                               checked={isColAllChecked(act.key)}
                               indeterminate={isColSomeChecked(act.key)}
@@ -403,46 +417,161 @@ const Roles = () => {
                             />
                           </th>
                         ))}
-                        <th style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '2px solid #f0f0f0', fontWeight: 600, minWidth: 80 }}>
+                        <th style={{ textAlign: 'center', padding: '12px 12px', borderBottom: '2px solid #f0f0f0', fontWeight: 600, minWidth: 80 }}>
                           Select All
                         </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {PERMISSION_ROWS.map((mod, idx) => (
-                        <tr key={mod.key} style={{ backgroundColor: idx % 2 === 0 ? '#fafafa' : '#fff' }}>
-                          <td
-                            style={{
-                              padding: mod.level === 0 ? '8px 12px' : '7px 12px 7px 32px',
-                              borderBottom: '1px solid #f0f0f0',
-                              fontWeight: mod.level === 0 ? 600 : 400,
-                              color: mod.level === 0 ? undefined : 'rgba(0,0,0,0.72)',
-                            }}
-                          >
-                            {mod.level === 1 ? (
-                              <span>
-                                <span style={{ color: 'rgba(0,0,0,0.35)', marginRight: 8 }}>-</span>
-                                {mod.label}
-                              </span>
-                            ) : mod.label}
-                          </td>
-                          {PERMISSION_ACTIONS.map((act) => (
-                            <td key={act.key} style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
+                      <style>{`
+                        .permissions-table {
+                          width: 100%;
+                          border-collapse: separate !important;
+                          border-spacing: 0;
+                        }
+                        .permissions-module-title-cell {
+                          transition: all 0.2s ease;
+                        }
+                        .permissions-module-title-cell.clickable:hover {
+                          background-color: #fdf2f4;
+                          color: #D80048;
+                        }
+                        .permissions-module-title-cell.clickable:hover .anticon {
+                          color: #D80048 !important;
+                        }
+                        
+                        /* Premium Checkbox overrides to eliminate circular shape & elevate visibility */
+                        .permissions-table .ant-checkbox-inner {
+                          width: 18px !important;
+                          height: 18px !important;
+                          border: 1.8px solid #c1a8b0 !important; /* High contrast brand-tinted outline */
+                          border-radius: 4px !important; /* Clean modern rounded-square instead of complete circle */
+                          background-color: #ffffff !important;
+                          transition: all 0.2s cubic-bezier(0.12, 0.4, 0.29, 1.46) !important;
+                        }
+                        
+                        /* Micro-scale and color feedback on hover */
+                        .permissions-table .ant-checkbox-wrapper:hover .ant-checkbox-inner,
+                        .permissions-table .ant-checkbox:hover .ant-checkbox-inner {
+                          border-color: #b70051 !important;
+                          background-color: #fff5f8 !important;
+                          box-shadow: 0 0 0 3px rgba(183, 0, 81, 0.15) !important;
+                          transform: scale(1.08);
+                        }
+                        
+                        /* Solid filled active state */
+                        .permissions-table .ant-checkbox-checked .ant-checkbox-inner {
+                          background-color: #b70051 !important;
+                          border-color: #b70051 !important;
+                        }
+                        
+                        /* Crisp checkmark scaling inside the checkbox */
+                        .permissions-table .ant-checkbox-checked .ant-checkbox-inner::after {
+                          width: 5.5px !important;
+                          height: 9.5px !important;
+                          border: 2px solid #ffffff !important;
+                          border-top: 0 !important;
+                          border-left: 0 !important;
+                          left: 4.25px !important;
+                          top: 0.75px !important;
+                        }
+                        
+                        /* Premium Indeterminate styling */
+                        .permissions-table .ant-checkbox-indeterminate .ant-checkbox-inner {
+                          background-color: #ffffff !important;
+                          border-color: #b70051 !important;
+                        }
+                        .permissions-table .ant-checkbox-indeterminate .ant-checkbox-inner::after {
+                          background-color: #b70051 !important;
+                          height: 3px !important;
+                          border-radius: 1px !important;
+                        }
+                        
+                        /* Premium row highlight backdrops */
+                        .permissions-table tbody tr {
+                          transition: background-color 0.15s ease;
+                        }
+                        .permissions-table tbody tr:hover {
+                          background-color: #fcf6f8 !important; /* Gentle brand-pink tint across the row */
+                        }
+                        
+                        /* Indent secondary hover cell background to guide user selection visually */
+                        .permissions-table tbody td:not(.permissions-module-title-cell) {
+                          transition: background-color 0.15s ease;
+                        }
+                        .permissions-table tbody td:not(.permissions-module-title-cell):hover {
+                          background-color: rgba(183, 0, 81, 0.05) !important;
+                        }
+                      `}</style>
+                      {visibleRows.map((mod, idx) => {
+                        const hasChildren = mod.children && mod.children.length > 0;
+                        const isExpanded = !!expandedModules[mod.key];
+                        return (
+                          <tr key={mod.key} style={{ backgroundColor: idx % 2 === 0 ? '#fafafa' : '#fff' }}>
+                            <td
+                                className={`permissions-module-title-cell ${mod.level === 0 && hasChildren ? 'clickable' : ''}`}
+                                onClick={mod.level === 0 && hasChildren ? () => toggleModule(mod.key) : undefined}
+                                style={{
+                                  padding: mod.level === 0 ? '12px 12px' : '9px 12px 9px 32px',
+                                  borderBottom: '1px solid #f0f0f0',
+                                  fontWeight: mod.level === 0 ? 600 : 400,
+                                  color: mod.level === 0 ? undefined : 'rgba(0,0,0,0.72)',
+                                  cursor: mod.level === 0 && hasChildren ? 'pointer' : 'default',
+                                  userSelect: 'none',
+                                }}
+                            >
+                              {mod.level === 0 && hasChildren ? (
+                                isExpanded ? (
+                                  <DownOutlined style={{ marginRight: 8, fontSize: 10, color: 'rgba(0,0,0,0.45)', verticalAlign: 'middle' }} />
+                                ) : (
+                                  <RightOutlined style={{ marginRight: 8, fontSize: 10, color: 'rgba(0,0,0,0.45)', verticalAlign: 'middle' }} />
+                                )
+                              ) : null}
+                              {mod.level === 1 ? (
+                                <span>
+                                  <span style={{ color: 'rgba(0,0,0,0.35)', marginRight: 8 }}>-</span>
+                                  {mod.label}
+                                </span>
+                              ) : (
+                                <span style={{ verticalAlign: 'middle' }}>{mod.label}</span>
+                              )}
+                            </td>
+                            {PERMISSION_ACTIONS.map((act) => (
+                              <td key={act.key} style={{ textAlign: 'center', padding: 0, borderBottom: '1px solid #f0f0f0' }}>
+                                <Checkbox
+                                  checked={permissions[mod.key]?.[act.key] || false}
+                                  onChange={(e) => handlePermissionChange(mod.key, act.key, e.target.checked)}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    width: '100%',
+                                    height: '100%',
+                                    padding: '12px 8px',
+                                    cursor: 'pointer',
+                                  }}
+                                />
+                              </td>
+                            ))}
+                            <td style={{ textAlign: 'center', padding: 0, borderBottom: '1px solid #f0f0f0' }}>
                               <Checkbox
-                                checked={permissions[mod.key]?.[act.key] || false}
-                                onChange={(e) => handlePermissionChange(mod.key, act.key, e.target.checked)}
+                                checked={isRowAllChecked(mod.key)}
+                                indeterminate={isRowSomeChecked(mod.key)}
+                                onChange={(e) => handleSelectAllRow(mod.key, e.target.checked)}
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  width: '100%',
+                                  height: '100%',
+                                  padding: '12px 8px',
+                                  cursor: 'pointer',
+                                }}
                               />
                             </td>
-                          ))}
-                          <td style={{ textAlign: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f0f0' }}>
-                            <Checkbox
-                              checked={isRowAllChecked(mod.key)}
-                              indeterminate={isRowSomeChecked(mod.key)}
-                              onChange={(e) => handleSelectAllRow(mod.key, e.target.checked)}
-                            />
-                          </td>
-                        </tr>
-                      ))}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

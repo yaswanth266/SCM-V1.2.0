@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 from app.database import get_db
-from app.schemas.packaging import ItemPackagingResponse, ItemPackagingUpsertRequest
+from app.schemas.packaging import ItemPackagingResponse, ItemPackagingUpsertRequest, PackagingLevelCreate
 from app.services.packaging_service import PackagingService
 from app.models.master import ItemPackaging, PackagingLevel
 from app.utils.schema_sync import ensure_packaging_schema
@@ -59,3 +59,52 @@ async def trigger_packaging_cascade(item_id: int, db: AsyncSession = Depends(get
     await service.update_item_cascade(item_id)
     await db.commit()
     return {"message": "Packaging cascade updated successfully"}
+
+
+@router.post("/packaging-levels")
+async def create_packaging_level(payload: PackagingLevelCreate, db: AsyncSession = Depends(get_db)):
+    await ensure_packaging_schema(db)
+    
+    # Check if level_name already exists (case-insensitive check)
+    name_check = await db.execute(
+        select(PackagingLevel).where(PackagingLevel.level_name == payload.level_name)
+    )
+    if name_check.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Packaging level '{payload.level_name}' already exists.")
+        
+    # Check if level_order already exists
+    order_check = await db.execute(
+        select(PackagingLevel).where(PackagingLevel.level_order == payload.level_order)
+    )
+    if order_check.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Packaging level order '{payload.level_order}' already exists.")
+        
+    lvl = PackagingLevel(level_name=payload.level_name, level_order=payload.level_order)
+    db.add(lvl)
+    await db.commit()
+    return {"id": lvl.id, "level_name": lvl.level_name, "level_order": lvl.level_order}
+
+
+@router.delete("/packaging-levels/{level_id}")
+async def delete_packaging_level(level_id: int, db: AsyncSession = Depends(get_db)):
+    await ensure_packaging_schema(db)
+    
+    lvl = (
+        await db.execute(select(PackagingLevel).where(PackagingLevel.id == level_id))
+    ).scalar_one_or_none()
+    if not lvl:
+        raise HTTPException(status_code=404, detail="Packaging level not found")
+        
+    # Check if any items are currently using this packaging level
+    usage_check = await db.execute(
+        select(ItemPackaging).where(ItemPackaging.level_id == level_id)
+    )
+    if usage_check.scalar_one_or_none():
+        raise HTTPException(
+            status_code=409, 
+            detail="Cannot delete level: it is currently active in one or more item packaging hierarchies."
+        )
+        
+    await db.delete(lvl)
+    await db.commit()
+    return {"message": "Packaging level deleted successfully"}

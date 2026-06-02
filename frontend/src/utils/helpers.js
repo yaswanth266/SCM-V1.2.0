@@ -2,6 +2,7 @@ import dayjs from 'dayjs';
 import utc from 'dayjs/plugin/utc';
 import timezone from 'dayjs/plugin/timezone';
 import * as XLSX from 'xlsx';
+import { message } from 'antd';
 import { DATE_FORMAT, DATETIME_FORMAT, STATUS_COLORS, STATUS_LABELS } from './constants';
 
 dayjs.extend(utc);
@@ -282,4 +283,34 @@ export const getStatusColor = (status) => {
 export const getStatusText = (status) => {
   if (!status) return 'Unknown';
   return STATUS_LABELS[status.toLowerCase()] || status.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+};
+
+export const handleFormValidationFailed = (errorInfo) => {
+  try {
+    message.error('Form submission blocked. Please correct the highlighted errors.');
+    const firstErrorField = errorInfo?.errorFields?.[0];
+    if (firstErrorField) {
+      const fieldName = Array.isArray(firstErrorField.name)
+        ? firstErrorField.name.join('_')
+        : firstErrorField.name;
+
+      const element = document.getElementById(fieldName) ||
+                      document.querySelector(`[name="${fieldName}"]`) ||
+                      document.getElementById(`parent_${fieldName}`) ||
+                      document.querySelector(`[id$="_${fieldName}"]`);
+
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => {
+          try {
+            element.focus();
+          } catch (e) {
+            // silent
+          }
+        }, 300);
+      }
+    }
+  } catch (err) {
+    console.error('Error in handleFormValidationFailed:', err);
+  }
 };

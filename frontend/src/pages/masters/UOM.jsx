@@ -692,21 +692,21 @@ const UOM = () => {
             <Select
               placeholder="Select category (e.g. Weight, Volume)"
               options={categoryOptions}
-              onChange={() => {
-                // Clear UOMs when category changes to prevent cross-category conversion
-                convForm.setFieldsValue({ from_uom_id: undefined, to_uom_id: undefined });
+              onChange={(val) => {
+                const category = uomCategories.find(c => c.id === val);
+                const baseUomId = category?.base_uom_id;
+                // Auto-populate From UOM with Base UOM and clear To UOM
+                convForm.setFieldsValue({ from_uom_id: baseUomId, to_uom_id: undefined });
               }}
             />
           </Form.Item>
           <Row gutter={16}>
             <Col span={12}>
-              <Form.Item name="from_uom_id" label="From UOM" rules={[{ required: true, message: 'Required' }]}>
+              <Form.Item name="from_uom_id" label="From UOM (Base)" rules={[{ required: true, message: 'Required' }]}>
                 <Select
-                  placeholder={selectedConvCategory ? "Select UOM" : "Select category first"}
-                  options={getUomOptions(selectedToUom)}
-                  showSearch
-                  optionFilterProp="label"
-                  disabled={!selectedConvCategory}
+                  placeholder={selectedConvCategory ? "Base UOM auto-selected" : "Select category first"}
+                  options={filteredUomList.map(u => ({ label: `${u.name} (${u.abbreviation || ''})`, value: u.id }))}
+                  disabled={true}
                 />
               </Form.Item>
             </Col>

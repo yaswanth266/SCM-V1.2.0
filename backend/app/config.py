@@ -1,3 +1,4 @@
+import os
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from typing import List
@@ -92,8 +93,11 @@ class Settings(BaseSettings):
     def allowed_extensions_list(self) -> List[str]:
         return [e.strip().lower() for e in self.ALLOWED_UPLOAD_EXTENSIONS.split(",")]
 
+    _backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _env_file_path = os.path.join(_backend_dir, ".env")
+
     model_config = {
-        "env_file": ".env",
+        "env_file": _env_file_path,
         "env_file_encoding": "utf-8",
         "case_sensitive": True,
     }

@@ -14,7 +14,7 @@ const collectLeafKeys = (nodes, prefix) => {
   const out = [];
   const walk = (items) => {
     (items || []).forEach((node) => {
-      if (String(node.key).startsWith(prefix)) out.push(node.key);
+      if (String(node.key).includes(prefix)) out.push(node.key);
       if (node.children) walk(node.children);
     });
   };
@@ -22,133 +22,42 @@ const collectLeafKeys = (nodes, prefix) => {
   return out;
 };
 
-const idsFromKeys = (keys, prefix) => keys
-  .filter((key) => String(key).startsWith(prefix))
-  .map((key) => Number(String(key).replace(prefix, '')))
-  .filter(Boolean);
+const idsFromKeys = (keys, prefix) => {
+  const ids = new Set();
+  (keys || []).forEach((key) => {
+    const sKey = String(key);
+    if (sKey.includes(prefix)) {
+      const idx = sKey.indexOf(prefix);
+      const suffix = sKey.substring(idx + prefix.length);
+      const num = Number(suffix);
+      if (!isNaN(num)) {
+        ids.add(num);
+      }
+    }
+  });
+  return Array.from(ids);
+};
 
 const textMatches = (value, query) => String(value || '').toLowerCase().includes(query);
-const userMatches = (user, query) => textMatches(`${user.username || ''} ${user.name || ''} ${user.employee_code || ''}`, query);
-const positionMatches = (position, query) => textMatches(`${position.code || ''} ${position.name || ''}`, query);
-const projectMatches = (project, query) => textMatches(`${project.code || ''} ${project.name}`, query);
 const itemMatches = (item, query) => textMatches(`${item.item_code || ''} ${item.name || ''}`, query);
 const categoryMatches = (cat, query) => textMatches(`${cat.full_code || ''} ${cat.code || ''} ${cat.name || ''}`, query);
 
-const buildUserTree = (projects, positions, users, query = '') => {
-  const usersByPosition = new Map();
-  users.forEach((user) => {
-    const positionId = user.position_id || 0;
-    usersByPosition.set(positionId, [...(usersByPosition.get(positionId) || []), user]);
-  });
-
-  const userNode = (user) => ({
-    key: `user-${user.id}`,
-    title: (
-      <Space size={6}>
-        <Text>{user.employee_code || user.username}</Text>
-        <Text type="secondary">{user.name}</Text>
-      </Space>
-    ),
-    isLeaf: true,
-  });
-
-  const makePositionNode = (position, forceVisible = false) => {
-    const positionUsers = usersByPosition.get(position.id) || [];
-    const visibleUsers = query && !forceVisible && !positionMatches(position, query)
-      ? positionUsers.filter((user) => userMatches(user, query))
-      : positionUsers;
-    if (query && !forceVisible && !positionMatches(position, query) && !visibleUsers.length) return null;
-    return {
-      key: `position-${position.id}`,
-      title: `${position.code || ''} ${position.name}`.trim(),
-      children: visibleUsers.map(userNode),
-    };
-  };
-
-  const projectNodes = projects
-    .map((project) => {
-      const forceProjectVisible = query && projectMatches(project, query);
-      const projectPositions = positions.filter((pos) => pos.project_id === project.id);
-      
-      const positionsByRole = new Map();
-      projectPositions.forEach((pos) => {
-        const role = (pos.role_name || 'No Role').trim();
-        positionsByRole.set(role, [...(positionsByRole.get(role) || []), pos]);
-      });
-
-      const roleNodes = [];
-      positionsByRole.forEach((rolePositions, roleName) => {
-        const forceRoleVisible = forceProjectVisible || (query && roleName.toLowerCase().includes(query));
-        const positionNodes = rolePositions
-          .map((position) => makePositionNode(position, forceRoleVisible))
-          .filter(Boolean);
-
-        if (query && !forceRoleVisible && !positionNodes.length) return;
-
-        roleNodes.push({
-          key: `project-${project.id}-role-${roleName}`,
-          title: roleName,
-          children: positionNodes,
-        });
-      });
-
-      roleNodes.sort((a, b) => a.title.localeCompare(b.title));
-
-      if (query && !forceProjectVisible && !roleNodes.length) return null;
-
-      return {
-        key: `project-${project.id}`,
-        title: `${project.code || ''} ${project.name}`.trim(),
-        children: roleNodes,
-      };
+const buildRoleTree = (roles = [], query = '') => {
+  return roles
+    .filter((role) => {
+      if (!query) return true;
+      const q = query.toLowerCase();
+      return (
+        String(role.name || '').toLowerCase().includes(q) ||
+        String(role.code || '').toLowerCase().includes(q)
+      );
     })
-    .filter(Boolean);
-
-  const unassignedPositions = positions.filter((pos) => !pos.project_id || pos.project_id === 0);
-  const unassignedPositionsByRole = new Map();
-  unassignedPositions.forEach((pos) => {
-    const role = (pos.role_name || 'No Role').trim();
-    unassignedPositionsByRole.set(role, [...(unassignedPositionsByRole.get(role) || []), pos]);
-  });
-
-  const unassignedRoleNodes = [];
-  unassignedPositionsByRole.forEach((rolePositions, roleName) => {
-    const forceRoleVisible = query && roleName.toLowerCase().includes(query);
-    const positionNodes = rolePositions
-      .map((position) => makePositionNode(position, forceRoleVisible))
-      .filter(Boolean);
-
-    if (query && !forceRoleVisible && !positionNodes.length) return;
-
-    unassignedRoleNodes.push({
-      key: `project-unassigned-role-${roleName}`,
-      title: roleName,
-      children: positionNodes,
-    });
-  });
-  unassignedRoleNodes.sort((a, b) => a.title.localeCompare(b.title));
-
-  const unassignedUsers = (usersByPosition.get(0) || [])
-    .filter((user) => !query || userMatches(user, query))
-    .map(userNode);
-
-  const extras = [];
-  if (unassignedRoleNodes.length) {
-    extras.push({
-      key: 'project-unassigned',
-      title: 'No Project',
-      children: unassignedRoleNodes,
-    });
-  }
-  if (unassignedUsers.length) {
-    extras.push({
-      key: 'position-unassigned',
-      title: 'No Position',
-      children: unassignedUsers,
-    });
-  }
-
-  return [...projectNodes, ...extras];
+    .map((role) => ({
+      key: `role-${role.id}`,
+      title: `${role.code ? `[${role.code}] ` : ''}${role.name || ''}`,
+      isLeaf: true,
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title));
 };
 
 const buildItemTree = (categories, items, query = '') => {
@@ -196,10 +105,10 @@ const UserMaterialMapping = () => {
   const { message } = AntApp.useApp();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [data, setData] = useState({ projects: [], positions: [], users: [], categories: [], items: [] });
-  const [userKeys, setUserKeys] = useState([]);
+  const [data, setData] = useState({ roles: [], categories: [], items: [] });
+  const [roleKeys, setRoleKeys] = useState([]);
   const [materialKeys, setMaterialKeys] = useState([]);
-  const [userSearch, setUserSearch] = useState('');
+  const [roleSearch, setRoleSearch] = useState('');
   const [materialSearch, setMaterialSearch] = useState('');
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -224,9 +133,26 @@ const UserMaterialMapping = () => {
     setHistoryLoading(true);
     try {
       const res = await api.get('/masters/user-material-mappings', {
-        params: { page, page_size: 20, search: search || undefined },
+        params: { page, page_size: 1000, search: search || undefined },
       });
-      setHistory(res.data?.items || []);
+      
+      const rawItems = res.data?.items || [];
+      const grouped = new Map();
+      
+      rawItems.forEach((item) => {
+        if (!grouped.has(item.role_id)) {
+          grouped.set(item.role_id, {
+            id: `role-${item.role_id}`,
+            isRoleRow: true,
+            role_name: item.role_name,
+            role_code: item.role_code,
+            children: [],
+          });
+        }
+        grouped.get(item.role_id).children.push(item);
+      });
+      
+      setHistory(Array.from(grouped.values()));
       setHistoryTotal(res.data?.total || 0);
       setHistoryPage(page);
     } catch (err) {
@@ -242,21 +168,21 @@ const UserMaterialMapping = () => {
     form.setFieldsValue({ action: 'view', replace_existing: false });
   }, []);
 
-  const userTree = useMemo(
-    () => buildUserTree(data.projects || [], data.positions || [], data.users || [], userSearch.trim().toLowerCase()),
-    [data.projects, data.positions, data.users, userSearch],
+  const roleTree = useMemo(
+    () => buildRoleTree(data.roles || [], roleSearch.trim()),
+    [data.roles, roleSearch],
   );
   const materialTree = useMemo(
     () => buildItemTree(data.categories || [], data.items || [], materialSearch.trim().toLowerCase()),
     [data.categories, data.items, materialSearch],
   );
-  const selectedUserIds = useMemo(() => idsFromKeys(userKeys, 'user-'), [userKeys]);
+  const selectedRoleIds = useMemo(() => idsFromKeys(roleKeys, 'role-'), [roleKeys]);
   const selectedCategoryIds = useMemo(() => idsFromKeys(materialKeys, 'cat-'), [materialKeys]);
   const selectedItemIds = useMemo(() => idsFromKeys(materialKeys, 'item-'), [materialKeys]);
 
   const handleSave = async () => {
-    if (!selectedUserIds.length) {
-      message.warning('Select at least one user');
+    if (!selectedRoleIds.length) {
+      message.warning('Select at least one role');
       return;
     }
     if (!selectedCategoryIds.length && !selectedItemIds.length) {
@@ -268,12 +194,12 @@ const UserMaterialMapping = () => {
       setSaving(true);
       const res = await api.post('/masters/user-material-mappings/bulk', {
         ...values,
-        user_ids: selectedUserIds,
+        role_ids: selectedRoleIds,
         category_ids: selectedCategoryIds,
         item_ids: selectedItemIds,
       });
-      message.success(res.data?.message || 'User-material mappings saved');
-      setUserKeys([]);
+      message.success(res.data?.message || 'Role-material mappings saved');
+      setRoleKeys([]);
       setMaterialKeys([]);
       loadHistory(1, historySearch);
     } catch (err) {
@@ -286,32 +212,42 @@ const UserMaterialMapping = () => {
 
   const historyColumns = [
     {
-      title: 'User',
-      dataIndex: 'user_name',
-      render: (value, row) => (
-        <Space size={6}>
-          <Text>{row.employee_code || row.username}</Text>
-          <Text type="secondary">{value}</Text>
-        </Space>
-      ),
-    },
-    { title: 'Target Type', dataIndex: 'entity_type', width: 130, render: (value) => (value === 'item_category' ? 'Category' : 'Item') },
-    {
-      title: 'Target',
+      title: 'Role / Target Name',
       dataIndex: 'target_name',
-      render: (value, row) => (
-        <Space size={6}>
-          <Text>{row.target_code || '-'}</Text>
-          <Text type="secondary">{value || '-'}</Text>
-        </Space>
-      ),
+      render: (value, row) => {
+        if (row.isRoleRow) {
+          return (
+            <Space size={6}>
+              <Text strong>{row.role_code ? `[${row.role_code}]` : ''}</Text>
+              <Text type="secondary">{row.role_name}</Text>
+            </Space>
+          );
+        }
+        return (
+          <Space size={6}>
+            <Text>{row.target_code || '-'}</Text>
+            <Text type="secondary">{value || '-'}</Text>
+          </Space>
+        );
+      },
     },
-    { title: 'Permission', dataIndex: 'action', width: 120, render: (value) => <Tag color="blue">{String(value || '').toUpperCase()}</Tag> },
+    { 
+      title: 'Target Type', 
+      dataIndex: 'entity_type', 
+      width: 150, 
+      render: (value, row) => row.isRoleRow ? null : (value === 'item_category' ? 'Category' : 'Item') 
+    },
+    { 
+      title: 'Permission', 
+      dataIndex: 'action', 
+      width: 150, 
+      render: (value, row) => row.isRoleRow ? null : <Tag color="blue">{String(value || '').toUpperCase()}</Tag> 
+    },
   ];
 
   return (
     <div>
-      <PageHeader title="User Material Mapping" subtitle="Map users by project and position to item categories or specific materials">
+      <PageHeader title="Role Material Mapping" subtitle="Map roles to item categories or specific materials">
         <Space>
           <Button icon={<ReloadOutlined />} onClick={loadData} loading={loading}>Refresh</Button>
           <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={saving}>Save Mapping</Button>
@@ -320,12 +256,12 @@ const UserMaterialMapping = () => {
 
       <Spin spinning={loading}>
         <Row gutter={16}>
-          <Col xs={24} lg={8}>
-            <Card title="Projects, Positions & Users" extra={<Button size="small" onClick={() => setUserKeys(collectLeafKeys(userTree, 'user-'))}>Select visible</Button>}>
-              <Input.Search placeholder="Search users" allowClear onChange={(e) => setUserSearch(e.target.value)} style={{ marginBottom: 12 }} />
-              {userTree.length ? (
-                <Tree checkable checkedKeys={userKeys} onCheck={(checked) => setUserKeys(Array.isArray(checked) ? checked : checked.checked)} treeData={userTree} height={520} defaultExpandAll />
-              ) : <Empty description="No linked users" />}
+          <Col xs={24} lg={10}>
+            <Card title="Roles" extra={<Button size="small" onClick={() => setRoleKeys(collectLeafKeys(roleTree, 'role-'))}>Select visible</Button>}>
+              <Input.Search placeholder="Search roles" allowClear onChange={(e) => setRoleSearch(e.target.value)} style={{ marginBottom: 12 }} />
+              {roleTree.length ? (
+                <Tree checkable checkedKeys={roleKeys} onCheck={(checked) => setRoleKeys(Array.isArray(checked) ? checked : checked.checked)} treeData={roleTree} height={750} defaultExpandAll />
+              ) : <Empty description="No active roles found" />}
             </Card>
           </Col>
 
@@ -333,22 +269,22 @@ const UserMaterialMapping = () => {
             <Card title="Item Categories & Materials" extra={<Button size="small" onClick={() => setMaterialKeys(collectLeafKeys(materialTree, 'item-'))}>Select visible items</Button>}>
               <Input.Search placeholder="Search items or categories" allowClear onChange={(e) => setMaterialSearch(e.target.value)} style={{ marginBottom: 12 }} />
               {materialTree.length ? (
-                <Tree checkable checkedKeys={materialKeys} onCheck={(checked) => setMaterialKeys(Array.isArray(checked) ? checked : checked.checked)} treeData={materialTree} height={520} defaultExpandAll />
+                <Tree checkable checkedKeys={materialKeys} onCheck={(checked) => setMaterialKeys(Array.isArray(checked) ? checked : checked.checked)} treeData={materialTree} height={750} defaultExpandAll />
               ) : <Empty description="No items" />}
             </Card>
           </Col>
 
-          <Col xs={24} lg={6}>
+          <Col xs={24} lg={4}>
             <Card title="Mapping Control">
               <Space direction="vertical" style={{ width: '100%' }} size="middle">
                 <Row gutter={8}>
-                  <Col span={12}><Statistic title="Users" value={selectedUserIds.length} /></Col>
+                  <Col span={12}><Statistic title="Roles" value={selectedRoleIds.length} /></Col>
                   <Col span={12}><Statistic title="Targets" value={selectedCategoryIds.length + selectedItemIds.length} /></Col>
                 </Row>
-                <Tag color="blue">{selectedUserIds.length * (selectedCategoryIds.length + selectedItemIds.length)} permissions</Tag>
+                <Tag color="blue">{selectedRoleIds.length * (selectedCategoryIds.length + selectedItemIds.length)} permissions</Tag>
                 <Form form={form} layout="vertical">
                   <Form.Item name="action" label="Permission">
-                    <Select options={[
+                     <Select options={[
                       { label: 'View', value: 'view' },
                       { label: 'Indent', value: 'indent' },
                       { label: 'Consume', value: 'consume' },
@@ -358,10 +294,10 @@ const UserMaterialMapping = () => {
                     />
                   </Form.Item>
                   <Form.Item name="replace_existing" valuePropName="checked">
-                    <Checkbox>Replace existing mappings for selected users and permission</Checkbox>
+                    <Checkbox>Replace existing mappings for selected roles and permission</Checkbox>
                   </Form.Item>
                 </Form>
-                <Checkbox checked={!userKeys.length && !materialKeys.length} onChange={() => { setUserKeys([]); setMaterialKeys([]); }}>
+                <Checkbox checked={!roleKeys.length && !materialKeys.length} onChange={() => { setRoleKeys([]); setMaterialKeys([]); }}>
                   Clear selection
                 </Checkbox>
               </Space>
@@ -398,7 +334,7 @@ const UserMaterialMapping = () => {
             pagination={{
               current: historyPage,
               total: historyTotal,
-              pageSize: 20,
+              pageSize: 1000,
               showSizeChanger: false,
               onChange: (page) => loadHistory(page, historySearch),
             }}

@@ -31,13 +31,13 @@ const MODULES = [
   { id: 'procurement', name: 'Procurement',     desc: 'Material requests, POs, quotations',  icon: <ShoppingCartOutlined />,     color: '#D80048', bg: '#FDE6EC', path: '/procurement/material-requests', countKey: 'procurement_open' },
   { id: 'warehouse',   name: 'Warehouse',       desc: 'GRN, quality, putaway, issues',       icon: <HomeOutlined />,             color: '#F09000', bg: '#FFEAD2', path: '/warehouse/grn' },
   { id: 'inventory',   name: 'Inventory',       desc: 'Stock, transfers, audit, replenish',  icon: <InboxOutlined />,            color: '#900078', bg: '#F7E3F2', path: '/inventory/stock-balance' },
-  { id: 'logistics',   name: 'Logistics',       desc: 'Transport, fleet, shipments',         icon: <CarOutlined />,              color: '#F09000', bg: '#FFEAD2', path: '/logistics/transport-requirements' },
   { id: 'indent',      name: 'Indent',          desc: 'Field indents & acknowledgement',     icon: <FileTextOutlined />,         color: '#481890', bg: '#EEE6F7', path: '/indent/indents' },
   { id: 'consumption', name: 'Consumption',     desc: 'Issue tracking & reports',            icon: <AuditOutlined />,            color: '#D80048', bg: '#FDE6EC', path: '/consumption/entry' },
   { id: 'approvals',   name: 'Approvals',       desc: 'Pending workflows',                   icon: <CheckSquareOutlined />,      color: '#900078', bg: '#F7E3F2', path: '/approvals/pending', countKey: 'pending_approvals' },
   { id: 'accounts',    name: 'Accounts',        desc: 'Invoices, payments, ledger',          icon: <DollarOutlined />,           color: '#F09000', bg: '#FFEAD2', path: '/accounts/invoices' },
   { id: 'assets',      name: 'Assets',          desc: 'Register & movement',                 icon: <SafetyCertificateOutlined />,color: '#2E7D52', bg: '#E6F4EC', path: '/assets/register' },
   { id: 'healthcare',  name: 'Healthcare SCM',  desc: 'MMU kits, 108 fleet, programs',       icon: <HeartOutlined />,            color: '#D80048', bg: '#FDE6EC', path: '/healthcare' },
+  { id: 'logistics',   name: 'Logistics',       desc: 'B2B dispatches, RFQs & Service Orders',icon: <CarOutlined />,              color: '#096dd9', bg: '#E6F7FF', path: '/logistics/dashboard' },
   { id: 'reports',     name: 'Reports',         desc: 'Pivot, graph, exports',               icon: <BarChartOutlined />,         color: '#481890', bg: '#EEE6F7', path: '/reports' },
   { id: 'settings',    name: 'Settings',        desc: 'Users, roles, system',                icon: <SettingOutlined />,          color: '#7A6D66', bg: '#F4EEEA', path: '/settings/profile' },
   { id: 'lms',         name: 'Learning Center', desc: 'Tutorials for your role',             icon: <PlayCircleOutlined />,       color: '#2E7D52', bg: '#E6F4EC', path: '/lms', alwaysShow: true },
@@ -50,13 +50,13 @@ const PERM_MAP = {
   procurement: 'procurement',
   warehouse: 'warehouse',
   inventory: 'inventory',
-  logistics: 'logistics',
   indent: 'indent',
   consumption: 'consumption',
   approvals: 'approvals',
   accounts: 'accounts',
   assets: 'assets',
   healthcare: 'healthcare',
+  logistics: 'logistics',
   reports: 'reports',
   settings: 'settings',
   // BUG-FE-097: keep PERM_MAP exhaustive so a future tweak to `alwaysShow`
@@ -167,10 +167,10 @@ const AppLauncher = () => {
   // gating. Field staff / field supervisors see Dashboard, Indent,
   // Consumption, Inventory (Stock Balance), LMS, and (if they have the
   // approve perm) Approvals. They must NOT see Masters, Procurement,
-  // Warehouse, Logistics, Accounts, Assets, Reports, Healthcare —
+  // Warehouse, Accounts, Assets, Reports, Healthcare —
   // those are management/setup areas that just confuse field users.
   const FIELD_HIDE_TILES = new Set([
-    'masters', 'procurement', 'warehouse', 'logistics',
+    'masters', 'procurement', 'warehouse',
     'accounts', 'assets', 'reports', 'healthcare',
   ]);
   const FIELD_ROLE_CODES = new Set([
@@ -182,7 +182,7 @@ const AppLauncher = () => {
   );
   const MANAGER_ROLE_CODES = new Set([
     'super_admin','admin','procurement_manager','store_manager',
-    'warehouse_manager','inventory_manager','logistics_manager',
+    'warehouse_manager','inventory_manager',
     'accounts_manager','finance_manager','compliance_manager',
     'project_manager','manager','pharmacy_manager','qa_manager',
   ]);

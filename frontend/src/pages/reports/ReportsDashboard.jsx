@@ -63,16 +63,6 @@ const reportCategories = [
     count: 6,
   },
   {
-    key: 'logistics',
-    title: 'Logistics Reports',
-    description: 'Transport requirements, fleet utilization, delivery performance, cost analysis',
-    icon: <CarOutlined style={{ fontSize: 36, color: '#eb2f96' }} />,
-    color: '#fff0f6',
-    borderColor: '#eb2f96',
-    path: '/reports/logistics',
-    count: 7,
-  },
-  {
     key: 'system',
     title: 'System Reports',
     description: 'Activity logs, audit trail, system mails, API usage, pending valuations',
@@ -90,7 +80,6 @@ const quickLinks = [
   { label: 'Consumption Summary', path: '/reports/consumption', icon: <BarChartOutlined /> },
   { label: 'Invoice Details', path: '/reports/sales', icon: <LineChartOutlined /> },
   { label: 'Activity Logs', path: '/reports/system', icon: <AuditOutlined /> },
-  { label: 'Transport Cost', path: '/reports/logistics', icon: <CarOutlined /> },
 ];
 
 const ReportsDashboard = () => {

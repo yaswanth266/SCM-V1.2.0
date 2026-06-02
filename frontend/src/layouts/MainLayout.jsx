@@ -87,7 +87,6 @@ const _FIELD_HIDE_PARENT_KEYS = new Set([
   'masters',
   'procurement',
   'warehouse',
-  'logistics',
   'accounts',
   'assets',
   'reports',
@@ -134,8 +133,7 @@ const _ADMIN_ONLY_CHILD_KEYS = new Set([
 // Add new keys here when reports show field-staff users seeing
 // manager-only sub-pages.
 const _MANAGER_ONLY_CHILD_KEYS = new Set([
-  // Inventory: field staff sees Stock Balance only.
-  'inventory-stock-ledger',
+  // Inventory: field staff can access Stock Balance and Stock Ledger (scoped to their warehouses).
   'inventory-stock-transfer',
   'inventory-stock-audit',
   'inventory-replenishment',
@@ -148,9 +146,6 @@ const _MANAGER_ONLY_CHILD_KEYS = new Set([
   // and POs are manager-grade.
   'procurement-quotations',
   'procurement-purchase-orders',
-  // Logistics: vendor quotations + fleet dashboard are manager-grade.
-  'logistics-vendor-quotations',
-  'logistics-fleet-dashboard',
   // Accounts: full module is manager-grade. Children below + the
   // module-level perm check handle visibility.
   'accounts-invoices',
@@ -180,7 +175,6 @@ const _MANAGER_ROLE_CODES = new Set([
   'store_manager',
   'warehouse_manager',
   'inventory_manager',
-  'logistics_manager',
   'accounts_manager',
   'finance_manager',
   'compliance_manager',

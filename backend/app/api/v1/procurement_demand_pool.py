@@ -55,17 +55,27 @@ async def list_demand_pool(
         "warehouse_manager",
     )),
 ):
-    """List approved indent line items not yet linked to any MR, grouped by
-    (warehouse_id, item_id, uom_id) so the consolidator can see total demand
-    per item per warehouse."""
-    # Pull approved indents
+    """List indent line items with outstanding unacknowledged demand, grouped by
+    (warehouse_id, item_id, uom_id).
+
+    An indent line stays in the pool until the raiser fully acknowledges receipt
+    (acknowledged_qty >= approved_qty). Partially-acknowledged lines remain but
+    show the remaining outstanding qty so the warehouse manager knows what is
+    still outstanding.
+
+    Status meanings per source indent entry:
+      • pending            — approved, not yet consolidated into MR / issued
+      • issued             — material issued, awaiting acknowledgement
+      • partially_acked    — some qty acknowledged, remainder outstanding
+    """
+    # Pull approved AND partially_fulfilled indents (both have outstanding demand)
     q = (
         select(Indent)
         .options(
             selectinload(Indent.items).selectinload(IndentItem.item),
             selectinload(Indent.warehouse),
         )
-        .where(Indent.status == "approved")
+        .where(Indent.status.in_(["approved", "partially_fulfilled"]))
     )
     if warehouse_id:
         q = q.where(Indent.warehouse_id == warehouse_id)
@@ -84,13 +94,31 @@ async def list_demand_pool(
     ).all()
     legacy_indent_ids = {r[0] for r in legacy_rows if r[0] is not None}
 
+    # ------------------------------------------------------------------
+    # Load acknowledged qty per indent_item across ALL past ack events
+    # ------------------------------------------------------------------
+    from app.models.indent import IndentAcknowledgementItem as _IAI
+    all_indent_item_ids = [
+        it.id
+        for ind in indents
+        for it in (ind.items or [])
+    ]
+    ack_map: dict[int, float] = {}  # indent_item_id → total acknowledged qty
+    if all_indent_item_ids:
+        ack_rows = (await db.execute(
+            select(_IAI.indent_item_id, func.sum(_IAI.received_qty).label("total_acked"))
+            .where(_IAI.indent_item_id.in_(all_indent_item_ids))
+            .group_by(_IAI.indent_item_id)
+        )).all()
+        ack_map = {r[0]: float(r[1] or 0) for r in ack_rows}
+
     # Group by (warehouse_id, item_id, uom_id)
     Bucket = lambda: {
         "warehouse_id": None, "warehouse_name": None,
         "item_id": None, "item_code": None, "item_name": None,
         "uom_id": None, "uom_name": None,
         "total_qty": 0.0, "indent_count": 0,
-        "sources": [],   # [{indent_id, indent_number, indent_item_id, qty, raised_by_name, required_date}]
+        "sources": [],   # [{indent_id, indent_number, indent_item_id, qty, issued_qty, acknowledged_qty, remaining_qty, ident_status, required_date}]
     }
     buckets = defaultdict(Bucket)
 
@@ -105,18 +133,35 @@ async def list_demand_pool(
         if ind.warehouse_id is None:
             continue
         for it in (ind.items or []):
-            if it.id in linked_ids:
-                continue
             # BUG-PRO-065 fix: an *explicit* approved_qty=0 means the approver
             # rejected the line — do NOT silently fall back to requested_qty.
             # Use approved_qty when it's set (even to 0); fall back only when
             # approved_qty is truly None.
             if it.approved_qty is not None:
-                qty = float(it.approved_qty)
+                approved_qty = float(it.approved_qty)
             else:
-                qty = float(it.requested_qty or 0)
-            if qty <= 0:
+                approved_qty = float(it.requested_qty or 0)
+            if approved_qty <= 0:
                 continue
+
+            issued_qty = float(it.issued_qty or 0)
+            acknowledged_qty = ack_map.get(it.id, 0.0)
+            remaining_qty = max(0.0, approved_qty - acknowledged_qty)
+
+            # Skip lines that are already fully acknowledged — they are done
+            if remaining_qty <= 0:
+                continue
+
+            # Determine per-line status for the UI
+            if acknowledged_qty > 0:
+                ident_status = "partially_acked"
+            elif issued_qty > 0:
+                ident_status = "issued"
+            elif it.id in linked_ids:
+                ident_status = "in_mr"
+            else:
+                ident_status = "pending"
+
             key = (ind.warehouse_id, it.item_id, it.uom_id)
             b = buckets[key]
             b["warehouse_id"] = ind.warehouse_id
@@ -125,14 +170,18 @@ async def list_demand_pool(
             b["item_code"] = it.item.item_code if it.item else None
             b["item_name"] = it.item.name if it.item else None
             b["uom_id"] = it.uom_id
-            # uom name fetched lazily; cheap enough
-            b["total_qty"] += qty
+            # Use remaining (unacknowledged) qty as the demand figure
+            b["total_qty"] += remaining_qty
             b["indent_count"] += 1
             b["sources"].append({
                 "indent_id": ind.id,
                 "indent_number": ind.indent_number,
                 "indent_item_id": it.id,
-                "qty": qty,
+                "qty": approved_qty,
+                "issued_qty": issued_qty,
+                "acknowledged_qty": acknowledged_qty,
+                "remaining_qty": remaining_qty,
+                "ident_status": ident_status,
                 "required_date": ind.required_date.isoformat() if ind.required_date else None,
             })
 
@@ -152,14 +201,26 @@ async def list_demand_pool(
     from app.models.warehouse import Warehouse as _Wh
     from app.models.stock import StockBalance
     real_main_id = None
+    # Prioritize the designated primary 'CENTRAL' depot first
     real_row = await db.execute(
         select(_Wh.id)
-        .where(_Wh.type.in_(("main", "regional")))
+        .where(_Wh.type == "main")
+        .where(_Wh.name == "CENTRAL")
         .where(_Wh.is_active == True)
-        .order_by(_Wh.id.asc())
         .limit(1)
     )
     real_main_id = real_row.scalar()
+    
+    if not real_main_id:
+        # Fallback to other main/regional warehouses ordered by ID descending
+        real_row = await db.execute(
+            select(_Wh.id)
+            .where(_Wh.type.in_(("main", "regional")))
+            .where(_Wh.is_active == True)
+            .order_by(_Wh.id.desc())
+            .limit(1)
+        )
+        real_main_id = real_row.scalar()
 
     item_ids = {b["item_id"] for b in buckets.values() if b["item_id"]}
     stock_map: dict[tuple[int, int], float] = {}
@@ -178,13 +239,9 @@ async def list_demand_pool(
             stock_map[(it_id, wh_id)] = float(qty or 0)
 
     for b in buckets.values():
-        # effective source warehouse: vehicle dest → CENTRAL; real dest → itself
-        dest_wh = b["warehouse_id"]
-        # we don't reload Warehouse here — assume the cheap path: if dest_wh
-        # has any stock for this item, use it; otherwise fall back to real_main_id
-        eff_wh = dest_wh
-        if (b["item_id"], dest_wh) not in stock_map and real_main_id:
-            eff_wh = real_main_id
+        # The Source warehouse is ALWAYS the main/regional hub warehouse (CENTRAL)
+        # where materials are actually issued from to fulfill indents.
+        eff_wh = real_main_id if real_main_id else dest_wh
         avail = stock_map.get((b["item_id"], eff_wh), 0.0)
         b["available_qty"] = avail
         b["stock_at_warehouse_id"] = eff_wh
@@ -456,33 +513,11 @@ async def consolidate_indents_to_mr(
             "source_indent_count": len(source_numbers),
         })
 
-    # BUG-PRO-068 fix: flip indent status off "approved" once all of its items
-    # have been consolidated, so the indent does not keep showing up in the
-    # demand pool / approved-indent worklists. We use the existing enum values
-    # ("partially_fulfilled" / "fulfilled") since adding a new "pooled" value
-    # would require a DB enum migration (DEFERRED).
-    try:
-        # Recompute coverage per indent: total items vs. items now linked.
-        for ind in indents:
-            ind_item_ids = [it.id for it in (ind.items or [])]
-            if not ind_item_ids:
-                continue
-            linked_count = (await db.execute(
-                select(func.count(MrIndentLink.id))
-                .where(MrIndentLink.indent_item_id.in_(ind_item_ids))
-            )).scalar() or 0
-            if linked_count >= len(ind_item_ids):
-                ind.status = "fulfilled"
-            elif linked_count > 0:
-                ind.status = "partially_fulfilled"
-        await db.flush()
-    except Exception:
-        # Status update is best-effort. Log but don't abort the consolidation —
-        # the MRs are already persisted and traceable via mr_indent_links.
-        import logging as _logging
-        _logging.getLogger(__name__).exception(
-            "Failed to update indent status post-consolidation"
-        )
+    # NOTE: We intentionally do NOT change indent.status after consolidation.
+    # An indent remains "approved" until material is actually issued (at which
+    # point warehouse.py sets it to "partially_fulfilled").  The demand pool
+    # shows consolidated items with ident_status = "in_mr" based on the presence
+    # of MrIndentLink rows — no status flip needed here.
 
     return {
         "success": True,

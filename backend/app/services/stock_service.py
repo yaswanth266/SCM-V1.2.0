@@ -197,13 +197,13 @@ async def post_stock_ledger(
     db.add(ledger)
 
     # Update balance
-    # BUG-INV-041: re-read reserved_qty / committed_qty from the locked row
+    # BUG-INV-041: re-read reserved_qty / transit_qty from the locked row
     # immediately before computing available_qty so we don't use a value that
     # was mutated by another path in the same transaction (the ORM in-memory
     # attributes can lag a flushed update done elsewhere).
-    await db.refresh(balance, attribute_names=["reserved_qty", "committed_qty"])
+    await db.refresh(balance, attribute_names=["reserved_qty", "transit_qty"])
     balance.total_qty = new_qty
-    balance.available_qty = new_qty - (balance.reserved_qty or Decimal("0")) - (balance.committed_qty or Decimal("0"))
+    balance.available_qty = new_qty - (balance.reserved_qty or Decimal("0"))
     balance.stock_value = new_value
     # BUG-INV-039: quantize valuation_rate to 4 decimal places. Without this,
     # repeated inbound/outbound posts compound floating-point-like precision drift
@@ -334,7 +334,7 @@ async def _get_or_create_balance(
         batch_id=batch_id,
         available_qty=Decimal("0"),
         reserved_qty=Decimal("0"),
-        committed_qty=Decimal("0"),
+        transit_qty=Decimal("0"),
         total_qty=Decimal("0"),
         valuation_rate=Decimal("0"),
         stock_value=Decimal("0"),

@@ -1,24 +1,34 @@
 import React, { useEffect, useState } from 'react';
 import { usePackagingApi } from './usePackagingApi';
 import api from '../../config/api';
-import { Button, Input, Select, Card, Spin, Typography } from 'antd';
-import { DeleteOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons';
+import {
+    Button,
+    Input,
+    Select,
+    Card,
+    Spin,
+    Typography,
+    Drawer,
+    Form,
+    InputNumber,
+    Space,
+    Popconfirm,
+    List,
+    Divider
+} from 'antd';
+import {
+    DeleteOutlined,
+    PlusOutlined,
+    SaveOutlined,
+    SettingOutlined
+} from '@ant-design/icons';
 
 const { Title, Text } = Typography;
 
-export const ItemPackagingConfig = ({ itemId, itemName, baseUOM }) => {
-    const { fetchHierarchy, saveHierarchy, fetchLevels } = usePackagingApi();
+export const ItemPackagingConfig = ({ itemId, itemName, baseUOM, availableLevels }) => {
+    const { fetchHierarchy, saveHierarchy } = usePackagingApi();
     const [loading, setLoading] = useState(false);
-    const [availableLevels, setAvailableLevels] = useState([]);
     const [packagings, setPackagings] = useState([]);
-
-    useEffect(() => {
-        const loadLevels = async () => {
-            const levels = await fetchLevels();
-            setAvailableLevels(levels);
-        };
-        loadLevels();
-    }, []);
 
     useEffect(() => {
         const loadData = async () => {
@@ -35,8 +45,8 @@ export const ItemPackagingConfig = ({ itemId, itemName, baseUOM }) => {
 
     // Real-time client-side Debounced/Cascading UI state computation
     useEffect(() => {
-        if (availableLevels.length === 0 || packagings.length === 0) return;
-        
+        if (!availableLevels || availableLevels.length === 0 || packagings.length === 0) return;
+
         let updated = false;
         const newPackagings = [...packagings];
 
@@ -57,7 +67,7 @@ export const ItemPackagingConfig = ({ itemId, itemName, baseUOM }) => {
                 if (parentPack) {
                     const expectedBaseQty = (parentPack.total_base_qty || 1) * (pack.qty_per_parent || 1);
                     const expectedSku = `${parentPack.sku_name} * ${pack.qty_per_parent || 1} ${levelName}`;
-                    
+
                     if (pack.total_base_qty !== expectedBaseQty || pack.sku_name !== expectedSku) {
                         newPackagings[index] = { ...pack, total_base_qty: expectedBaseQty, sku_name: expectedSku };
                         updated = true;
@@ -78,6 +88,7 @@ export const ItemPackagingConfig = ({ itemId, itemName, baseUOM }) => {
     };
 
     const addLevel = () => {
+        if (!availableLevels || availableLevels.length === 0) return;
         const nextLevel = availableLevels.find(l => !packagings.some(p => String(p.level_id) === String(l.id)));
         setPackagings([
             ...packagings,
@@ -97,7 +108,7 @@ export const ItemPackagingConfig = ({ itemId, itemName, baseUOM }) => {
             const payload = packagings.map((p, idx, arr) => ({
                 id: p.id || null,
                 level_id: parseInt(p.level_id),
-                parent_id: idx > 0 ? arr[idx-1].id || null : null, 
+                parent_id: idx > 0 ? arr[idx - 1].id || null : null,
                 qty_per_parent: parseInt(p.qty_per_parent),
                 sku_code: p.sku_code || null
             }));
@@ -120,7 +131,7 @@ export const ItemPackagingConfig = ({ itemId, itemName, baseUOM }) => {
                     <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', marginBottom: '16px' }}>
                         <thead>
                             <tr style={{ borderBottom: '1px solid #e5e7eb' }}>
-                                <th style={{ padding: '12px' }}>Level</th>
+                                <th style={{ padding: '12px' }}>Container Type</th>
                                 <th style={{ padding: '12px' }}>Qty per Parent</th>
                                 <th style={{ padding: '12px' }}>SKU Code</th>
                                 <th style={{ padding: '12px' }}>Total Base Qty</th>
@@ -132,13 +143,13 @@ export const ItemPackagingConfig = ({ itemId, itemName, baseUOM }) => {
                             {packagings.map((pack, index) => (
                                 <tr key={index} style={{ borderBottom: '1px solid #e5e7eb' }}>
                                     <td style={{ padding: '12px' }}>
-                                        <select 
+                                        <select
                                             value={pack.level_id}
                                             onChange={(e) => handleFieldChange(index, 'level_id', e.target.value)}
                                             style={{ padding: '6px 12px', borderRadius: '4px', border: '1px solid #d9d9d9', width: '100%', background: '#fff' }}
                                         >
-                                            <option value="">Select Level...</option>
-                                            {availableLevels
+                                            <option value="">Select Container Type...</option>
+                                            {(availableLevels || [])
                                                 .filter(l => {
                                                     if (String(l.id) === String(pack.level_id)) return true;
                                                     return !packagings.some((p, idx) => idx !== index && String(p.level_id) === String(l.id));
@@ -150,15 +161,15 @@ export const ItemPackagingConfig = ({ itemId, itemName, baseUOM }) => {
                                         </select>
                                     </td>
                                     <td style={{ padding: '12px' }}>
-                                        <Input 
-                                            type="number" 
+                                        <Input
+                                            type="number"
                                             value={pack.qty_per_parent}
-                                            onChange={e => handleFieldChange(index, 'qty_per_parent', parseInt(e.target.value) || 0)} 
-                                            style={{ width: '100px' }} 
+                                            onChange={e => handleFieldChange(index, 'qty_per_parent', parseInt(e.target.value) || 0)}
+                                            style={{ width: '100px' }}
                                         />
                                     </td>
                                     <td style={{ padding: '12px' }}>
-                                        <Input 
+                                        <Input
                                             value={pack.sku_code || ''}
                                             onChange={e => handleFieldChange(index, 'sku_code', e.target.value)}
                                         />
@@ -174,11 +185,11 @@ export const ItemPackagingConfig = ({ itemId, itemName, baseUOM }) => {
                                         </div>
                                     </td>
                                     <td style={{ padding: '12px' }}>
-                                        <Button 
-                                            type="primary" 
-                                            danger 
-                                            icon={<DeleteOutlined />} 
-                                            onClick={() => removeLevel(index)} 
+                                        <Button
+                                            type="primary"
+                                            danger
+                                            icon={<DeleteOutlined />}
+                                            onClick={() => removeLevel(index)}
                                         />
                                     </td>
                                 </tr>
@@ -186,17 +197,17 @@ export const ItemPackagingConfig = ({ itemId, itemName, baseUOM }) => {
                         </tbody>
                     </table>
                 </div>
-                
+
                 <div style={{ display: 'flex', gap: '16px', marginTop: '16px' }}>
                     <Button icon={<PlusOutlined />} onClick={addLevel}>
-                        Add Level
+                        Add Container
                     </Button>
                     <Button type="primary" icon={<SaveOutlined />} onClick={onSubmit} loading={loading}>
                         Save Hierarchy
                     </Button>
                 </div>
             </div>
-            
+
             <Card style={{ marginTop: '32px', backgroundColor: '#111827', color: '#fff' }} variant="borderless">
                 <h3 style={{ marginBottom: '8px', color: '#9ca3af', fontWeight: 'bold', textTransform: 'uppercase', fontSize: '12px', letterSpacing: '0.05em' }}>
                     Hierarchy Preview
@@ -205,7 +216,7 @@ export const ItemPackagingConfig = ({ itemId, itemName, baseUOM }) => {
                     <div key={i} style={{ paddingLeft: `${i * 20}px`, padding: '4px 0 4px ' + (i * 20) + 'px' }}>
                         └─ 📦 <span style={{ color: '#93c5fd', fontWeight: 'bold' }}>
                             {availableLevels.find(l => String(l.id) === String(p.level_id))?.level_name}
-                        </span> ({p.qty_per_parent}) 
+                        </span> ({p.qty_per_parent})
                         <span style={{ color: '#6b7280', marginLeft: '16px' }}>↳ Base Items: {p.total_base_qty}</span>
                     </div>
                 )).reverse()}
@@ -215,15 +226,27 @@ export const ItemPackagingConfig = ({ itemId, itemName, baseUOM }) => {
 };
 
 export default function PackagingHierarchyPage() {
+    const { fetchLevels, createLevel, deleteLevel } = usePackagingApi();
     const [selectedItem, setSelectedItem] = useState(null);
     const [items, setItems] = useState([]);
-    
+    const [availableLevels, setAvailableLevels] = useState([]);
+    const [drawerVisible, setDrawerVisible] = useState(false);
+    const [form] = Form.useForm();
+    const [drawerLoading, setDrawerLoading] = useState(false);
+
+    const loadLevels = async () => {
+        const levels = await fetchLevels();
+        setAvailableLevels(levels);
+    };
+
+    useEffect(() => {
+        loadLevels();
+    }, []);
+
     useEffect(() => {
         const fetchItems = async () => {
             try {
                 const response = await api.get('/masters/items?page_size=10000');
-                // The axios response.data contains the body. 
-                // masters list endpoint returns paginated response: { items: [...] } or flat list.
                 const data = response.data;
                 setItems(data.items || data || []);
             } catch (err) {
@@ -233,13 +256,62 @@ export default function PackagingHierarchyPage() {
         fetchItems();
     }, []);
 
+    const handleCreateLevel = async (values) => {
+        setDrawerLoading(true);
+        try {
+            await createLevel(values);
+            form.resetFields();
+            // Automatically pre-populate next order
+            const nextOrder = values.level_order + 1;
+            form.setFieldsValue({ level_order: nextOrder });
+            await loadLevels();
+        } catch (err) {
+            // Error notification is already handled in hook (message.error)
+        } finally {
+            setDrawerLoading(false);
+        }
+    };
+
+    const handleDeleteLevel = async (levelId) => {
+        setDrawerLoading(true);
+        try {
+            await deleteLevel(levelId);
+            await loadLevels();
+        } catch (err) {
+            // Error is handled in hook
+        } finally {
+            setDrawerLoading(false);
+        }
+    };
+
+    const openDrawer = () => {
+        const maxOrder = availableLevels.reduce((max, lvl) => lvl.level_order > max ? lvl.level_order : max, 0);
+        form.setFieldsValue({
+            level_name: '',
+            level_order: maxOrder + 1
+        });
+        setDrawerVisible(true);
+    };
+
     return (
-        <Card title="Packaging Hierarchy Configuration" style={{ margin: '24px' }}>
+        <Card
+            title="Packaging Hierarchy Configuration"
+            style={{ margin: '24px' }}
+            extra={
+                <Button
+                    type="primary"
+                    icon={<SettingOutlined />}
+                    onClick={openDrawer}
+                >
+                    Manage Container Type
+                </Button>
+            }
+        >
             <div style={{ marginBottom: '24px' }}>
                 <Typography.Text strong style={{ display: 'block', marginBottom: '8px' }}>
                     Select Item
                 </Typography.Text>
-                <Select 
+                <Select
                     showSearch
                     placeholder="Search and select an item by name or code..."
                     optionFilterProp="label"
@@ -260,10 +332,11 @@ export default function PackagingHierarchyPage() {
 
             {selectedItem ? (
                 <div style={{ marginTop: '24px', paddingTop: '24px', borderTop: '1px solid #f0f0f0' }}>
-                    <ItemPackagingConfig 
-                        itemId={selectedItem.id} 
-                        itemName={selectedItem.name || selectedItem.item_name} 
-                        baseUOM={selectedItem.primary_uom?.name || selectedItem.uom_name || 'Unit'} 
+                    <ItemPackagingConfig
+                        itemId={selectedItem.id}
+                        itemName={selectedItem.name || selectedItem.item_name}
+                        baseUOM={selectedItem.primary_uom?.name || selectedItem.uom_name || 'Unit'}
+                        availableLevels={availableLevels}
                     />
                 </div>
             ) : (
@@ -271,6 +344,107 @@ export default function PackagingHierarchyPage() {
                     Please select an item to configure its packaging hierarchy.
                 </div>
             )}
+
+            <Drawer
+                title="Manage Container Type"
+                width={450}
+                onClose={() => setDrawerVisible(false)}
+                open={drawerVisible}
+            >
+                <List
+                    loading={drawerLoading}
+                    dataSource={availableLevels}
+                    renderItem={(item) => (
+                        <List.Item
+                            key={item.id}
+                            actions={[
+                                <Popconfirm
+                                    title="Delete Container Type"
+                                    description={`Are you sure you want to delete "${item.level_name}"?`}
+                                    onConfirm={() => handleDeleteLevel(item.id)}
+                                    okText="Yes"
+                                    cancelText="No"
+                                    placement="left"
+                                >
+                                    <Button
+                                        type="text"
+                                        danger
+                                        icon={<DeleteOutlined />}
+                                    />
+                                </Popconfirm>
+                            ]}
+                            style={{
+                                padding: '12px 16px',
+                                borderRadius: '8px',
+                                marginBottom: '8px',
+                                border: '1px solid #f0f0f0',
+                                background: '#fafafa',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                            }}
+                        >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <div style={{
+                                    width: '28px',
+                                    height: '28px',
+                                    borderRadius: '50%',
+                                    backgroundColor: '#e6f4ff',
+                                    color: '#0958d9',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontWeight: 'bold',
+                                    fontSize: '14px'
+                                }}>
+                                    {item.level_order}
+                                </div>
+                                <div>
+                                    <Typography.Text strong style={{ fontSize: '15px' }}>{item.level_name}</Typography.Text>
+                                </div>
+                            </div>
+                        </List.Item>
+                    )}
+                />
+
+                <Divider orientation="left" style={{ margin: '24px 0 16px 0' }}>Add New Container Type</Divider>
+
+                <Form
+                    form={form}
+                    layout="vertical"
+                    onFinish={handleCreateLevel}
+                    autoComplete="off"
+                    requiredMark="optional"
+                >
+                    <Form.Item
+                        name="level_name"
+                        label="Container Type Name"
+                        rules={[
+                            { required: true, message: 'Please enter container type name' },
+                            { whitespace: true, message: 'Container type name cannot be empty spaces' }
+                        ]}
+                    >
+                        <Input placeholder="e.g. Case, Pallet, Box" maxLength={50} />
+                    </Form.Item>
+
+                    <Form.Item
+                        name="level_order"
+                        label="Container Type Order"
+                        tooltip="Lower numbers represent base container types (e.g. Unit = 1, Strip = 2)"
+                        rules={[
+                            { required: true, message: 'Please enter container type order' }
+                        ]}
+                    >
+                        <InputNumber min={1} max={100} style={{ width: '100%' }} />
+                    </Form.Item>
+
+                    <Form.Item style={{ marginTop: '24px', marginBottom: 0 }}>
+                        <Button type="primary" htmlType="submit" block loading={drawerLoading} icon={<PlusOutlined />}>
+                            Add Container Type
+                        </Button>
+                    </Form.Item>
+                </Form>
+            </Drawer>
         </Card>
     );
 }

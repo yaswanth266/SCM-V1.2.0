@@ -3549,3 +3549,84 @@ body {
   margin-top: 6px;
   color: #7A6D66;
 }
+
+/* =========================================================================
+   Aesthetic Message Alerts Override
+   Transforms flat AntD floating toasts into premium glassmorphic cards
+   with glowing left-borders and elegant typography.
+   ========================================================================= */
+
+.ant-message {
+  z-index: 10010 !important;
+}
+
+.ant-message-notice-content {
+  background: rgba(255, 255, 255, 0.85) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+  border: 1px solid rgba(255, 255, 255, 0.5) !important;
+  border-radius: 16px !important;
+  padding: 12px 24px !important;
+  box-shadow: 
+    0 16px 36px -8px rgba(27, 28, 28, 0.12), 
+    0 8px 16px -4px rgba(27, 28, 28, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.ant-message-custom-content {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  font-family: var(--bavya-body), 'Inter', sans-serif !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: #1a1220 !important;
+}
+
+.ant-message-custom-content .anticon {
+  font-size: 18px !important;
+  margin-top: 1px !important;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.05)) !important;
+}
+
+/* Success Message Toast */
+.ant-message-notice-content:has(.ant-message-success),
+.ant-message-notice-content .ant-message-success {
+  border-left: 4px solid #10b981 !important;
+}
+.ant-message-notice-content:has(.ant-message-success) {
+  background: rgba(240, 253, 250, 0.88) !important;
+  border-color: rgba(16, 185, 129, 0.18) !important;
+}
+
+/* Error Message Toast */
+.ant-message-notice-content:has(.ant-message-error),
+.ant-message-notice-content .ant-message-error {
+  border-left: 4px solid #ef4444 !important;
+}
+.ant-message-notice-content:has(.ant-message-error) {
+  background: rgba(255, 241, 242, 0.88) !important;
+  border-color: rgba(239, 68, 68, 0.18) !important;
+}
+
+/* Warning Message Toast */
+.ant-message-notice-content:has(.ant-message-warning),
+.ant-message-notice-content .ant-message-warning {
+  border-left: 4px solid #f59e0b !important;
+}
+.ant-message-notice-content:has(.ant-message-warning) {
+  background: rgba(254, 243, 199, 0.88) !important;
+  border-color: rgba(245, 158, 11, 0.18) !important;
+}
+
+/* Info Message Toast */
+.ant-message-notice-content:has(.ant-message-info),
+.ant-message-notice-content .ant-message-info {
+  border-left: 4px solid #3b82f6 !important;
+}
+.ant-message-notice-content:has(.ant-message-info) {
+  background: rgba(239, 246, 255, 0.88) !important;
+  border-color: rgba(59, 130, 246, 0.18) !important;
+}
+

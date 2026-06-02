@@ -17,6 +17,7 @@ import ItemSelector from '../../components/ItemSelector';
 import api from '../../config/api';
 import {
   formatDate, formatCurrency, getErrorMessage, formatDateForAPI,
+  handleFormValidationFailed,
 } from '../../utils/helpers';
 import { DATE_FORMAT } from '../../utils/constants';
 
@@ -187,12 +188,35 @@ const IndentForm = () => {
       const validItems = indentItems.filter((item) => item.item_id);
       if (validItems.length === 0) {
         message.error('Please add at least one item');
+        const tbl = document.querySelector('.ant-table');
+        if (tbl) {
+          tbl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          tbl.style.border = '1.5px dashed #FF4D4F';
+          tbl.style.backgroundColor = '#FFF2F0';
+          setTimeout(() => {
+            tbl.style.border = '';
+            tbl.style.backgroundColor = '';
+          }, 3000);
+        }
         return;
       }
       // Validate each item has required fields
       for (const item of validItems) {
         if (!item.requested_qty || item.requested_qty <= 0) {
           message.error('Each item must have a requested quantity greater than 0');
+          const rowInputs = document.querySelectorAll('.ant-input-number');
+          rowInputs.forEach((inp) => {
+            const val = parseFloat(inp.querySelector('input')?.value || '0');
+            if (val <= 0 || isNaN(val)) {
+              inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              inp.style.border = '1.5px solid #FF4D4F';
+              inp.style.backgroundColor = '#FFF2F0';
+              setTimeout(() => {
+                inp.style.border = '';
+                inp.style.backgroundColor = '';
+              }, 3000);
+            }
+          });
           return;
         }
       }
@@ -263,7 +287,10 @@ const IndentForm = () => {
         fetchIndent();
       }
     } catch (err) {
-      if (err.errorFields) return;
+      if (err.errorFields) {
+        handleFormValidationFailed(err);
+        return;
+      }
       message.error(getErrorMessage(err));
     } finally {
       setSubmitting(false);
@@ -489,7 +516,7 @@ const IndentForm = () => {
       </PageHeader>
 
       <Card>
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" scrollToFirstError={true}>
           {/* indent_type and indent_date are kept in form state as hidden fields
               — defaulted to "regular" / today so the field user never has to
               touch them. Urgent flag is exposed as a single inline checkbox. */}
@@ -525,8 +552,26 @@ const IndentForm = () => {
               </Col>
             )}
             <Col xs={24} sm={12} md={8}>
-              <Form.Item name="required_date" label="Required Date" rules={[{ required: true, message: 'Required' }]}>
-                <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
+              <Form.Item
+                name="required_date"
+                label="Required Date"
+                rules={[
+                  { required: true, message: 'Required Date is mandatory' },
+                  {
+                    validator: (_, value) => {
+                      if (value && value.isBefore(dayjs(), 'day')) {
+                        return Promise.reject(new Error('Required Date must be a future date'));
+                      }
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
+              >
+                <DatePicker 
+                  style={{ width: '100%' }} 
+                  format={DATE_FORMAT} 
+                  disabledDate={(current) => current && current.isBefore(dayjs(), 'day')}
+                />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={8}>

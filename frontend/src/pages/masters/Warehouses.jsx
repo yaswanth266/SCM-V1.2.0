@@ -436,6 +436,10 @@ const Warehouses = () => {
     );
   };
 
+  const selectableParentOptions = warehouses
+    .filter((w) => !editingWh || w.id !== editingWh.id)
+    .map((w) => ({ label: w.name || w.warehouse_name, value: w.id }));
+
   return (
     <div>
       <PageHeader title="Warehouses" subtitle="Manage warehouses and storage hierarchy">
@@ -520,6 +524,7 @@ const Warehouses = () => {
                         <Space size={4}>
                           {wh.warehouse_type && <Tag style={{ fontSize: 10 }}>{wh.warehouse_type}</Tag>}
                           {wh.code && <span style={{ fontSize: 11, color: '#999' }}>{wh.code}</span>}
+                          {wh.parent_name && <Tag color="purple" style={{ fontSize: 10 }}>Parent: {wh.parent_name}</Tag>}
                           <Tag color={wh.status === 'active' || wh.is_active ? 'green' : 'red'} style={{ fontSize: 10 }}>
                             {wh.status === 'active' || wh.is_active ? 'Active' : 'Inactive'}
                           </Tag>
@@ -632,6 +637,35 @@ const Warehouses = () => {
                   options={[
                     { label: 'Active', value: 'active' },
                     { label: 'Inactive', value: 'inactive' },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={16}>
+            <Col span={24}>
+              <Form.Item
+                name="parent_id"
+                label="Parent Warehouse"
+                rules={[
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      if (value && editingWh && value === editingWh.id) {
+                        return Promise.reject(new Error('A warehouse cannot be its own parent'));
+                      }
+                      return Promise.resolve();
+                    },
+                  }),
+                ]}
+              >
+                <Select
+                  placeholder="Select parent warehouse (optional)"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  options={[
+                    { label: 'None (Top Level Warehouse)', value: null },
+                    ...selectableParentOptions,
                   ]}
                 />
               </Form.Item>

@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.user import User
-from app.models.grn import GoodsReceiptNote, GRNItem, QualityInspection, QualityInspectionItem, PutawayOrder, PutawayItem
+from app.models.grn import GoodsReceiptNote, GRNItem, GRNItemSerial, QualityInspection, QualityInspectionItem, PutawayOrder, PutawayItem
 from app.models.procurement import PurchaseOrder, PurchaseOrderItem
-from app.models.warehouse import Batch, Warehouse
+from app.models.warehouse import Batch, Warehouse, MaterialInward, WarehouseLocation, WarehouseLine, WarehouseRack, WarehouseBin, SerialNumber
 from app.models.stock import StockBalance, StockLedger
 from app.models.returns import PurchaseReturn, PurchaseReturnItem
 from app.models.issue import MaterialIssue, MaterialIssueItem
@@ -31,6 +31,121 @@ from app.utils.helpers import paginate_params, build_paginated_response, apply_s
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+async def resolve_or_create_bin(db: AsyncSession, warehouse_id: int, bin_identifier: any) -> Optional[int]:
+    if not bin_identifier:
+        return None
+    
+    # Convert to string and strip
+    ident_str = str(bin_identifier).strip()
+    if not ident_str:
+        return None
+        
+    # 1. Try to find by integer ID first (if it's purely digits)
+    if ident_str.isdigit():
+        bin_id = int(ident_str)
+        # Verify it belongs to this warehouse
+        bin_row = (await db.execute(
+            select(WarehouseBin)
+            .join(WarehouseRack, WarehouseRack.id == WarehouseBin.rack_id)
+            .join(WarehouseLine, WarehouseLine.id == WarehouseRack.line_id)
+            .join(WarehouseLocation, WarehouseLocation.id == WarehouseLine.location_id)
+            .where(WarehouseBin.id == bin_id, WarehouseLocation.warehouse_id == warehouse_id)
+        )).scalar_one_or_none()
+        if bin_row:
+            return bin_row.id
+            
+    # 2. Try to find by code or name in this warehouse
+    bin_row = (await db.execute(
+        select(WarehouseBin)
+        .join(WarehouseRack, WarehouseRack.id == WarehouseBin.rack_id)
+        .join(WarehouseLine, WarehouseLine.id == WarehouseRack.line_id)
+        .join(WarehouseLocation, WarehouseLocation.id == WarehouseLine.location_id)
+        .where(
+            WarehouseLocation.warehouse_id == warehouse_id,
+            (WarehouseBin.code == ident_str) | (WarehouseBin.name == ident_str)
+        )
+    )).scalar_one_or_none()
+    if bin_row:
+        return bin_row.id
+        
+    # 3. Create a new WarehouseBin dynamically!
+    # Find or create a rack in this warehouse
+    rack_row = (await db.execute(
+        select(WarehouseRack)
+        .join(WarehouseLine, WarehouseLine.id == WarehouseRack.line_id)
+        .join(WarehouseLocation, WarehouseLocation.id == WarehouseLine.location_id)
+        .where(WarehouseLocation.warehouse_id == warehouse_id)
+        .limit(1)
+    )).scalar_one_or_none()
+    
+    if rack_row:
+        rack_id = rack_row.id
+    else:
+        # Find or create a line in this warehouse
+        line_row = (await db.execute(
+            select(WarehouseLine)
+            .join(WarehouseLocation, WarehouseLocation.id == WarehouseLine.location_id)
+            .where(WarehouseLocation.warehouse_id == warehouse_id)
+            .limit(1)
+        )).scalar_one_or_none()
+        
+        if line_row:
+            line_id = line_row.id
+        else:
+            # Find or create a location in this warehouse
+            loc_row = (await db.execute(
+                select(WarehouseLocation)
+                .where(WarehouseLocation.warehouse_id == warehouse_id)
+                .limit(1)
+            )).scalar_one_or_none()
+            
+            if not loc_row:
+                # Create new location
+                loc_row = WarehouseLocation(
+                    warehouse_id=warehouse_id,
+                    code="DEFAULT",
+                    name="Default Location",
+                    is_active=True
+                )
+                db.add(loc_row)
+                await db.flush()
+                
+            # Create new line
+            line_row = WarehouseLine(
+                location_id=loc_row.id,
+                code="DEFAULT",
+                name="Default Line",
+                zone_type="storage",
+                is_active=True
+            )
+            db.add(line_row)
+            await db.flush()
+            line_id = line_row.id
+            
+        # Create new rack
+        rack_row = WarehouseRack(
+            line_id=line_id,
+            code="DEFAULT",
+            name="Default Rack",
+            is_active=True
+        )
+        db.add(rack_row)
+        await db.flush()
+        rack_id = rack_row.id
+        
+    # Now create the new WarehouseBin under the resolved rack
+    new_bin = WarehouseBin(
+        rack_id=rack_id,
+        code=ident_str,
+        name=ident_str,
+        bin_type="shelf",
+        capacity=0,
+        is_active=True
+    )
+    db.add(new_bin)
+    await db.flush()
+    return new_bin.id
 
 
 # ==================== GRN ====================
@@ -81,9 +196,11 @@ async def list_grns(
     query = query.options(
         selectinload(GoodsReceiptNote.items).selectinload(GRNItem.item),
         selectinload(GoodsReceiptNote.items).selectinload(GRNItem.uom),
+        selectinload(GoodsReceiptNote.items).selectinload(GRNItem.serials),
         selectinload(GoodsReceiptNote.vendor),
         selectinload(GoodsReceiptNote.purchase_order),
         selectinload(GoodsReceiptNote.warehouse),
+        selectinload(GoodsReceiptNote.inward),
     )
     result = await db.execute(query.offset(offset).limit(limit).order_by(GoodsReceiptNote.id.desc()))
     grns = result.scalars().all()
@@ -92,9 +209,11 @@ async def list_grns(
     for g in grns:
         grn_dict = {
             "id": g.id, "grn_number": g.grn_number, "po_id": g.po_id,
+            "inward_id": g.inward_id,
+            "inward_number": g.inward.inward_number if g.inward else None,
             "vendor_id": g.vendor_id, "warehouse_id": g.warehouse_id,
             "vendor_name": g.vendor.name if g.vendor else None,
-            "po_number": g.purchase_order.po_number if g.purchase_order else None,
+            "po_number": g.po_number or (g.purchase_order.po_number if g.purchase_order else None),
             "warehouse_name": g.warehouse.name if g.warehouse else None,
             "grn_date": g.grn_date, "receipt_type": g.receipt_type,
             "supplier_invoice": g.supplier_invoice,
@@ -110,6 +229,9 @@ async def list_grns(
                 "id": gi.id, "item_id": gi.item_id,
                 "item_name": gi.item.name if gi.item else None,
                 "item_code": gi.item.item_code if gi.item else None,
+                "item_type": gi.item.item_type if gi.item else None,
+                "has_serial": bool(gi.item.has_serial) if gi.item else False,
+                "serial_numbers": [s.serial_number for s in gi.serials] if hasattr(gi, "serials") else [],
                 "uom_name": gi.uom.name if gi.uom else None,
                 "received_qty": float(gi.received_qty or 0),
                 "uom_id": gi.uom_id,
@@ -131,6 +253,7 @@ async def get_grn(
         select(GoodsReceiptNote)
         .options(
             selectinload(GoodsReceiptNote.items).selectinload(GRNItem.item),
+            selectinload(GoodsReceiptNote.items).selectinload(GRNItem.serials),
             selectinload(GoodsReceiptNote.items).selectinload(GRNItem.uom),
         )
         .where(GoodsReceiptNote.id == grn_id)
@@ -141,9 +264,16 @@ async def get_grn(
     response = GRNResponse.model_validate(grn).model_dump(mode="json")
 
     # Joined names so UI shows labels instead of FK ids
-    if grn.po_id:
+    # Prioritize the stored po_number column (set during create_grn from inward)
+    if grn.po_number:
+        response["po_number"] = grn.po_number
+    elif grn.po_id:
         response["po_number"] = (await db.execute(
             select(PurchaseOrder.po_number).where(PurchaseOrder.id == grn.po_id)
+        )).scalar()
+    if grn.inward_id:
+        response["inward_number"] = (await db.execute(
+            select(MaterialInward.inward_number).where(MaterialInward.id == grn.inward_id)
         )).scalar()
     from app.models.master import Vendor as _V
     response["vendor_name"] = (await db.execute(
@@ -165,6 +295,9 @@ async def get_grn(
         response["items"][i]["item_name"] = gi.item.name if gi.item else None
         response["items"][i]["item_code"] = gi.item.item_code if gi.item else None
         response["items"][i]["uom_name"] = gi.uom.name if gi.uom else None
+        response["items"][i]["item_type"] = gi.item.item_type if gi.item else None
+        response["items"][i]["has_serial"] = bool(gi.item.has_serial) if gi.item else False
+        response["items"][i]["serial_numbers"] = [s.serial_number for s in gi.serials] if hasattr(gi, "serials") else []
     return response
 
 
@@ -180,6 +313,27 @@ async def create_grn(
     items flagged has_expiry=True must have expiry_date. Otherwise the audit
     trail is useless and patient-safety expiry checks at issue time fail.
     """
+    # Pre-resolve po_id and po_number from inward if provided
+    resolved_po_number = None
+    if payload.inward_id:
+        inward_res = await db.execute(
+            select(MaterialInward).where(MaterialInward.id == payload.inward_id)
+        )
+        inward = inward_res.scalar_one_or_none()
+        if inward:
+            if not payload.po_id and inward.po_id:
+                payload.po_id = inward.po_id
+            resolved_po_number = inward.po_number
+
+    if payload.po_id and not resolved_po_number:
+        po_res = await db.execute(
+            select(PurchaseOrder.po_number).where(PurchaseOrder.id == payload.po_id)
+        )
+        resolved_po_number = po_res.scalar()
+
+    if resolved_po_number and not payload.po_number:
+        payload.po_number = resolved_po_number
+
     # BUG-INV-011: GRN must have at least one item — empty GRNs poisoned the
     # putaway/QI list with no-op rows users could not delete cleanly.
     if not payload.items or len(payload.items) == 0:
@@ -291,6 +445,12 @@ async def create_grn(
                 status_code=400,
                 detail=f"Cannot create GRN against PO {_po_for_status.po_number} in '{_po_for_status.status}' status",
             )
+        # Block GRN if supplier has not accepted the PO
+        if _po_for_status.supplier_acknowledgement != "accepted":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot generate GRN: PO {_po_for_status.po_number} has not been accepted by the supplier (current status: '{_po_for_status.supplier_acknowledgement or 'pending'}').",
+            )
 
     grn_number = await generate_number(db, "warehouse", "goods_receipt_note")
     total_qty = Decimal("0")
@@ -298,6 +458,8 @@ async def create_grn(
     grn = GoodsReceiptNote(
         grn_number=grn_number,
         po_id=payload.po_id,
+        po_number=payload.po_number,
+        inward_id=payload.inward_id,
         vendor_id=payload.vendor_id,
         warehouse_id=payload.warehouse_id,
         grn_date=payload.grn_date,
@@ -426,9 +588,15 @@ async def create_grn(
                         raise
                     batch_id = existing_batch.id
 
+        po_item_id = item.po_item_id
+        if not po_item_id and payload.po_id and 'po_items_map' in locals():
+            po_item = po_items_map.get(item.item_id)
+            if po_item:
+                po_item_id = po_item.id
+
         grn_item = GRNItem(
             grn_id=grn.id,
-            po_item_id=item.po_item_id,
+            po_item_id=po_item_id,
             item_id=item.item_id,
             ordered_qty=item.ordered_qty,
             received_qty=item.received_qty,
@@ -451,12 +619,13 @@ async def create_grn(
             remarks=item.remarks,
         )
         db.add(grn_item)
+        await db.flush()
         total_qty += item.received_qty
 
         # Update PO item received qty
-        if item.po_item_id:
+        if po_item_id:
             po_item_result = await db.execute(
-                select(PurchaseOrderItem).where(PurchaseOrderItem.id == item.po_item_id)
+                select(PurchaseOrderItem).where(PurchaseOrderItem.id == po_item_id)
             )
             po_item = po_item_result.scalar_one_or_none()
             if po_item:
@@ -498,6 +667,12 @@ async def create_grn(
                 for i in po_items
             )
             po.status = "received" if all_received else "partially_received"
+
+    if payload.inward_id:
+        inw_res = await db.execute(select(MaterialInward).where(MaterialInward.id == payload.inward_id))
+        inw = inw_res.scalar_one_or_none()
+        if inw:
+            inw.status = "grn_created"
 
     await db.flush()
     return {"id": grn.id, "grn_number": grn_number, "message": "GRN created"}
@@ -732,10 +907,22 @@ async def list_quality_inspections(
         )
         latest_qi_per_grn = {r[0]: r[1] for r in latest_qi_rows.all()}
 
+    # Bulk lookup user names for inspected_by
+    user_ids = {q.inspected_by for q in qis if q.inspected_by}
+    users_map = {}
+    if user_ids:
+        u_rows = await db.execute(
+            select(User.id, User.first_name, User.last_name, User.username).where(User.id.in_(list(user_ids)))
+        )
+        for r in u_rows.all():
+            name = f"{r.first_name} {r.last_name or ''}".strip() or r.username
+            users_map[r.id] = name
+
     items_list = []
     for q in qis:
         data = QIResponse.model_validate(q).model_dump()
         data["grn_number"] = q.grn.grn_number if q.grn else None
+        data["inspected_by_name"] = users_map.get(q.inspected_by) if q.inspected_by else None
         gst = grn_status_map.get(q.grn_id) if q.grn_id else None
         is_latest = (q.grn_id is not None) and (latest_qi_per_grn.get(q.grn_id) == q.id)
         # If GRN has progressed past QI, only the LATEST QI for that GRN is
@@ -1032,6 +1219,7 @@ async def create_putaway_order(
     await db.flush()
 
     for item in payload.items:
+        resolved_suggested_bin_id = await resolve_or_create_bin(db, payload.warehouse_id, item.suggested_bin_id)
         pi = PutawayItem(
             putaway_id=po.id,
             grn_item_id=item.grn_item_id,
@@ -1039,7 +1227,7 @@ async def create_putaway_order(
             qty=item.qty,
             uom_id=item.uom_id,
             batch_id=item.batch_id,
-            suggested_bin_id=item.suggested_bin_id,
+            suggested_bin_id=resolved_suggested_bin_id,
         )
         db.add(pi)
 
@@ -1057,11 +1245,37 @@ async def confirm_putaway_item(
 ):
     """Confirm putaway of an item to a bin (scan to confirm)."""
     result = await db.execute(
-        select(PutawayItem).where(PutawayItem.id == item_id, PutawayItem.putaway_id == putaway_id)
+        select(PutawayItem)
+        .options(selectinload(PutawayItem.item))
+        .where(PutawayItem.id == item_id, PutawayItem.putaway_id == putaway_id)
     )
     pi = result.scalar_one_or_none()
     if not pi:
         raise HTTPException(status_code=404, detail="Putaway item not found")
+
+    has_serial = bool(pi.item.has_serial) if (pi and pi.item) else False
+    if has_serial:
+        if not payload.serial_numbers or len(payload.serial_numbers) != int(pi.qty):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Item requires {int(pi.qty)} serial numbers, but got {len(payload.serial_numbers) if payload.serial_numbers else 0}."
+            )
+        if len(payload.serial_numbers) != len(set(payload.serial_numbers)):
+            raise HTTPException(
+                status_code=400,
+                detail="Duplicate serial numbers provided in the request."
+            )
+        stmt = select(SerialNumber.serial_number).where(
+            SerialNumber.item_id == pi.item_id,
+            SerialNumber.serial_number.in_(payload.serial_numbers),
+            SerialNumber.status.in_(("available", "issued"))
+        )
+        existing_serials = (await db.execute(stmt)).scalars().all()
+        if existing_serials:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Serial numbers already active/in stock: {', '.join(existing_serials)}"
+            )
 
     # BUG-INV-030: validate the chosen bin actually lives inside the putaway
     # order's warehouse. Without this, a typo'd bin_id can land stock in the
@@ -1069,30 +1283,18 @@ async def confirm_putaway_item(
     po_warehouse_id = (await db.execute(
         select(PutawayOrder.warehouse_id).where(PutawayOrder.id == putaway_id)
     )).scalar()
+
+    resolved_bin_id = None
     if payload.actual_bin_id is not None and po_warehouse_id is not None:
-        from app.models.warehouse import (
-            WarehouseBin as _Bin, WarehouseRack as _Rack,
-            WarehouseLine as _Line, WarehouseLocation as _Loc,
-        )
-        bin_row = (await db.execute(
-            select(_Bin, _Loc.warehouse_id)
-            .join(_Rack, _Rack.id == _Bin.rack_id)
-            .join(_Line, _Line.id == _Rack.line_id)
-            .join(_Loc, _Loc.id == _Line.location_id)
-            .where(_Bin.id == payload.actual_bin_id)
-            .limit(1)
-        )).first()
-        if bin_row is None:
-            raise HTTPException(status_code=400, detail=f"Bin {payload.actual_bin_id} not found")
-        bin_obj, bin_wh = bin_row[0], bin_row[1]
-        if bin_wh != po_warehouse_id:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Bin {payload.actual_bin_id} belongs to warehouse {bin_wh}, "
-                    f"but putaway order is for warehouse {po_warehouse_id}"
-                ),
-            )
+        resolved_bin_id = await resolve_or_create_bin(db, po_warehouse_id, payload.actual_bin_id)
+        if resolved_bin_id is None:
+            raise HTTPException(status_code=400, detail=f"Bin could not be resolved or created for '{payload.actual_bin_id}'")
+        
+        # Load bin_obj for capacity validation
+        bin_obj = await db.get(WarehouseBin, resolved_bin_id)
+        if not bin_obj:
+            raise HTTPException(status_code=400, detail=f"Bin ID {resolved_bin_id} not found")
+            
         # BUG-INV-109: enforce bin capacity. Sum existing balance qty in this
         # bin and refuse the putaway if total > capacity (capacity=0 means
         # uncapped — treat as unlimited).
@@ -1112,7 +1314,7 @@ async def confirm_putaway_item(
                     ),
                 )
 
-    pi.actual_bin_id = payload.actual_bin_id
+    pi.actual_bin_id = resolved_bin_id
     pi.status = payload.status
     pi.scanned_at = datetime.now(timezone.utc)
     pi.scanned_by = current_user.id
@@ -1134,13 +1336,24 @@ async def confirm_putaway_item(
         transaction_type="putaway",
         qty_in=pi.qty,
         rate=grn_item_rate,
-        bin_id=payload.actual_bin_id,
+        bin_id=resolved_bin_id,
         batch_id=pi.batch_id,
         reference_type="putaway_order",
         reference_id=putaway_id,
         uom_id=pi.uom_id,
         created_by=current_user.id,
     )
+
+    if has_serial and payload.status == "done":
+        for sn in payload.serial_numbers:
+            db.add(SerialNumber(
+                item_id=pi.item_id,
+                serial_number=sn.strip(),
+                batch_id=pi.batch_id,
+                status="available",
+                warehouse_id=po_warehouse_id,
+                bin_id=resolved_bin_id
+            ))
 
     # Check if all items done
     # BUG-INV-034: a 'skipped' item is a terminal state (operator deliberately
@@ -1255,9 +1468,20 @@ async def quick_complete_putaway(
         return {"success": True, "message": "Already completed", "items_posted": 0}
 
     items_q = await db.execute(
-        select(PutawayItem).where(PutawayItem.putaway_id == putaway_id, PutawayItem.status != "done")
+        select(PutawayItem)
+        .options(selectinload(PutawayItem.item))
+        .where(PutawayItem.putaway_id == putaway_id, PutawayItem.status != "done")
     )
     items = items_q.scalars().all()
+
+    # Block quick-complete if any item requires serial number tracking
+    for pi in items:
+        if pi.item and pi.item.has_serial:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot quick-complete: Item '{pi.item.item_code}' is serial-tracked. Please confirm this item individually and enter its serial numbers."
+            )
+
     posted = 0
     failures: list[dict] = []
     for pi in items:
@@ -1917,8 +2141,37 @@ async def get_putaway_order_alias(
         rows = (await db.execute(select(UOM.id, UOM.name).where(UOM.id.in_(uom_ids)))).all()
         uom_map = {r.id: r.name for r in rows}
 
+    bin_ids = {
+        bin_id
+        for it in order.items
+        for bin_id in (it.suggested_bin_id, it.actual_bin_id)
+        if bin_id
+    }
+    bin_map = {}
+    if bin_ids:
+        rows = (await db.execute(
+            select(WarehouseBin.id, WarehouseBin.code, WarehouseBin.name)
+            .where(WarehouseBin.id.in_(bin_ids))
+        )).all()
+        bin_map = {r.id: (r.code or r.name or str(r.id)) for r in rows}
+
     items = []
     for it in order.items:
+        has_serial = bool(it.item.has_serial) if it.item else False
+        serial_numbers = []
+        if has_serial and it.actual_bin_id:
+            sn_rows = (await db.execute(
+                select(SerialNumber.serial_number)
+                .where(
+                    SerialNumber.item_id == it.item_id,
+                    SerialNumber.warehouse_id == order.warehouse_id,
+                    SerialNumber.bin_id == it.actual_bin_id,
+                    SerialNumber.batch_id == it.batch_id,
+                    SerialNumber.status == "available"
+                )
+            )).scalars().all()
+            serial_numbers = list(sn_rows)
+
         items.append({
             "id": it.id,
             "grn_item_id": it.grn_item_id,
@@ -1931,8 +2184,12 @@ async def get_putaway_order_alias(
             "batch_id": it.batch_id,
             "batch_number": it.batch.batch_number if it.batch else None,
             "suggested_bin_id": it.suggested_bin_id,
+            "suggested_bin": bin_map.get(it.suggested_bin_id),
             "actual_bin_id": it.actual_bin_id,
+            "actual_bin": bin_map.get(it.actual_bin_id),
             "status": it.status,
+            "has_serial": has_serial,
+            "serial_numbers": serial_numbers,
         })
 
     return {
@@ -2081,7 +2338,10 @@ async def save_putaway_bin_assignments(
     for it in items:
         if not it.get("id"):
             continue
-        bin_id = _coerce_bin_id(it.get("actual_bin_id"))
+        bin_identifier = it.get("actual_bin_id") or it.get("actual_bin")
+        bin_id = _coerce_bin_id(bin_identifier)
+        if bin_id is None and bin_identifier:
+            bin_id = await resolve_or_create_bin(db, pa.warehouse_id, bin_identifier)
         batch_number = it.get("batch_number")
         row = await db.execute(
             select(PutawayItem).where(
@@ -2206,7 +2466,7 @@ async def get_stock_visibility(
         "bin_id": b.bin_id, "batch_id": b.batch_id,
         "available_qty": float(b.available_qty or 0),
         "reserved_qty": float(b.reserved_qty or 0),
-        "committed_qty": float(b.committed_qty or 0),
+        "transit_qty": float(b.transit_qty or 0),
         "total_qty": float(b.total_qty or 0),
         "valuation_rate": float(b.valuation_rate or 0),
         "stock_value": float(b.stock_value or 0),
@@ -2270,12 +2530,23 @@ async def list_material_issues(
             batch_map[b.id] = b
 
     items_list = []
+    # Bulk-load all indents referenced by the current page of MIs
+    all_indent_ids = list({mi.indent_id for mi in issues if mi.indent_id})
+    indent_map = {}
+    if all_indent_ids:
+        from app.models.indent import Indent as _Indent
+        ind_rows = await db.execute(select(_Indent).where(_Indent.id.in_(all_indent_ids)))
+        for ind in ind_rows.scalars().all():
+            indent_map[ind.id] = ind
+
     for mi in issues:
+        indent = indent_map.get(mi.indent_id) if mi.indent_id else None
         mi_dict = {
             "id": mi.id,
             "issue_number": mi.issue_number,
             "mr_id": mi.mr_id,
             "indent_id": mi.indent_id,
+            "indent_number": indent.indent_number if indent else None,
             "warehouse_id": mi.warehouse_id,
             "issue_date": mi.issue_date,
             "department": mi.department,
@@ -2311,6 +2582,7 @@ async def list_material_issues(
         items_list.append(mi_dict)
 
     return build_paginated_response(items_list, total, page, page_size)
+
 
 
 @router.post("/material-issues", status_code=201, dependencies=[Depends(require_key("warehouse-material-issues"))])
@@ -2533,6 +2805,7 @@ async def create_material_issue(
                 mr_id=payload.mr_id,
                 indent_id=payload.indent_id,
                 warehouse_id=payload.warehouse_id,
+                destination_warehouse_id=payload.destination_warehouse_id,
                 issue_date=payload.issue_date,
                 department=payload.department,
                 issued_to=payload.issued_to,
@@ -2555,6 +2828,7 @@ async def create_material_issue(
                     bin_id=item.bin_id,
                     rate=item.rate,
                     amount=amount,
+                    serial_numbers=item.serial_numbers,
                 )
                 db.add(mi_item)
 
@@ -2576,12 +2850,15 @@ async def get_material_issue(
     current_user: User = Depends(get_current_user),
 ):
     """Get material issue detail with items."""
+    from app.models.indent import Indent
     result = await db.execute(
         select(MaterialIssue)
         .options(
             selectinload(MaterialIssue.items).selectinload(MaterialIssueItem.item),
             selectinload(MaterialIssue.items).selectinload(MaterialIssueItem.uom),
+            selectinload(MaterialIssue.items).selectinload(MaterialIssueItem.batch),
             selectinload(MaterialIssue.warehouse),
+            selectinload(MaterialIssue.destination_warehouse),
             selectinload(MaterialIssue.issued_to_user),
         )
         .where(MaterialIssue.id == issue_id)
@@ -2591,15 +2868,26 @@ async def get_material_issue(
         raise HTTPException(status_code=404, detail="Material issue not found")
     response = MaterialIssueResponse.model_validate(mi).model_dump()
     response["warehouse_name"] = mi.warehouse.name if mi.warehouse else None
+    response["destination_warehouse_name"] = mi.destination_warehouse.name if mi.destination_warehouse else None
     response["issued_to_name"] = (
         f"{mi.issued_to_user.first_name} {mi.issued_to_user.last_name or ''}".strip()
         or mi.issued_to_user.username
     ) if mi.issued_to_user else None
+    # Enrich with indent_number so the dispatch form can display it without an extra call
+    if mi.indent_id:
+        indent_row = await db.get(Indent, mi.indent_id)
+        response["indent_number"] = indent_row.indent_number if indent_row else None
+    else:
+        response["indent_number"] = None
     for i, item in enumerate(mi.items):
         response["items"][i]["item_name"] = item.item.name if item.item else None
         response["items"][i]["item_code"] = item.item.item_code if item.item else None
         response["items"][i]["uom_name"] = item.uom.name if item.uom else None
+        response["items"][i]["batch_number"] = item.batch.batch_number if item.batch else None
+        response["items"][i]["serial_numbers"] = item.serial_numbers
+        response["items"][i]["has_serial"] = bool(item.item.has_serial) if item.item else False
     return response
+
 
 
 @router.put("/material-issues/{issue_id}", dependencies=[Depends(require_key("warehouse-material-issues"))])
@@ -2628,6 +2916,8 @@ async def update_material_issue(
         mi.indent_id = payload.indent_id
     if payload.warehouse_id is not None:
         mi.warehouse_id = payload.warehouse_id
+    if payload.destination_warehouse_id is not None:
+        mi.destination_warehouse_id = payload.destination_warehouse_id
     if payload.issue_date is not None:
         mi.issue_date = payload.issue_date
     if payload.department is not None:
@@ -2670,6 +2960,7 @@ async def update_material_issue(
                 prescriber_license=getattr(item, "prescriber_license", None),
                 patient_name=getattr(item, "patient_name", None),
                 patient_id_text=getattr(item, "patient_id_text", None),
+                serial_numbers=item.serial_numbers,
             )
             db.add(mi_item)
 
@@ -2695,7 +2986,9 @@ async def issue_material(
     # subsequent flip below.
     result = await db.execute(
         select(MaterialIssue)
-        .options(selectinload(MaterialIssue.items))
+        .options(
+            selectinload(MaterialIssue.items).selectinload(MaterialIssueItem.item)
+        )
         .where(MaterialIssue.id == issue_id)
         .with_for_update()
     )
@@ -2707,6 +3000,46 @@ async def issue_material(
 
     if not mi.items or len(mi.items) == 0:
         raise HTTPException(status_code=400, detail="Material issue has no items")
+
+    # Validate serial numbers for serial-tracked items
+    serials_to_issue = []
+    for item in mi.items:
+        has_serial = bool(item.item.has_serial) if item.item else False
+        if has_serial:
+            qty_int = int(item.qty)
+            if not item.serial_numbers or len(item.serial_numbers) != qty_int:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Item {item.item.name if item.item else item.item_id} requires {qty_int} serial numbers, but got {len(item.serial_numbers) if item.serial_numbers else 0}."
+                )
+            if len(item.serial_numbers) != len(set(item.serial_numbers)):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Duplicate serial numbers provided for item {item.item.name if item.item else item.item_id}."
+                )
+            
+            sn_conds = [
+                SerialNumber.item_id == item.item_id,
+                SerialNumber.serial_number.in_(item.serial_numbers),
+                SerialNumber.warehouse_id == mi.warehouse_id,
+                SerialNumber.status == "available"
+            ]
+            if item.bin_id is not None:
+                sn_conds.append(SerialNumber.bin_id == item.bin_id)
+            if item.batch_id is not None:
+                sn_conds.append(SerialNumber.batch_id == item.batch_id)
+                
+            sn_stmt = select(SerialNumber).where(and_(*sn_conds))
+            sn_rows = (await db.execute(sn_stmt)).scalars().all()
+            
+            found_serials = {s.serial_number for s in sn_rows}
+            missing_serials = set(item.serial_numbers) - found_serials
+            if missing_serials:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"The following serial numbers are not available in the selected warehouse/bin/batch: {', '.join(missing_serials)}"
+                )
+            serials_to_issue.extend(sn_rows)
 
     # PATIENT SAFETY: double-check expiry at issue time. Even if create_material_issue
     # let a batch through (concurrent expiry date update, draft aged out, etc.),
@@ -2813,39 +3146,36 @@ async def issue_material(
                 ),
             )
 
-    # Deduct stock for each item and capture the effective valuation rate so
-    # the GL posting uses real cost (weighted-avg) rather than caller-supplied rate.
-    issue_gl_items: list[dict] = []
+    # Reserve stock for each item and capture the estimated valuation rate
+    from app.services.stock_service import reserve_stock, _get_or_create_balance
     for item in mi.items:
-        ledger_row = await post_stock_ledger(
+        success = await reserve_stock(
             db,
             item_id=item.item_id,
             warehouse_id=mi.warehouse_id,
-            transaction_type="material_issue",
-            qty_out=item.qty,
-            rate=item.rate,
+            qty=item.qty,
             bin_id=item.bin_id,
             batch_id=item.batch_id,
-            reference_type="material_issue",
-            reference_id=mi.id,
-            uom_id=item.uom_id,
-            created_by=current_user.id,
         )
-        # BUG-INV-049: snap the MI line's stored rate + amount to the ledger's
-        # weighted-avg rate so the MI total matches what GL/inventory recorded.
-        # Otherwise the operator-typed rate (often 0 or a guess) is shown on the
-        # printed MI but inventory was decremented at moving-avg cost — the two
-        # totals diverge and the consumption report disagrees with stock value.
-        if ledger_row and ledger_row.rate is not None:
-            effective_rate = Decimal(str(ledger_row.rate))
-            item.rate = effective_rate
-            item.amount = (item.qty or Decimal("0")) * effective_rate
-        # ledger.rate is the moving-avg rate at the moment of posting
-        issue_gl_items.append({
-            "item_id": item.item_id,
-            "qty": item.qty,
-            "rate": ledger_row.rate or item.rate or 0,
-        })
+        if not success:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to reserve stock for item {item.item_id}",
+            )
+        
+        balance = await _get_or_create_balance(
+            db,
+            item_id=item.item_id,
+            warehouse_id=mi.warehouse_id,
+            bin_id=item.bin_id,
+            batch_id=item.batch_id,
+        )
+        effective_rate = balance.valuation_rate or Decimal("0")
+        item.rate = effective_rate
+        item.amount = (item.qty or Decimal("0")) * effective_rate
+
+    for s in serials_to_issue:
+        s.status = "issued"
 
     mi.status = "issued"
     mi.issued_by = current_user.id
@@ -2872,23 +3202,6 @@ async def issue_material(
                 prescription_image_url=None,
                 dispensed_by=current_user.id,
             )
-
-    # Fire GL posting (Consumption Dr / Inventory Cr)
-    try:
-        from app.services.gl_posting import post_issue_gl
-        org_id = current_user.organization_id or 1
-        await post_issue_gl(
-            db,
-            organization_id=org_id,
-            issue_id=mi.id,
-            issue_number=mi.issue_number,
-            issue_date=mi.issue_date,
-            warehouse_id=mi.warehouse_id,
-            items=issue_gl_items,
-            created_by=current_user.id,
-        )
-    except Exception:
-        logger.exception("GL posting failed for material issue %s", mi.issue_number)
 
     # --- Update linked indent's issued_qty and status ---
     if mi.indent_id:
@@ -2983,23 +3296,114 @@ async def issue_material(
                 if remaining_to_credit > 0 and candidates:
                     last_line = candidates[-1]
                     last_line.issued_qty = (last_line.issued_qty or Decimal("0")) + remaining_to_credit
-            # Determine indent fulfilment status
-            all_fulfilled = True
-            any_fulfilled = False
+            # Determine indent fulfilment status after issue.
+            # IMPORTANT: We deliberately do NOT set status = "fulfilled" here.
+            # An indent is only truly fulfilled after the RAISER acknowledges
+            # receipt of the material. At issue time we track how much has been
+            # issued vs approved, and if any qty was issued we mark the indent as
+            # "partially_fulfilled" so it stays visible in the demand pool until
+            # the raiser confirms receipt. The demand pool uses acknowledged_qty
+            # (from IndentAcknowledgementItem) to decide when to remove a line.
+            any_issued = False
             for ind_item in indent.items:
-                target = ind_item.approved_qty or ind_item.requested_qty or 0
-                issued = ind_item.issued_qty or 0
-                if issued > 0:
-                    any_fulfilled = True
-                if issued < target:
-                    all_fulfilled = False
-            if all_fulfilled and any_fulfilled:
-                indent.status = "fulfilled"
-            elif any_fulfilled:
+                if (ind_item.issued_qty or 0) > 0:
+                    any_issued = True
+                    break
+            if any_issued:
+                # Always partially_fulfilled at issue time — full "fulfilled" set
+                # only by the acknowledge endpoint once ACK qty >= approved qty.
                 indent.status = "partially_fulfilled"
 
     await db.flush()
-    return {"id": mi.id, "issue_number": mi.issue_number, "message": "Material issued successfully, stock deducted"}
+    return {"id": mi.id, "issue_number": mi.issue_number, "message": "Material issued successfully, stock reserved"}
+
+
+@router.post("/material-issues/{issue_id}/dispatch", dependencies=[Depends(require_key("warehouse-material-issues"))])
+async def dispatch_material_issue(
+    issue_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_any_role(
+        "super_admin", "admin", "warehouse_manager", "warehouse_operator", "store_keeper"
+    )),
+):
+    """Mark material issue as dispatched, reduce stock, and post GL entries."""
+    result = await db.execute(
+        select(MaterialIssue)
+        .options(selectinload(MaterialIssue.items))
+        .where(MaterialIssue.id == issue_id)
+        .with_for_update()
+    )
+    mi = result.scalar_one_or_none()
+    if not mi:
+        raise HTTPException(status_code=404, detail="Material issue not found")
+    if mi.status != "issued":
+        raise HTTPException(status_code=400, detail="Only issued material issues can be dispatched")
+
+    if not mi.items or len(mi.items) == 0:
+        raise HTTPException(status_code=400, detail="Material issue has no items")
+
+    from app.services.stock_service import release_reservation, post_stock_ledger
+    issue_gl_items: list[dict] = []
+    for item in mi.items:
+        # 1. Release reservation
+        await release_reservation(
+            db,
+            item_id=item.item_id,
+            warehouse_id=mi.warehouse_id,
+            qty=item.qty,
+            bin_id=item.bin_id,
+            batch_id=item.batch_id,
+        )
+
+        # 2. Post stock ledger entry to deduct total quantity
+        ledger_row = await post_stock_ledger(
+            db,
+            item_id=item.item_id,
+            warehouse_id=mi.warehouse_id,
+            transaction_type="material_issue",
+            qty_out=item.qty,
+            rate=item.rate,
+            bin_id=item.bin_id,
+            batch_id=item.batch_id,
+            reference_type="material_issue",
+            reference_id=mi.id,
+            uom_id=item.uom_id,
+            created_by=current_user.id,
+        )
+
+        if ledger_row and ledger_row.rate is not None:
+            effective_rate = Decimal(str(ledger_row.rate))
+            item.rate = effective_rate
+            item.amount = (item.qty or Decimal("0")) * effective_rate
+
+        issue_gl_items.append({
+            "item_id": item.item_id,
+            "qty": item.qty,
+            "rate": (ledger_row.rate if ledger_row else None) or item.rate or Decimal("0"),
+        })
+
+    mi.status = "dispatched"
+    mi.dispatched_at = datetime.now(timezone.utc)
+
+    # Fire GL posting (Consumption Dr / Inventory Cr)
+    try:
+        from app.services.gl_posting import post_issue_gl
+        org_id = current_user.organization_id or 1
+        await post_issue_gl(
+            db,
+            organization_id=org_id,
+            issue_id=mi.id,
+            issue_number=mi.issue_number,
+            issue_date=mi.issue_date,
+            warehouse_id=mi.warehouse_id,
+            items=issue_gl_items,
+            created_by=current_user.id,
+        )
+    except Exception:
+        logger.exception("GL posting failed for material issue dispatch %s", mi.issue_number)
+
+    await db.flush()
+    return {"id": mi.id, "issue_number": mi.issue_number, "message": "Material issue dispatched successfully"}
 
 
 @router.post("/material-issues/{issue_id}/cancel", dependencies=[Depends(require_key("warehouse-material-issues"))])
@@ -3025,13 +3429,39 @@ async def cancel_material_issue(
     mi = result.scalar_one_or_none()
     if not mi:
         raise HTTPException(status_code=404, detail="Material issue not found")
-    if mi.status in ("cancelled", "completed"):
+    if mi.status in ("cancelled", "completed", "acknowledged"):
         raise HTTPException(
             status_code=400,
             detail=f"Cannot cancel a material issue with status '{mi.status}'",
         )
 
-    if mi.status in ("issued", "acknowledged"):
+    if mi.status == "issued":
+        from app.services.stock_service import release_reservation
+        for item in mi.items:
+            await release_reservation(
+                db,
+                item_id=item.item_id,
+                warehouse_id=mi.warehouse_id,
+                qty=item.qty,
+                bin_id=item.bin_id,
+                batch_id=item.batch_id,
+            )
+
+        # Decrement linked indent issued_qty so it can be re-fulfilled
+        if mi.indent_id:
+            from app.models.indent import Indent
+            indent_result = await db.execute(
+                select(Indent).options(selectinload(Indent.items)).where(Indent.id == mi.indent_id)
+            )
+            indent = indent_result.scalar_one_or_none()
+            if indent:
+                for mi_item in mi.items:
+                    for ind_item in indent.items:
+                        if ind_item.item_id == mi_item.item_id:
+                            ind_item.issued_qty = max(0, (ind_item.issued_qty or 0) - mi_item.qty)
+                            break
+
+    elif mi.status == "dispatched":
         # Reverse stock ledger — push qty back IN with the same valuation
         reverse_gl_items: list[dict] = []
         for item in mi.items:
@@ -3039,7 +3469,7 @@ async def cancel_material_issue(
                 db,
                 item_id=item.item_id,
                 warehouse_id=mi.warehouse_id,
-                transaction_type="material_issue_reversal",
+                transaction_type="material_issue",
                 qty_in=item.qty,
                 rate=item.rate,
                 bin_id=item.bin_id,
@@ -3052,7 +3482,7 @@ async def cancel_material_issue(
             reverse_gl_items.append({
                 "item_id": item.item_id,
                 "qty": -1 * (item.qty or 0),  # negative qty triggers reverse JE
-                "rate": ledger_row.rate or item.rate or 0,
+                "rate": (ledger_row.rate if ledger_row else None) or item.rate or 0,
             })
 
         # Reverse GL by posting an issue JE with negated quantities. The
@@ -3117,6 +3547,20 @@ async def cancel_material_issue(
             "Failed to annotate prescription_records for cancelled MI %s", mi.id
         )
 
+    # Revert serial numbers back to "available"
+    if mi.status in ("issued", "dispatched"):
+        for item in mi.items:
+            if item.serial_numbers:
+                sn_q = await db.execute(
+                    select(SerialNumber).where(
+                        SerialNumber.item_id == item.item_id,
+                        SerialNumber.serial_number.in_(item.serial_numbers),
+                        SerialNumber.status == "issued"
+                    )
+                )
+                for sn in sn_q.scalars().all():
+                    sn.status = "available"
+
     mi.status = "cancelled"
     await db.flush()
     return {"id": mi.id, "issue_number": mi.issue_number, "message": "Material issue cancelled"}
@@ -3135,13 +3579,15 @@ async def acknowledge_material_issue(
 ):
     """Acknowledge receipt of issued material."""
     result = await db.execute(
-        select(MaterialIssue).where(MaterialIssue.id == issue_id)
+        select(MaterialIssue)
+        .options(selectinload(MaterialIssue.items))
+        .where(MaterialIssue.id == issue_id)
     )
     mi = result.scalar_one_or_none()
     if not mi:
         raise HTTPException(status_code=404, detail="Material issue not found")
-    if mi.status != "issued":
-        raise HTTPException(status_code=400, detail="Only issued material issues can be acknowledged")
+    if mi.status != "dispatched":
+        raise HTTPException(status_code=400, detail="Only dispatched material issues can be acknowledged")
 
     # BUG-ISS-021 — recipient-or-admin restriction. A non-admin must be the
     # MI's issued_to user before acknowledging on their behalf.
@@ -3155,6 +3601,67 @@ async def acknowledge_material_issue(
         )
 
     mi.status = "acknowledged"
+
+    # Post stock ledger entries at the destination warehouse if destination_warehouse_id is set
+    if mi.destination_warehouse_id:
+        from app.services.stock_service import post_stock_ledger
+        for item in mi.items:
+            await post_stock_ledger(
+                db,
+                item_id=item.item_id,
+                warehouse_id=mi.destination_warehouse_id,
+                transaction_type="material_issue",
+                qty_in=item.qty,
+                rate=item.rate,
+                bin_id=None,
+                batch_id=item.batch_id,
+                reference_type="material_issue",
+                reference_id=mi.id,
+                uom_id=item.uom_id,
+                created_by=current_user.id,
+            )
+
+    # -----------------------------------------------------------------------
+    # After acknowledgement, update the linked indent's fulfillment status.
+    # This is the ONLY place that can promote an indent to "fulfilled".
+    # We sum all AcknowledgementItem rows for each indent line across ALL MIs
+    # so partial acknowledgements across multiple issues are handled correctly.
+    # -----------------------------------------------------------------------
+    if mi.indent_id:
+        from app.models.indent import Indent as _Indent, IndentAcknowledgementItem as _IAI
+        from sqlalchemy.orm import selectinload as _sil
+        indent_res = await db.execute(
+            select(_Indent)
+            .options(_sil(_Indent.items))
+            .where(_Indent.id == mi.indent_id)
+        )
+        indent = indent_res.scalar_one_or_none()
+        if indent:
+            # Sum all acknowledged qtys per indent_item_id across all past acks
+            ind_item_ids = [it.id for it in (indent.items or [])]
+            if ind_item_ids:
+                ack_rows = (await db.execute(
+                    select(_IAI.indent_item_id, func.sum(_IAI.received_qty).label("total_acked"))
+                    .where(_IAI.indent_item_id.in_(ind_item_ids))
+                    .group_by(_IAI.indent_item_id)
+                )).all()
+                ack_map = {r[0]: float(r[1] or 0) for r in ack_rows}
+
+                all_acked = True
+                any_acked = False
+                for ind_item in indent.items:
+                    target = float(ind_item.approved_qty or ind_item.requested_qty or 0)
+                    acked = ack_map.get(ind_item.id, 0)
+                    if acked > 0:
+                        any_acked = True
+                    if acked < target:
+                        all_acked = False
+
+                if all_acked and any_acked:
+                    indent.status = "fulfilled"       # fully acknowledged → remove from demand pool
+                elif any_acked:
+                    indent.status = "partially_fulfilled"  # partially acked → stays in pool with remaining qty
+
     await db.flush()
     return {"id": mi.id, "issue_number": mi.issue_number, "message": "Material issue acknowledged"}
 
@@ -3176,7 +3683,7 @@ async def delete_material_issue(
     # BUG-INV-050: also block delete on "acknowledged" — once a recipient has
     # acknowledged the issue, the stock has been consumed and audit history
     # must remain intact. Only draft/pending/cancelled MIs may be deleted.
-    if mi.status in ("issued", "completed", "acknowledged"):
+    if mi.status in ("issued", "dispatched", "completed", "acknowledged"):
         raise HTTPException(status_code=400, detail=f"Cannot delete a {mi.status} material issue")
 
     # BUG-ISS-020 — additionally enforce creator-or-admin: a non-admin
@@ -3604,13 +4111,29 @@ async def complete_purchase_return(
 from app.models.dispatch import GatePass
 from app.schemas.warehouse import GatePassCreate, GatePassResponse
 
-@router.get("/gate-entries/{gp_id}")
+@router.get("/gate-entries/{gp_id}", response_model=GatePassResponse)
 async def get_gate_entry(gp_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    result = await db.execute(select(GatePass).where(GatePass.id == gp_id))
+    result = await db.execute(
+        select(GatePass)
+        .options(
+            selectinload(GatePass.dispatch_order),
+            selectinload(GatePass.warehouse)
+        )
+        .where(GatePass.id == gp_id)
+    )
     gp = result.scalar_one_or_none()
     if not gp:
         raise HTTPException(status_code=404, detail="Gate entry not found")
-    return gp
+    
+    data = GatePassResponse.model_validate(gp)
+    if gp.grn_id:
+        from app.models.logistics import LogisticsServiceOrder
+        so_res = await db.execute(select(LogisticsServiceOrder).where(LogisticsServiceOrder.id == gp.grn_id))
+        so = so_res.scalar_one_or_none()
+        if so:
+            data.so_id = so.id
+            data.so_number = so.so_number
+    return data
 
 @router.post("/gate-entries/{gp_id}/cancel")
 async def cancel_gate_entry(gp_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_any_role("super_admin", "admin", "warehouse_manager"))):
@@ -3647,19 +4170,27 @@ async def list_gate_entries(
     result = await db.execute(query.offset(offset).limit(limit).order_by(GatePass.id.desc()))
     entries = result.scalars().all()
 
-    # Bulk-fetch GRN numbers for entries with grn_id
+    # Bulk-fetch GRN numbers / Service Order numbers for entries with grn_id
     grn_ids = [e.grn_id for e in entries if e.grn_id]
     grn_map = {}
+    so_map = {}
     if grn_ids:
         grn_result = await db.execute(select(GoodsReceiptNote).where(GoodsReceiptNote.id.in_(grn_ids)))
         for g in grn_result.scalars().all():
             grn_map[g.id] = g.grn_number
+
+        from app.models.logistics import LogisticsServiceOrder
+        so_result = await db.execute(select(LogisticsServiceOrder).where(LogisticsServiceOrder.id.in_(grn_ids)))
+        for s in so_result.scalars().all():
+            so_map[s.id] = s.so_number
 
     items_list = []
     for e in entries:
         data = GatePassResponse.model_validate(e).model_dump()
         data["dispatch_number"] = e.dispatch_order.dispatch_number if e.dispatch_order else None
         data["grn_number"] = grn_map.get(e.grn_id)
+        data["so_number"] = so_map.get(e.grn_id)
+        data["so_id"] = e.grn_id if e.grn_id in so_map else None
         data["warehouse_name"] = e.warehouse.name if e.warehouse else None
         items_list.append(data)
 
@@ -3676,7 +4207,7 @@ async def create_gate_entry(
         gate_pass_number=gp_number,
         gate_type=payload.gate_type,
         warehouse_id=payload.warehouse_id,
-        grn_id=payload.grn_id,
+        grn_id=payload.so_id or payload.grn_id,
         dispatch_id=payload.dispatch_id,
         vehicle_number=payload.vehicle_number,
         person_name=payload.person_name,

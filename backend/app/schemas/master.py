@@ -407,8 +407,15 @@ class ItemCreate(BaseModel):
     def check_min_max(self):
         if (self.min_order_qty and self.max_order_qty
                 and self.min_order_qty > 0 and self.max_order_qty > 0
-                and self.min_order_qty > self.max_order_qty):
-            raise ValueError("Min order qty cannot be greater than max order qty")
+                and self.min_order_qty >= self.max_order_qty):
+            raise ValueError("Min order qty must be less than max order qty")
+        
+        # Automatically set has_serial = True for asset/equipment types
+        item_type_lower = (self.item_type or "").lower()
+        asset_keywords = ['asset', 'equipment', 'laptop', 'computer', 'it', 'fixed']
+        if any(kw in item_type_lower for kw in asset_keywords):
+            self.has_serial = True
+            
         return self
 
 
@@ -484,6 +491,15 @@ class ItemUpdate(BaseModel):
             if v not in VALID_BARCODE_TYPES:
                 raise ValueError(f"Invalid barcode type. Must be one of: {', '.join(VALID_BARCODE_TYPES)}")
         return v
+
+    @model_validator(mode="after")
+    def check_asset_serial(self):
+        if self.item_type is not None:
+            item_type_lower = self.item_type.lower()
+            asset_keywords = ['asset', 'equipment', 'laptop', 'computer', 'it', 'fixed']
+            if any(kw in item_type_lower for kw in asset_keywords):
+                self.has_serial = True
+        return self
 
 
 class ItemResponse(BaseModel):
@@ -646,8 +662,8 @@ class VendorCreate(BaseModel):
     bank_name: Optional[str] = None
     bank_account: Optional[str] = None
     bank_ifsc: Optional[str] = None
-    payment_terms_days: int = 30
-    credit_limit: Decimal = Decimal("0")
+    payment_terms_days: Optional[int] = 30
+    credit_limit: Optional[Decimal] = Decimal("0")
     vendor_type: str = "material"
     vendor_type_id: Optional[int] = None
     vendor_type_ids: List[int] = Field(default_factory=list)
@@ -896,6 +912,7 @@ class VendorResponse(BaseModel):
     license_doc_url: Optional[str] = None
     vendor_compliance_status: Optional[str] = None
     is_active: bool
+    has_login: Optional[bool] = None
     status: Optional[str] = None
     created_at: Optional[datetime] = None
     model_config = {"from_attributes": True}
@@ -991,6 +1008,7 @@ class WarehouseCreate(BaseModel):
     contact_phone: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
+    parent_id: Optional[int] = None
 
     @field_validator("code")
     @classmethod
@@ -1035,6 +1053,7 @@ class WarehouseUpdate(BaseModel):
     contact_person: Optional[str] = None
     phone: Optional[str] = None
     is_active: Optional[bool] = None
+    parent_id: Optional[int] = None
 
 
 class WarehouseResponse(BaseModel):
@@ -1050,6 +1069,8 @@ class WarehouseResponse(BaseModel):
     is_active: bool
     status: Optional[str] = None
     created_at: Optional[datetime] = None
+    parent_id: Optional[int] = None
+    parent_name: Optional[str] = None
     model_config = {"from_attributes": True}
 
     @model_validator(mode="after")
@@ -1357,13 +1378,13 @@ class VendorItemBulkMapCreate(BaseModel):
 
 
 class UserItemBulkMapCreate(BaseModel):
-    user_ids: List[int]
+    role_ids: List[int]
     category_ids: List[int] = Field(default_factory=list)
     item_ids: List[int] = Field(default_factory=list)
     action: str = "view"
     replace_existing: bool = False
 
-    @field_validator("user_ids", "category_ids", "item_ids")
+    @field_validator("role_ids", "category_ids", "item_ids")
     @classmethod
     def val_id_list(cls, v):
         ids = []
@@ -1389,8 +1410,8 @@ class UserItemBulkMapCreate(BaseModel):
 
     @model_validator(mode="after")
     def val_mapping(self):
-        if not self.user_ids:
-            raise ValueError("Select at least one user")
+        if not self.role_ids:
+            raise ValueError("Select at least one role")
         if not self.category_ids and not self.item_ids:
             raise ValueError("Select at least one category or item")
         return self

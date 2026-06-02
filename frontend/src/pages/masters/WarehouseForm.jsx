@@ -50,6 +50,7 @@ const WarehouseDetail = () => {
           <Descriptions.Item label="Name">{warehouse.name || warehouse.warehouse_name}</Descriptions.Item>
           <Descriptions.Item label="Code">{warehouse.code || '-'}</Descriptions.Item>
           <Descriptions.Item label="Type">{warehouse.warehouse_type || '-'}</Descriptions.Item>
+          <Descriptions.Item label="Parent Warehouse">{warehouse.parent_name || 'None (Top Level)'}</Descriptions.Item>
           <Descriptions.Item label="Address" span={2}>{warehouse.address || '-'}</Descriptions.Item>
           <Descriptions.Item label="City">{warehouse.city || '-'}</Descriptions.Item>
           <Descriptions.Item label="State">{warehouse.state || '-'}</Descriptions.Item>

@@ -1,13 +1,15 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Button, Drawer, Form, Input, InputNumber, Select, Switch, Space, Tabs,
-  Popconfirm, message, Row, Col, Rate, Table, Card, Descriptions, Tag,
-  Spin, Empty, Modal, Tooltip, Typography,
+  Popconfirm, App as AntApp, Row, Col, Rate, Table, Card, Descriptions, Tag,
+  Spin, Empty, Modal, Tooltip, Typography, Alert,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined,
-  ArrowLeftOutlined, DownloadOutlined,
+  ArrowLeftOutlined, DownloadOutlined, CloseCircleOutlined,
+  WarningOutlined, KeyOutlined, LockOutlined, UserOutlined,
+  CheckCircleOutlined, CloseOutlined,
 } from '@ant-design/icons';
 import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
@@ -15,6 +17,7 @@ import StatusTag from '../../components/StatusTag';
 import api from '../../config/api';
 import {
   formatCurrency, formatDate, getErrorMessage, downloadExcel, formatNumber,
+  handleFormValidationFailed,
 } from '../../utils/helpers';
 
 const STATES = [
@@ -43,17 +46,44 @@ const legacyVendorType = (type) => {
   return 'material';
 };
 
+const isMaterialSupplierVendor = (record) => {
+  const typeCodes = Array.isArray(record?.vendor_types)
+    ? record.vendor_types.map((t) => legacyVendorType(t))
+    : [];
+  const primaryType = legacyVendorType(record?.vendor_type_name || record?.vendor_type);
+  return typeCodes.includes('material')
+    || typeCodes.includes('both')
+    || primaryType === 'material'
+    || primaryType === 'both';
+};
+
+const filterMaterialSupplierVendors = (items) => items.filter(isMaterialSupplierVendor);
+
 const Vendors = () => {
+  const { message } = AntApp.useApp();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingVendor, setEditingVendor] = useState(null);
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [formErrors, setFormErrors] = useState([]);
+
+  const hasTabErrors = (tabKey) => {
+    const tabFields = {
+      basic: ['vendor_code', 'name', 'contact_person', 'email', 'phone', 'alt_phone', 'status'],
+      address: ['address_line1', 'address_line2', 'city', 'state', 'pincode', 'country'],
+      tax_bank: ['gst_number', 'pan_number', 'bank_name', 'bank_account', 'bank_ifsc'],
+      terms: ['payment_terms_days', 'credit_limit', 'vendor_type_ids', 'vendor_category_id', 'is_transport_vendor']
+    };
+    const fieldsWithError = formErrors
+      .filter(f => f.errors && f.errors.length > 0)
+      .map(f => Array.isArray(f.name) ? f.name[0] : f.name);
+    
+    return fieldsWithError.some(fieldName => tabFields[tabKey]?.includes(fieldName));
+  };
   const [filterType, setFilterType] = useState(undefined);
   const [filterCategory, setFilterCategory] = useState(undefined);
   const [filterCity, setFilterCity] = useState(undefined);
-  const [filterState, setFilterState] = useState(undefined);
-  const [filterTransport, setFilterTransport] = useState(undefined);
   const [vendorTypes, setVendorTypes] = useState([]);
   const [vendorTypeLoading, setVendorTypeLoading] = useState(false);
   const [vendorTypeModalOpen, setVendorTypeModalOpen] = useState(false);
@@ -78,10 +108,30 @@ const Vendors = () => {
   const [vendorPOs, setVendorPOs] = useState([]);
   const [detailDataLoading, setDetailDataLoading] = useState(false);
 
+  // Supplier login management state
+  const [supplierLogins, setSupplierLogins] = useState([]);
+  const [supplierLoginsLoading, setSupplierLoginsLoading] = useState(false);
+  const [supplierLoginModal, setSupplierLoginModal] = useState(false);
+  const [supplierLoginVendor, setSupplierLoginVendor] = useState(null);
+  const [supplierLoginForm] = Form.useForm();
+  const [supplierLoginSubmitting, setSupplierLoginSubmitting] = useState(false);
+  const [supplierLoginMode, setSupplierLoginMode] = useState('create'); // 'create' | 'reset'
+  const [supplierLoginError, setSupplierLoginError] = useState('');
+
   useEffect(() => {
     fetchVendorTypes();
     fetchVendorCategories();
+    fetchSupplierLogins();
   }, []);
+
+  const supplierLoginVendorIds = useMemo(
+    () => new Set(
+      supplierLogins
+        .filter((row) => row.login)
+        .map((row) => Number(row.vendor_id)),
+    ),
+    [supplierLogins],
+  );
 
   const fetchVendorTypes = async () => {
     setVendorTypeLoading(true);
@@ -109,6 +159,96 @@ const Vendors = () => {
     }
   };
 
+  const fetchSupplierLogins = async () => {
+    setSupplierLoginsLoading(true);
+    try {
+      const res = await api.get('/masters/vendors/supplier-logins');
+      setSupplierLogins(res.data || []);
+    } catch {
+      setSupplierLogins([]);
+    } finally {
+      setSupplierLoginsLoading(false);
+    }
+  };
+
+  const openSupplierLoginModal = (vendor, mode) => {
+    const existingLogin = vendor.login;
+    const resolvedMode = mode || (existingLogin ? 'reset' : 'create');
+
+    setSupplierLoginVendor(vendor);
+    setSupplierLoginMode(resolvedMode);
+    setSupplierLoginError('');
+    supplierLoginForm.resetFields();
+    if (resolvedMode === 'create') {
+      supplierLoginForm.setFieldsValue({
+        full_name: vendor.contact_person || '',
+        email: vendor.email || '',
+        phone: vendor.phone || '',
+      });
+    } else {
+      supplierLoginForm.setFieldsValue({
+        full_name: vendor.contact_person || '',
+        email: vendor.login?.email || vendor.email || '',
+        phone: vendor.phone || '',
+        is_active: vendor.login?.is_active !== false,
+      });
+    }
+    setSupplierLoginModal(true);
+  };
+
+  const handleSupplierLoginSubmit = async (values) => {
+    if (supplierLoginMode === 'create' && supplierLoginVendor?.is_active === false) {
+      setSupplierLoginError('Cannot create portal login for an inactive vendor. Activate the vendor first.');
+      return;
+    }
+    setSupplierLoginSubmitting(true);
+    setSupplierLoginError('');
+    try {
+      const vendorId = supplierLoginVendor.vendor_id;
+      if (supplierLoginMode === 'create') {
+        await api.post(`/masters/vendors/${vendorId}/supplier-login`, {
+          username: values.username,
+          email: values.email,
+          password: values.password,
+          full_name: values.full_name,
+          phone: values.phone,
+        });
+        message.success('Supplier login created successfully');
+      } else {
+        await api.put(`/masters/vendors/${vendorId}/supplier-login`, {
+          new_password: values.password || undefined,
+          is_active: values.is_active !== undefined ? values.is_active : undefined,
+          email: values.email,
+          full_name: values.full_name,
+          phone: values.phone,
+        });
+        message.success('Supplier login updated');
+      }
+      setSupplierLoginModal(false);
+      await fetchSupplierLogins();
+    } catch (err) {
+      const detail = err?.response?.data?.detail;
+      const msg = Array.isArray(detail)
+        ? detail.map((d) => d.msg || d.message || String(d)).join(', ')
+        : detail || err?.response?.data?.message || 'Operation failed';
+      setSupplierLoginError(msg);
+      message.error(msg);
+    } finally {
+      setSupplierLoginSubmitting(false);
+    }
+  };
+
+  const handleDeactivateSupplierLogin = async (vendorId) => {
+    try {
+      await api.delete(`/masters/vendors/${vendorId}/supplier-login`);
+      message.success('Supplier login deactivated');
+      fetchSupplierLogins();
+    } catch (err) {
+      message.error(err?.response?.data?.detail || 'Failed to deactivate login');
+    }
+  };
+
+
   const vendorTypeOptions = vendorTypes
     .filter((t) => t.is_active !== false)
     .map((t) => ({ label: t.name, value: t.id, code: t.code }));
@@ -123,25 +263,36 @@ const Vendors = () => {
       if (filterType) queryParams.vendor_type = filterType;
       if (filterCategory) queryParams.vendor_category_id = filterCategory;
       if (filterCity) queryParams.city = filterCity;
-      if (filterState) queryParams.state = filterState;
-      if (filterTransport !== undefined) queryParams.is_transport_vendor = filterTransport;
-      return await api.get('/masters/vendors', { params: queryParams });
+      const response = await api.get('/masters/vendors', { params: queryParams });
+      const responseData = response.data || {};
+      const items = responseData.items || responseData.data || responseData || [];
+      if (!Array.isArray(items)) return response;
+      const filteredItems = items.filter(isMaterialSupplierVendor);
+      return {
+        ...response,
+        data: {
+          ...responseData,
+          items: filteredItems,
+          data: filteredItems,
+          total: filterType ? responseData.total : filteredItems.length,
+          count: filterType ? responseData.count : filteredItems.length,
+        },
+      };
     },
-    [filterType, filterCategory, filterCity, filterState, filterTransport]
+    [filterType, filterCategory, filterCity]
   );
 
   const handleAdd = () => {
     setEditingVendor(null);
     form.resetFields();
-    // BUG-FE-057: do NOT auto-generate vendor_code client-side. Two rapid
-    // double-creates within the same millisecond can collide. Leave blank so
-    // the backend assigns a server-side sequenced code at create time.
+    setFormErrors([]);
     form.setFieldsValue({ vendor_code: '', status: 'active', is_transport_vendor: false, country: 'India', vendor_type_ids: [], vendor_category_id: undefined });
     setDrawerOpen(true);
   };
 
   const handleEdit = (record) => {
     setEditingVendor(record);
+    setFormErrors([]);
     form.setFieldsValue({
       ...record,
       vendor_type_ids: record.vendor_type_ids || [],
@@ -202,7 +353,10 @@ const Vendors = () => {
       setEditingVendor(null);
       setRefreshKey((k) => k + 1);
     } catch (err) {
-      if (err.errorFields) return;
+      if (err.errorFields) {
+        handleFormValidationFailed(err);
+        return;
+      }
       message.error(getErrorMessage(err));
     } finally {
       setSubmitting(false);
@@ -436,23 +590,52 @@ const Vendors = () => {
       title: 'Type',
       dataIndex: 'vendor_type',
       key: 'vendor_type',
-      width: 130,
+      width: 190,
       render: (v, record) => {
         const types = Array.isArray(record?.vendor_types) ? record.vendor_types : [];
         if (types.length) {
-          return <Space size={4} wrap>{types.map((t) => <Tag key={t.id || t.code || t.name}>{t.name || t.code}</Tag>)}</Space>;
+          return (
+            <Space size={[4, 4]} wrap style={{ maxWidth: 180 }}>
+              {types.map((t) => (
+                <Tag
+                  key={t.id || t.code || t.name}
+                  style={{
+                    maxWidth: 170,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    marginInlineEnd: 0,
+                  }}
+                >
+                  {t.name || t.code}
+                </Tag>
+              ))}
+            </Space>
+          );
         }
-        if (record?.vendor_type_name) return record.vendor_type_name;
-        if (typeof v === 'string' || typeof v === 'number') return v;
-        return '-';
+        const label = record?.vendor_type_name || (typeof v === 'string' || typeof v === 'number' ? v : '-');
+        if (label === '-') return '-';
+        return (
+          <Typography.Text ellipsis style={{ maxWidth: 170, display: 'block' }}>
+            {label}
+          </Typography.Text>
+        );
       },
     },
     {
       title: 'Category',
       dataIndex: 'vendor_category_name',
       key: 'vendor_category',
-      width: 140,
-      render: (v, record) => v || record.vendor_category?.name || '-',
+      width: 220,
+      render: (v, record) => {
+        const label = v || record.vendor_category?.name || '-';
+        if (label === '-') return '-';
+        return (
+          <Typography.Text style={{ maxWidth: 205, display: 'block', whiteSpace: 'normal', wordBreak: 'break-word' }}>
+            {label}
+          </Typography.Text>
+        );
+      },
     },
     {
       title: 'Rating',
@@ -481,6 +664,53 @@ const Vendors = () => {
         <Space size="small">
           <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => handleViewVendor(record)} />
           <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
+          {isMaterialSupplierVendor(record) && (
+            (record.has_login || supplierLoginVendorIds.has(Number(record.id))) ? (
+              <Tooltip title="Manage active portal login">
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<UserOutlined style={{ color: '#52c41a' }} />}
+                  onClick={async () => {
+                    let vendorWithLogin = record;
+                    try {
+                      const res = await api.get(`/masters/vendors/${record.id}/supplier-login`);
+                      vendorWithLogin = {
+                        ...record,
+                        vendor_id: record.id,
+                        login: res.data?.has_login ? res.data : null,
+                      };
+                    } catch {
+                      vendorWithLogin = { ...record, vendor_id: record.id, login: null };
+                    }
+                    openSupplierLoginModal(vendorWithLogin, 'reset');
+                  }}
+                />
+              </Tooltip>
+            ) : (
+              <Tooltip title="Create supplier portal login">
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<KeyOutlined />}
+                  onClick={async () => {
+                    let vendorWithLogin = record;
+                    try {
+                      const res = await api.get(`/masters/vendors/${record.id}/supplier-login`);
+                      vendorWithLogin = {
+                        ...record,
+                        vendor_id: record.id,
+                        login: res.data?.has_login ? res.data : null,
+                      };
+                    } catch {
+                      vendorWithLogin = { ...record, vendor_id: record.id, login: null };
+                    }
+                    openSupplierLoginModal(vendorWithLogin, 'create');
+                  }}
+                />
+              </Tooltip>
+            )
+          )}
           <Popconfirm
             title="Delete this vendor?"
             onConfirm={() => handleDelete(record.id)}
@@ -511,26 +741,6 @@ const Vendors = () => {
         value={filterCategory}
         onChange={(v) => { setFilterCategory(v); setRefreshKey((k) => k + 1); }}
         options={vendorCategoryOptions}
-      />
-      <Select
-        placeholder="State"
-        allowClear
-        showSearch
-        style={{ width: 150 }}
-        value={filterState}
-        onChange={(v) => { setFilterState(v); setRefreshKey((k) => k + 1); }}
-        options={STATES.map((s) => ({ label: s, value: s }))}
-      />
-      <Select
-        placeholder="Transport"
-        allowClear
-        style={{ width: 130 }}
-        value={filterTransport}
-        onChange={(v) => { setFilterTransport(v); setRefreshKey((k) => k + 1); }}
-        options={[
-          { label: 'Transport', value: true },
-          { label: 'Non-Transport', value: false },
-        ]}
       />
     </Space>
   );
@@ -725,7 +935,7 @@ const Vendors = () => {
         searchPlaceholder="Search by vendor name or code..."
         exportFileName="vendors"
         toolbar={toolbar}
-        scroll={{ x: 1800 }}
+        scroll={{ x: 2000 }}
       />
 
       <Row gutter={16} style={{ marginTop: 16 }}>
@@ -807,11 +1017,11 @@ const Vendors = () => {
         title={editingVendor ? 'Edit Vendor' : 'Add Vendor'}
         width={720}
         open={drawerOpen}
-        onClose={() => { setDrawerOpen(false); setEditingVendor(null); form.resetFields(); }}
+        onClose={() => { setDrawerOpen(false); setEditingVendor(null); form.resetFields(); setFormErrors([]); }}
         destroyOnHidden
         extra={
           <Space>
-            <Button onClick={() => { setDrawerOpen(false); setEditingVendor(null); form.resetFields(); }}>
+            <Button onClick={() => { setDrawerOpen(false); setEditingVendor(null); form.resetFields(); setFormErrors([]); }}>
               Cancel
             </Button>
             <Button type="primary" onClick={handleSubmit} loading={submitting}>
@@ -820,23 +1030,52 @@ const Vendors = () => {
           </Space>
         }
       >
-        <Form form={form} layout="vertical">
+        <Form 
+          form={form} 
+          layout="vertical" 
+          scrollToFirstError={true}
+          onFieldsChange={() => {
+            setFormErrors(form.getFieldsError());
+          }}
+        >
           <Tabs
             defaultActiveKey="basic"
             items={[
               {
                 key: 'basic',
-                label: 'Basic',
+                label: (
+                  <Space>
+                    <span>Basic</span>
+                    {hasTabErrors('basic') && (
+                      <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 13 }} />
+                    )}
+                  </Space>
+                ),
                 children: (
                   <>
                     <Row gutter={16}>
                       <Col span={12}>
-                        <Form.Item name="vendor_code" label="Vendor Code" rules={[{ required: true, message: 'Required' }]}>
-                          <Input placeholder="e.g. VND-001" />
+                        <Form.Item 
+                          name="vendor_code" 
+                          label="Vendor Code" 
+                          rules={[
+                            { required: true, message: 'Vendor Code is required' },
+                            { pattern: /^[A-Za-z0-9-_]+$/, message: 'Vendor Code must be alphanumeric without spaces' }
+                          ]}
+                        >
+                          <Input placeholder="e.g. VND-001" style={{ textTransform: 'uppercase' }} onChange={(e) => form.setFieldsValue({ vendor_code: e.target.value.toUpperCase() })} />
                         </Form.Item>
                       </Col>
                       <Col span={12}>
-                        <Form.Item name="name" label="Vendor Name" rules={[{ required: true, message: 'Required' }]}>
+                        <Form.Item 
+                          name="name" 
+                          label="Vendor Name" 
+                          rules={[
+                            { required: true, message: 'Vendor Name is required' },
+                            { min: 3, message: 'Name must be at least 3 characters' },
+                            { max: 100, message: 'Name must not exceed 100 characters' }
+                          ]}
+                        >
                           <Input placeholder="Enter vendor name" />
                         </Form.Item>
                       </Col>
@@ -848,19 +1087,19 @@ const Vendors = () => {
                         </Form.Item>
                       </Col>
                       <Col span={12}>
-                        <Form.Item name="email" label="Email" rules={[{ type: 'email', message: 'Invalid email' }]}>
+                        <Form.Item name="email" label="Email" rules={[{ type: 'email', message: 'Please enter a valid email address (e.g. info@vendor.com)' }]}>
                           <Input placeholder="email@example.com" />
                         </Form.Item>
                       </Col>
                     </Row>
                     <Row gutter={16}>
                       <Col span={12}>
-                        <Form.Item name="phone" label="Phone" rules={[{ pattern: /^[0-9+\-\s()]{6,20}$/, message: 'Enter a valid phone number (6-20 digits)' }]}>
+                        <Form.Item name="phone" label="Phone" rules={[{ pattern: /^[0-9+\-\s()]{6,20}$/, message: 'Please enter a valid phone number (6-20 digits)' }]}>
                           <Input placeholder="Phone number" />
                         </Form.Item>
                       </Col>
                       <Col span={12}>
-                        <Form.Item name="alt_phone" label="Alt Phone" rules={[{ pattern: /^[0-9+\-\s()]{6,20}$/, message: 'Enter a valid phone number' }]}>
+                        <Form.Item name="alt_phone" label="Alt Phone" rules={[{ pattern: /^[0-9+\-\s()]{6,20}$/, message: 'Please enter a valid alternate phone number' }]}>
                           <Input placeholder="Alternate phone" />
                         </Form.Item>
                       </Col>
@@ -878,7 +1117,14 @@ const Vendors = () => {
               },
               {
                 key: 'address',
-                label: 'Address',
+                label: (
+                  <Space>
+                    <span>Address</span>
+                    {hasTabErrors('address') && (
+                      <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 13 }} />
+                    )}
+                  </Space>
+                ),
                 children: (
                   <>
                     <Form.Item name="address_line1" label="Address Line 1">
@@ -899,7 +1145,7 @@ const Vendors = () => {
                         </Form.Item>
                       </Col>
                       <Col span={8}>
-                        <Form.Item name="pincode" label="Pincode" rules={[{ pattern: /^[0-9]{5,10}$/, message: 'Enter a valid pincode (5-10 digits)' }]}>
+                        <Form.Item name="pincode" label="Pincode" rules={[{ pattern: /^[0-9]{5,10}$/, message: 'Pincode must be between 5 and 10 digits' }]}>
                           <Input placeholder="Pincode" />
                         </Form.Item>
                       </Col>
@@ -912,18 +1158,33 @@ const Vendors = () => {
               },
               {
                 key: 'tax_bank',
-                label: 'Tax & Bank',
+                label: (
+                  <Space>
+                    <span>Tax & Bank</span>
+                    {hasTabErrors('tax_bank') && (
+                      <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 13 }} />
+                    )}
+                  </Space>
+                ),
                 children: (
                   <>
                     <Row gutter={16}>
                       <Col span={12}>
-                        <Form.Item name="gst_number" label="GST Number" rules={[{ pattern: /^[0-9]{2}[A-Z0-9]{10}[A-Z0-9]{3}$/, message: 'Enter valid 15-char GSTIN (e.g. 29ABCDE1234F1Z5)' }]}>
-                          <Input placeholder="GSTIN" style={{ textTransform: 'uppercase' }} />
+                        <Form.Item 
+                          name="gst_number" 
+                          label="GST Number" 
+                          rules={[{ pattern: /^[0-9]{2}[A-Z0-9]{10}[A-Z0-9]{3}$/, message: 'Enter a valid 15-character GSTIN (e.g. 29ABCDE1234F1Z5)' }]}
+                        >
+                          <Input placeholder="GSTIN" style={{ textTransform: 'uppercase' }} onChange={(e) => form.setFieldsValue({ gst_number: e.target.value.toUpperCase() })} />
                         </Form.Item>
                       </Col>
                       <Col span={12}>
-                        <Form.Item name="pan_number" label="PAN Number">
-                          <Input placeholder="PAN" />
+                        <Form.Item 
+                          name="pan_number" 
+                          label="PAN Number"
+                          rules={[{ pattern: /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/, message: 'Enter a valid 10-character PAN number (e.g. ABCDE1234F)' }]}
+                        >
+                          <Input placeholder="PAN" style={{ textTransform: 'uppercase' }} onChange={(e) => form.setFieldsValue({ pan_number: e.target.value.toUpperCase() })} />
                         </Form.Item>
                       </Col>
                     </Row>
@@ -934,13 +1195,21 @@ const Vendors = () => {
                         </Form.Item>
                       </Col>
                       <Col span={8}>
-                        <Form.Item name="bank_account" label="Bank Account No">
+                        <Form.Item 
+                          name="bank_account" 
+                          label="Bank Account No"
+                          rules={[{ pattern: /^[0-9]{9,18}$/, message: 'Bank Account Number must be between 9 and 18 numeric digits' }]}
+                        >
                           <Input placeholder="Account number" />
                         </Form.Item>
                       </Col>
                       <Col span={8}>
-                        <Form.Item name="bank_ifsc" label="Bank IFSC">
-                          <Input placeholder="IFSC code" />
+                        <Form.Item 
+                          name="bank_ifsc" 
+                          label="Bank IFSC"
+                          rules={[{ pattern: /^[A-Z]{4}0[A-Z0-9]{6}$/, message: 'Enter a valid 11-character IFSC code (e.g. HDFC0000123)' }]}
+                        >
+                          <Input placeholder="IFSC code" style={{ textTransform: 'uppercase' }} onChange={(e) => form.setFieldsValue({ bank_ifsc: e.target.value.toUpperCase() })} />
                         </Form.Item>
                       </Col>
                     </Row>
@@ -949,16 +1218,19 @@ const Vendors = () => {
               },
               {
                 key: 'terms',
-                label: 'Terms',
+                label: (
+                  <Space>
+                    <span>Terms</span>
+                    {hasTabErrors('terms') && (
+                      <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 13 }} />
+                    )}
+                  </Space>
+                ),
                 children: (
                   <>
                     <Row gutter={16}>
                       <Col span={12}>
                         <Form.Item name="payment_terms_days" label="Payment Terms (days)">
-                          {/* BUG-FE-059: allow custom day counts in addition to
-                              the preset list. Numeric InputNumber lets users
-                              capture vendor-specific terms (e.g. 21, 75) that
-                              wouldn't fit the original fixed Select. */}
                           <InputNumber
                             min={0}
                             max={365}
@@ -1062,6 +1334,113 @@ const Vendors = () => {
           <Form.Item name="status" label="Status" initialValue="active">
             <Select options={[{ label: 'Active', value: 'active' }, { label: 'Inactive', value: 'inactive' }]} />
           </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={supplierLoginMode === 'create' ? 'Create Supplier Login' : 'Manage Supplier Login'}
+        open={supplierLoginModal}
+        onCancel={() => {
+          setSupplierLoginModal(false);
+          setSupplierLoginVendor(null);
+          supplierLoginForm.resetFields();
+          setSupplierLoginError('');
+        }}
+        footer={null}
+        destroyOnHidden
+      >
+        <Descriptions size="small" column={1} style={{ marginBottom: 16 }}>
+          <Descriptions.Item label="Supplier">
+            {supplierLoginVendor?.name || '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Vendor Code">
+            {supplierLoginVendor?.vendor_code || '-'}
+          </Descriptions.Item>
+          <Descriptions.Item label="Vendor Status">
+            <Tag color={supplierLoginVendor?.is_active === false ? 'red' : 'success'}>
+              {supplierLoginVendor?.is_active === false ? 'Inactive' : 'Active'}
+            </Tag>
+          </Descriptions.Item>
+        </Descriptions>
+        {supplierLoginError && (
+          <Alert
+            type="error"
+            showIcon
+            message={supplierLoginError}
+            style={{ marginBottom: 16 }}
+          />
+        )}
+        <Form
+          form={supplierLoginForm}
+          layout="vertical"
+          onFinish={handleSupplierLoginSubmit}
+          initialValues={{ is_active: true }}
+        >
+          {supplierLoginMode === 'create' && (
+            <Form.Item
+              name="username"
+              label="Username"
+              rules={[
+                { required: true, message: 'Username is required' },
+                { min: 3, message: 'Minimum 3 characters' },
+                { pattern: /^[a-zA-Z0-9_.-]+$/, message: 'Use letters, numbers, dot, dash or underscore only' },
+              ]}
+            >
+              <Input prefix={<UserOutlined />} placeholder="supplier.username" />
+            </Form.Item>
+          )}
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="full_name" label="Contact Name">
+                <Input placeholder="Contact person" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="phone" label="Phone">
+                <Input placeholder="Phone" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item name="email" label="Email" rules={[{ required: supplierLoginMode === 'create' }, { type: 'email' }]}>
+            <Input placeholder="supplier@example.com" />
+          </Form.Item>
+          <Form.Item
+            name="password"
+            label={supplierLoginMode === 'create' ? 'Temporary Password' : 'New Password'}
+            rules={[
+              { required: supplierLoginMode === 'create', message: 'Password is required' },
+              ...(supplierLoginMode === 'create' ? [
+                { min: 8, message: 'Minimum 8 characters' },
+                { pattern: /[A-Z]/, message: 'Must include uppercase letter' },
+                { pattern: /[a-z]/, message: 'Must include lowercase letter' },
+                { pattern: /\d/, message: 'Must include a number' },
+              ] : [
+                {
+                  validator: (_, value) => {
+                    if (!value) return Promise.resolve();
+                    if (value.length < 8) return Promise.reject(new Error('Minimum 8 characters'));
+                    if (!/[A-Z]/.test(value)) return Promise.reject(new Error('Must include uppercase letter'));
+                    if (!/[a-z]/.test(value)) return Promise.reject(new Error('Must include lowercase letter'));
+                    if (!/\d/.test(value)) return Promise.reject(new Error('Must include a number'));
+                    return Promise.resolve();
+                  }
+                }
+              ])
+            ]}
+          >
+            <Input.Password prefix={<LockOutlined />} placeholder={supplierLoginMode === 'create' ? 'At least 8 characters' : 'Leave blank to keep current password'} />
+          </Form.Item>
+          {supplierLoginMode !== 'create' && (
+            <Form.Item name="is_active" label="Active" valuePropName="checked">
+              <Switch />
+            </Form.Item>
+          )}
+          <Space style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Button onClick={() => setSupplierLoginModal(false)}>Cancel</Button>
+            <Button type="primary" htmlType="submit" loading={supplierLoginSubmitting} icon={<KeyOutlined />}>
+              {supplierLoginMode === 'create' ? 'Create Login' : 'Update Login'}
+            </Button>
+          </Space>
         </Form>
       </Modal>
     </div>

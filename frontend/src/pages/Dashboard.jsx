@@ -71,7 +71,6 @@ const Dashboard = () => {
     if (['field_supervisor', 'project_manager'].includes(r)) return 'approver';
     if (['warehouse_manager', 'warehouse_operator', 'store_keeper', 'quality_inspector'].includes(r)) return 'warehouse';
     if (['purchase_manager', 'purchase_officer'].includes(r)) return 'procurement';
-    if (['logistics_manager'].includes(r)) return 'logistics';
     if (['accounts_manager', 'accounts_officer'].includes(r)) return 'accounts';
     if (['viewer'].includes(r)) return 'viewer';
     if (['super_admin', 'admin'].includes(r)) return 'ops';
@@ -326,12 +325,6 @@ const Dashboard = () => {
     { lbl: 'Overdue POs',         val: fmtNum(alerts.overdue_pos.length), delta: 'past expected date', icon: <CarOutlined />, color: '#D80048', onClick: () => navigate('/procurement/purchase-orders'), requiredKey: 'procurement-purchase-orders' },
     { lbl: 'PO Spend (mo)',       val: fmtMoney(get('po_spend_month')), delta: 'this month', icon: <InboxOutlined />, color: '#2E7D52', onClick: () => navigate('/reports/procurement'), requiredKey: 'reports-procurement' },
   ];
-  const _kpisLogistics = [
-    { lbl: 'Pending Transport Reqs', val: fmtNum(get('pending_transport_requirements')), delta: 'awaiting plan',     icon: <CarOutlined />,    color: '#D80048', onClick: () => navigate('/logistics/transport-requirements'), requiredKey: 'logistics-transport-requirements' },
-    { lbl: 'Open Transport Orders',  val: fmtNum(get('open_transport_orders')),         delta: 'in dispatch',       icon: <ShoppingCartOutlined />, color: '#481890', onClick: () => navigate('/logistics/transport-orders'), requiredKey: 'logistics-transport-orders' },
-    { lbl: 'Active Shipments',       val: fmtNum(get('active_shipments')),              delta: 'in transit',        icon: <BarChartOutlined />, color: '#F09000', onClick: () => navigate('/logistics/shipment-tracking'), requiredKey: 'logistics-shipment-tracking' },
-    { lbl: 'Fleet Available',        val: fmtNum(get('fleet_available')),               delta: 'idle vehicles',     icon: <HeartOutlined />,   color: '#2E7D52', onClick: () => navigate('/logistics/fleet-dashboard'), requiredKey: 'logistics-fleet-dashboard' },
-  ];
   const _kpisAccounts = [
     { lbl: 'Invoices Pending',    val: fmtNum(get('invoices_pending')),    delta: 'awaiting payment',     icon: <ShoppingCartOutlined />, color: '#D80048', onClick: () => navigate('/accounts/invoices'), requiredKey: 'accounts-invoices' },
     { lbl: 'Payments (today)',    val: fmtMoney(get('payments_today')),    delta: 'released today',       icon: <HeartOutlined />,    color: '#2E7D52', onClick: () => navigate('/accounts/payments'), requiredKey: 'accounts-payments' },
@@ -351,7 +344,6 @@ const Dashboard = () => {
       case 'approver': return _kpisApprover;
       case 'warehouse': return _kpisWarehouse;
       case 'procurement': return _kpisProcurement;
-      case 'logistics': return _kpisLogistics;
       case 'accounts': return _kpisAccounts;
       case 'viewer': return _kpisViewer;
       default: return _kpisOps;
@@ -480,7 +472,6 @@ const Dashboard = () => {
           approver: 'Approvals Inbox',
           warehouse: 'Warehouse Snapshot',
           procurement: 'Procurement Snapshot',
-          logistics: 'Logistics Snapshot',
           accounts: 'Accounts Snapshot',
           viewer: 'Read-Only Snapshot',
           ops: 'Operations Snapshot',
@@ -490,7 +481,6 @@ const Dashboard = () => {
           approver:    { label: 'Open Approvals',    to: '/approvals/pending' },
           warehouse:   { label: 'Issue Materials',   to: '/warehouse/material-issues' },
           procurement: { label: 'New Material Request', to: '/procurement/material-requests/new' },
-          logistics:   { label: 'New Transport Order', to: '/logistics/transport-orders' },
           accounts:    { label: 'New Invoice',       to: '/accounts/invoices' },
           viewer:      null,
           ops:         { label: 'New Request',       to: '/procurement/material-requests/new' },

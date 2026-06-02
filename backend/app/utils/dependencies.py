@@ -1,13 +1,19 @@
 from typing import List, Optional
 from functools import wraps
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.database import get_db
-from app.models.user import User, UserRole, Role, RolePermission, Permission
+from app.models.user import User, UserRole, Role, RolePermission, Permission, ApiKey
 from app.services.auth_service import verify_access_token
+import hashlib
+import json
+from datetime import datetime, timezone
+
+# Carrier model is imported lazily inside get_current_carrier_user to avoid
+# import-cycles between dependencies and the carrier router.
 
 # BUG-AUTH-040 fix: HTTPBearer defaults to raising 403 when no Authorization
 # header is present. The frontend axios refresh interceptor only retries on
@@ -47,6 +53,16 @@ async def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
+        )
+
+    # Carrier tokens must NOT be usable as employee tokens. They carry an
+    # explicit ``carrier_portal=True`` claim minted by /carrier-auth/login; refuse
+    # them here so the employee surface stays segregated.
+    if payload.get("carrier_portal"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This token is for the carrier portal and cannot be used here",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     # BUG-AUTH-017/019 (Wave 5): server-side token blocklist. We hash the
@@ -265,6 +281,140 @@ def require_any_role(*role_codes: str):
 
     return check_role
 
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+def require_api_key_scope(required_scope: str):
+    async def get_api_key_user(
+        request: Request = None,
+        api_key: str = Depends(api_key_header),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        if not api_key:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing X-API-Key header",
+            )
+        
+        key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+        
+        result = await db.execute(select(ApiKey).where(ApiKey.key_hash == key_hash))
+        api_key_record = result.scalar_one_or_none()
+        
+        if not api_key_record:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API Key",
+            )
+            
+        if not api_key_record.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API Key is inactive",
+            )
+            
+        if api_key_record.expires_at and api_key_record.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API Key has expired",
+            )
+            
+        scopes = json.loads(api_key_record.scopes) if api_key_record.scopes else []
+        if required_scope not in scopes:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"API Key missing required scope: {required_scope}",
+            )
+            
+        # Update last used
+        api_key_record.last_used_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        await db.commit()
+        
+        # Get user
+        user_result = await db.execute(select(User).where(User.id == api_key_record.user_id))
+        user = user_result.scalar_one_or_none()
+        
+        if not user or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is deactivated or missing",
+            )
+            
+        user.used_api_key = api_key_record
+        return user
+        
+    return get_api_key_user
+
+
+def require_stock_balance_scope():
+    async def get_api_key_user(
+        request: Request = None,
+        api_key: str = Depends(api_key_header),
+        db: AsyncSession = Depends(get_db),
+    ) -> User:
+        if not api_key:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing X-API-Key header",
+            )
+        
+        key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+        
+        result = await db.execute(select(ApiKey).where(ApiKey.key_hash == key_hash))
+        api_key_record = result.scalar_one_or_none()
+        
+        if not api_key_record:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid API Key",
+            )
+            
+        if not api_key_record.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API Key is inactive",
+            )
+            
+        if api_key_record.expires_at and api_key_record.expires_at < datetime.now(timezone.utc).replace(tzinfo=None):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API Key has expired",
+            )
+            
+        scopes = json.loads(api_key_record.scopes) if api_key_record.scopes else []
+        
+        has_access = "inventory:stock-balance:read" in scopes
+        if not has_access:
+            for s in scopes:
+                if s.startswith("inventory:stock-balance:"):
+                    has_access = True
+                    break
+                    
+        if not has_access:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="API Key missing required scope: inventory:stock-balance:read or granular stock balance scope",
+            )
+            
+        # Update last used
+        api_key_record.last_used_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        await db.commit()
+        
+        # Get user
+        user_result = await db.execute(select(User).where(User.id == api_key_record.user_id))
+        user = user_result.scalar_one_or_none()
+        
+        if not user or not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is deactivated or missing",
+            )
+            
+        user.used_api_key = api_key_record
+        return user
+        
+    return get_api_key_user
+
+
 
 # Roles that see every indent/PO/MR regardless of warehouse mapping.
 # Anyone NOT in this set is scoped down to:
@@ -273,7 +423,7 @@ def require_any_role(*role_codes: str):
 MANAGERIAL_ROLES = frozenset({
     "super_admin", "admin",
     "warehouse_manager", "purchase_manager", "accounts_manager",
-    "logistics_manager", "project_manager",
+    "project_manager",
     "purchase_officer", "accounts_officer",
 })
 
@@ -291,3 +441,87 @@ async def user_warehouse_ids(db: AsyncSession, user_id: int) -> List[int]:
         select(UserWarehouse.warehouse_id).where(UserWarehouse.user_id == user_id)
     )
     return [row[0] for row in result.all()]
+
+
+# =============================================================
+# Carrier portal authentication
+# =============================================================
+async def get_current_carrier_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db),
+):
+    """Extract the logged-in transport carrier (carrier_users row) from a
+    JWT minted by /carrier-auth/login. Refuses regular employee tokens."""
+    from app.models.carrier import CarrierUser
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Carrier authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    payload = verify_access_token(credentials.credentials)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not payload.get("carrier_portal"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This token is not a carrier token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    carrier_id = payload.get("sub")
+    if not carrier_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+    res = await db.execute(select(CarrierUser).where(CarrierUser.id == int(carrier_id)))
+    cu = res.scalar_one_or_none()
+    if not cu or not cu.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Carrier user not found or inactive")
+    if cu.vendor is None or not cu.vendor.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Carrier vendor account is inactive")
+    return cu
+
+
+# =============================================================
+# Vendor (material supplier) portal authentication
+# =============================================================
+async def get_current_vendor_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db),
+):
+    """Extract the logged-in material supplier (vendor_users row) from a
+    JWT minted by /vendor-auth/login. Refuses employee and carrier tokens."""
+    from app.models.vendor_portal import VendorUser
+
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Supplier portal authentication required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    payload = verify_access_token(credentials.credentials)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not payload.get("vendor_portal"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This token is not a supplier portal token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    vendor_user_id = payload.get("sub")
+    if not vendor_user_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token payload")
+    res = await db.execute(select(VendorUser).where(VendorUser.id == int(vendor_user_id)))
+    vu = res.scalar_one_or_none()
+    if not vu or not vu.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Supplier user not found or inactive")
+    if vu.vendor is None or not vu.vendor.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Supplier vendor account is inactive")
+    return vu

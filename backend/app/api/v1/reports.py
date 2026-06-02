@@ -16,8 +16,6 @@ from app.services.report_service import (
     # Accounts
     accounts_payable_report, accounts_receivable_report, payment_summary_report,
     vendor_ledger_report, po_ledger_report, project_ledger_report,
-    # Logistics
-    transport_summary_report, transport_cost_report,
     # Asset
     asset_register_report,
 )
@@ -168,44 +166,6 @@ async def reports_consumption_dispatch(
 @router.get("/consumption/chart")
 async def reports_consumption_chart(
     report_type: str = Query("summary"),
-    chart: bool = Query(True),
-    current_user: User = Depends(get_current_user),
-):
-    return {"labels": [], "datasets": [], "report_type": report_type}
-
-
-@router.get("/logistics")
-async def reports_logistics_dispatch(
-    report_type: str = Query("transport_summary"),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100000),  # BUG-FIN-103/106: lift export cap
-    date_from: Optional[str] = Query(None),
-    date_to: Optional[str] = Query(None),
-    vendor_id: Optional[int] = Query(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Logistics reports dispatcher.
-
-    BUG-FIN-097: previously returned an empty stub.
-    """
-    df = _parse_date(date_from)
-    dt = _parse_date(date_to)
-    if report_type == "transport_summary":
-        rows = await transport_summary_report(db, df, dt)
-    elif report_type == "transport_cost":
-        rows = await transport_cost_report(db, df, dt, vendor_id)
-    else:
-        rows = await transport_summary_report(db, df, dt)
-    rows = list(rows or [])
-    out = _paginate_list(rows, page, page_size)
-    out["report_type"] = report_type
-    return out
-
-
-@router.get("/logistics/chart")
-async def reports_logistics_chart(
-    report_type: str = Query("transport_requirement"),
     chart: bool = Query(True),
     current_user: User = Depends(get_current_user),
 ):
@@ -845,55 +805,6 @@ async def rpt_gst_summary(
     result = await db.execute(query)
     return [dict(row._mapping) for row in result.all()]
 
-
-# ==================== LOGISTICS REPORTS ====================
-
-@router.get("/logistics/transport-summary")
-async def rpt_transport_summary(
-    date_from: Optional[date] = Query(None),
-    date_to: Optional[date] = Query(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await transport_summary_report(db, date_from, date_to)
-
-
-@router.get("/logistics/transport-cost")
-async def rpt_transport_cost(
-    date_from: Optional[date] = Query(None),
-    date_to: Optional[date] = Query(None),
-    vendor_id: int = Query(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await transport_cost_report(db, date_from, date_to, vendor_id)
-
-
-@router.get("/logistics/delivery-performance")
-async def rpt_delivery_performance(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Delivery performance - on-time vs late."""
-    from sqlalchemy import select, func, case
-    from app.models.logistics import TransportOrder
-    result = await db.execute(
-        select(
-            func.count(TransportOrder.id).label("total_orders"),
-            func.sum(case(
-                (TransportOrder.actual_delivery_date <= TransportOrder.expected_delivery_date, 1), else_=0
-            )).label("on_time"),
-            func.sum(case(
-                (TransportOrder.actual_delivery_date > TransportOrder.expected_delivery_date, 1), else_=0
-            )).label("late"),
-        )
-        .where(
-            TransportOrder.status == "delivered",
-            TransportOrder.actual_delivery_date.isnot(None),
-        )
-    )
-    row = result.one()
-    return dict(row._mapping)
 
 
 # ==================== ASSET REPORTS ====================

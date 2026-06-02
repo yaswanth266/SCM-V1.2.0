@@ -40,7 +40,6 @@ from app.models.consumption import ConsumptionEntry
 from app.models.stock import StockLedger, StockBalance
 from app.models.grn import PutawayOrder, PutawayItem, GoodsReceiptNote
 from app.models.system import SystemSetting, NumberSeries, FileAttachment
-from app.models.logistics import ShipmentTracking
 from app.utils.dependencies import get_current_user, require_any_role, require_permission
 from app.utils.helpers import paginate_params, build_paginated_response, apply_search_filter
 from app.config import settings
@@ -544,6 +543,24 @@ async def stock_balance_breakdown(
     
     rows = (await db.execute(q)).scalars().all()
     
+    is_serial_tracked = False
+    if rows and rows[0].item and rows[0].item.has_serial:
+        is_serial_tracked = True
+        
+    serials_map = {}
+    if is_serial_tracked:
+        from app.models.warehouse import SerialNumber
+        s_query = select(SerialNumber).where(
+            SerialNumber.item_id == item_id,
+            SerialNumber.status == "available"
+        )
+        s_result = await db.execute(s_query)
+        for s in s_result.scalars().all():
+            key = (s.warehouse_id, s.bin_id, s.batch_id)
+            if key not in serials_map:
+                serials_map[key] = []
+            serials_map[key].append(s.serial_number)
+
     items = []
     for r in rows:
         data = {
@@ -558,12 +575,14 @@ async def stock_balance_breakdown(
             "supplier_batch": r.batch.supplier_batch if r.batch else None,
             "available_qty": float(r.available_qty or 0),
             "reserved_qty": float(r.reserved_qty or 0),
-            "committed_qty": float(r.committed_qty or 0),
+            "transit_qty": float(r.transit_qty or 0),
             "total_qty": float(r.total_qty or 0),
             "valuation_rate": float(r.valuation_rate or 0),
             "stock_value": float(r.stock_value or 0),
             "last_updated": r.last_updated.isoformat() if r.last_updated else None,
             "uom_name": r.item.primary_uom.name if r.item and r.item.primary_uom else None,
+            "has_serial": is_serial_tracked,
+            "serial_numbers": serials_map.get((r.warehouse_id, r.bin_id, r.batch_id), []),
         }
         
         if r.bin:
@@ -2088,31 +2107,4 @@ async def create_transfer_suggestion(
     return {"id": t.id, "transfer_number": t.transfer_number}
 
 
-# ==================== logistics: shipment tracking update ====================
 
-class ShipmentStatusUpdate(BaseModel):
-    tracking_id: Optional[int] = None
-    shipment_tracking_id: Optional[int] = None
-    status: str
-    location: Optional[str] = None
-    remarks: Optional[str] = None
-
-
-@router.post("/logistics/shipment-tracking/update-status")
-async def update_shipment_status(
-    payload: ShipmentStatusUpdate,
-    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
-):
-    tid = payload.tracking_id or payload.shipment_tracking_id
-    if not tid:
-        raise HTTPException(status_code=400, detail="tracking_id is required")
-    st = await _require(db, ShipmentTracking, tid, "Shipment tracking")
-    st.status = payload.status
-    if payload.location:
-        st.location_description = payload.location
-    if payload.remarks:
-        st.remarks = payload.remarks
-    st.status_timestamp = datetime.now(timezone.utc)
-    st.updated_by = current_user.id
-    await db.flush()
-    return {"success": True}

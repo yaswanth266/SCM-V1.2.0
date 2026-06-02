@@ -1262,7 +1262,7 @@ const Analytics = () => {
     { title: 'Item', dataIndex: 'item_name', key: 'name', ellipsis: true },
     { title: 'Warehouse', dataIndex: 'warehouse_name', key: 'wh', width: 150, ellipsis: true },
     { title: 'Stock Qty', dataIndex: 'stock_qty', key: 'stock', width: 100, align: 'right', render: (v) => formatNumber(v) },
-    { title: 'Committed', dataIndex: 'committed_qty', key: 'commit', width: 100, align: 'right', render: (v) => <Text type="warning">{formatNumber(v)}</Text> },
+    { title: 'Transit', dataIndex: 'transit_qty', key: 'commit', width: 100, align: 'right', render: (v) => <Text type="warning">{formatNumber(v)}</Text> },
     { title: 'Available (ATP)', dataIndex: 'available_qty', key: 'atp', width: 120, align: 'right',
       render: (v) => <Text strong type={v <= 0 ? 'danger' : 'success'}>{formatNumber(v)}</Text> },
   ];

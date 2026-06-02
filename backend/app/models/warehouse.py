@@ -22,9 +22,15 @@ class Warehouse(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    parent_id = Column(BigInteger, ForeignKey("warehouses.id"), nullable=True)
 
     organization = relationship("Organization", back_populates="warehouses")
     locations = relationship("WarehouseLocation", back_populates="warehouse")
+    parent = relationship("Warehouse", remote_side=[id], backref="children")
+
+    @property
+    def parent_name(self):
+        return self.parent.name if self.parent else None
 
 
 class WarehouseLocation(Base):
@@ -143,3 +149,48 @@ class SerialNumber(Base):
 
     item = relationship("Item")
     batch = relationship("Batch")
+
+
+class MaterialInward(Base):
+    __tablename__ = "material_inwards"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    inward_number = Column(String(50), unique=True, nullable=False)
+    po_id = Column(BigInteger, ForeignKey("purchase_orders.id"), nullable=True)
+    po_number = Column(String(50), nullable=True)  # For manual entry when PO is not in system
+    vendor_id = Column(BigInteger, ForeignKey("vendors.id"), nullable=True)
+    vendor_name_manual = Column(String(255), nullable=True) # Manual vendor name fallback
+    warehouse_id = Column(BigInteger, ForeignKey("warehouses.id"), nullable=False)
+    received_date = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    vehicle_number = Column(String(50))
+    driver_name = Column(String(255))
+    remarks = Column(Text)
+    status = Column(Enum("draft", "received", "grn_created", "cancelled", name="inward_status_enum"), default="draft")
+    
+    created_by = Column(BigInteger)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    purchase_order = relationship("PurchaseOrder")
+    vendor = relationship("Vendor")
+    warehouse = relationship("Warehouse")
+    items = relationship("MaterialInwardItem", back_populates="inward", cascade="all, delete-orphan")
+
+
+class MaterialInwardItem(Base):
+    __tablename__ = "material_inward_items"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    inward_id = Column(BigInteger, ForeignKey("material_inwards.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(BigInteger, ForeignKey("items.id"), nullable=True)  # Optional if item is not in system
+    item_name_manual = Column(String(255), nullable=True)
+    ordered_qty = Column(Numeric(15, 3), default=0)
+    received_qty = Column(Numeric(15, 3), nullable=False)
+    uom_id = Column(BigInteger, ForeignKey("uom.id"), nullable=True)
+    uom_manual = Column(String(50), nullable=True)
+    remarks = Column(Text)
+
+    inward = relationship("MaterialInward", back_populates="items")
+    item = relationship("Item")
+    uom = relationship("UOM")
+

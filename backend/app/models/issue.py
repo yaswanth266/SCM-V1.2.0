@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Text, DateTime, Enum, ForeignKey, Numeric
+from sqlalchemy import Column, BigInteger, String, Text, DateTime, Enum, ForeignKey, Numeric, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.database import Base
@@ -12,20 +12,23 @@ class MaterialIssue(Base):
     mr_id = Column(BigInteger, ForeignKey("material_requests.id"))
     indent_id = Column(BigInteger, ForeignKey("indents.id"))
     warehouse_id = Column(BigInteger, ForeignKey("warehouses.id"), nullable=False)
+    destination_warehouse_id = Column(BigInteger, ForeignKey("warehouses.id"), nullable=True)
     issue_date = Column(DateTime, nullable=False)
     department = Column(String(100))
     issued_to = Column(BigInteger, ForeignKey("users.id"))
     cost_center = Column(String(100))
-    status = Column(Enum("draft", "issued", "acknowledged", "completed", "cancelled", name="mi_status_enum"), default="draft")
+    status = Column(Enum("draft", "issued", "dispatched", "acknowledged", "completed", "cancelled", name="mi_status_enum"), default="draft")
     remarks = Column(Text)
     issued_by = Column(BigInteger)
+    dispatched_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     # Wave 5 — needed for ordering / "last edited" UX (BUG-ISS-014).
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     material_request = relationship("MaterialRequest")
     indent = relationship("Indent")
-    warehouse = relationship("Warehouse")
+    warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
+    destination_warehouse = relationship("Warehouse", foreign_keys=[destination_warehouse_id])
     issued_to_user = relationship("User", foreign_keys=[issued_to])
     items = relationship("MaterialIssueItem", back_populates="material_issue", cascade="all, delete-orphan")
 
@@ -47,6 +50,7 @@ class MaterialIssueItem(Base):
     prescriber_license = Column(String(100))
     patient_name = Column(String(255))
     patient_id_text = Column(String(100))
+    serial_numbers = Column(JSON, nullable=True)
 
     material_issue = relationship("MaterialIssue", back_populates="items")
     item = relationship("Item")

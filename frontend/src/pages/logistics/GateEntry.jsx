@@ -50,7 +50,7 @@ const GateEntry = () => {
   // Form state
   const [gateType, setGateType] = useState('inward');
   const [warehouses, setWarehouses] = useState([]);
-  const [grnOptions, setGrnOptions] = useState([]);
+  const [serviceOrderOptions, setServiceOrderOptions] = useState([]);
   const [dispatchOptions, setDispatchOptions] = useState([]);
 
   // Filter
@@ -76,17 +76,21 @@ const GateEntry = () => {
     }
   }, []);
 
-  const loadGRNOptions = useCallback(async (search = '') => {
+  const loadServiceOrderOptions = useCallback(async (search = '') => {
     try {
-      const res = await api.get('/warehouse/grn', {
-        params: { page_size: 50, search },
-      });
-      const data = res.data;
-      const items = data.items || data.data || data || [];
-      setGrnOptions(
-        items.map((grn) => ({
-          label: `${grn.grn_number} - ${grn.vendor_name || ''}`,
-          value: grn.id,
+      const res = await api.get('/logistics/so', { params: { exclude_gated: true } });
+      const data = res.data || [];
+      const filtered = search
+        ? data.filter((so) =>
+            so.so_number?.toLowerCase().includes(search.toLowerCase()) ||
+            so.vendor_name?.toLowerCase().includes(search.toLowerCase())
+          )
+        : data;
+      setServiceOrderOptions(
+        filtered.map((so) => ({
+          label: `${so.so_number} - ${so.vendor_name || ''}`,
+          value: so.id,
+          so: so,
         }))
       );
     } catch {
@@ -129,7 +133,7 @@ const GateEntry = () => {
     setGateType(type);
     form.setFieldsValue({ gate_type: type });
     loadLookups();
-    if (type === 'inward') loadGRNOptions();
+    if (type === 'inward') loadServiceOrderOptions();
     if (type === 'outward') loadDispatchOptions();
     setDrawerOpen(true);
   };
@@ -291,7 +295,7 @@ const GateEntry = () => {
       key: 'reference',
       width: 150,
       render: (_, record) => {
-        if (record.grn_number) return <Text>{record.grn_number}</Text>;
+        if (record.so_number) return <Text>{record.so_number}</Text>;
         if (record.dispatch_number) return <Text>{record.dispatch_number}</Text>;
         return '-';
       },
@@ -499,22 +503,38 @@ const GateEntry = () => {
               ]}
               onChange={(v) => {
                 setGateType(v);
-                form.setFieldsValue({ grn_id: undefined, dispatch_id: undefined });
-                if (v === 'inward') loadGRNOptions();
+                form.setFieldsValue({ so_id: undefined, dispatch_id: undefined });
+                if (v === 'inward') loadServiceOrderOptions();
                 if (v === 'outward') loadDispatchOptions();
               }}
             />
           </Form.Item>
 
           {gateType === 'inward' && (
-            <Form.Item name="grn_id" label="Link to GRN">
+            <Form.Item name="so_id" label="Link to Service Order">
               <Select
-                options={grnOptions}
-                placeholder="Select GRN (optional)"
+                options={serviceOrderOptions}
+                placeholder="Select Service Order (optional)"
                 showSearch
                 optionFilterProp="label"
                 allowClear
-                onSearch={(v) => loadGRNOptions(v)}
+                onSearch={(v) => loadServiceOrderOptions(v)}
+                onChange={(soId) => {
+                  if (!soId) return;
+                  const selectedOption = serviceOrderOptions.find(o => o.value === soId);
+                  if (selectedOption && selectedOption.so) {
+                    const so = selectedOption.so;
+                    const vehicle = so.vehicles?.[0] || {};
+                    const sdoNumbers = so.mappings?.map(m => m.sdo_number).filter(Boolean).join(', ') || '';
+                    form.setFieldsValue({
+                      warehouse_id: so.warehouse_id || undefined,
+                      vehicle_number: vehicle.vehicle_registration_no || '',
+                      person_name: vehicle.driver_name || '',
+                      person_contact: vehicle.driver_mobile || '',
+                      material_description: sdoNumbers ? `SDOs: ${sdoNumbers}` : 'SCM Materials',
+                    });
+                  }
+                }}
               />
             </Form.Item>
           )}
@@ -663,8 +683,8 @@ const GateEntry = () => {
                 </Tag>
               </Descriptions.Item>
               <Descriptions.Item label="Warehouse">{viewData.warehouse_name || '-'}</Descriptions.Item>
-              {viewData.grn_number && (
-                <Descriptions.Item label="GRN Reference">{viewData.grn_number}</Descriptions.Item>
+              {viewData.so_number && (
+                <Descriptions.Item label="Service Order Reference">{viewData.so_number}</Descriptions.Item>
               )}
               {viewData.dispatch_number && (
                 <Descriptions.Item label="Dispatch Reference">{viewData.dispatch_number}</Descriptions.Item>
@@ -774,4 +794,3 @@ const GateEntry = () => {
 };
 
 export default GateEntry;
-

@@ -321,7 +321,7 @@ class ATPItem(BaseModel):
     warehouse_id: Optional[int] = None
     warehouse_name: Optional[str] = None
     total_stock: Decimal
-    committed_qty: Decimal
+    transit_qty: Decimal
     available_qty: Decimal
 
 

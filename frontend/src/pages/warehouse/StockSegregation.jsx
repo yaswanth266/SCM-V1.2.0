@@ -135,17 +135,9 @@ const StockSegregation = () => {
   const handleConfirm = async (row) => {
     if (!viewData) return;
 
-    // Resolve bin id: prefer actual_bin_id (cascading select), else fall back
-    // to free-text input parsed as integer (early-stage UX before bin lookup).
-    let binId = row.actual_bin_id;
-    if (!binId) {
-      const parsed = parseInt(String(row.actual_bin_input || '').trim(), 10);
-      if (Number.isFinite(parsed) && parsed > 0) {
-        binId = parsed;
-      }
-    }
-    if (!binId) {
-      message.error('Enter a bin id (or pick one) before confirming');
+    const binVal = String(row.actual_bin_input || row.actual_bin_id || '').trim();
+    if (!binVal) {
+      message.error('Enter a bin code or name before confirming');
       return;
     }
 
@@ -153,14 +145,14 @@ const StockSegregation = () => {
     try {
       await api.put(
         `/warehouse/putaway/${viewData.id}/items/${row.id}/confirm`,
-        { actual_bin_id: binId, status: 'done' }
+        { actual_bin_id: binVal, status: 'done' }
       );
-      message.success(`Segregated ${row.item_name || row.item_code} to bin ${binId}`);
+      message.success(`Segregated ${row.item_name || row.item_code} to bin "${binVal}"`);
       // optimistic update
       setItems((prev) =>
         prev.map((r) =>
           r.key === row.key
-            ? { ...r, status: 'done', actual_bin_id: binId }
+            ? { ...r, status: 'done', actual_bin_input: binVal, actual_bin_id: binVal }
             : r
         )
       );
@@ -219,7 +211,7 @@ const StockSegregation = () => {
         if (r.status === 'done') {
           return (
             <Tag icon={<EnvironmentOutlined />} color="green">
-              Bin #{r.actual_bin_id || r.suggested_bin_id}
+              Bin: {r.actual_bin_input || r.actual_bin_id || r.suggested_bin || r.suggested_bin_id}
             </Tag>
           );
         }
@@ -227,16 +219,15 @@ const StockSegregation = () => {
           return <Tag color="default">Skipped</Tag>;
         }
         return (
-          <InputNumber
-            placeholder="Bin id"
+          <Input
+            placeholder="Bin code"
             size="small"
-            min={1}
-            precision={0}
             style={{ width: '100%' }}
-            value={r.actual_bin_id || (r.actual_bin_input ? Number(r.actual_bin_input) : null)}
-            onChange={(v) => {
+            value={r.actual_bin_input || ''}
+            onChange={(e) => {
+              const v = e.target.value;
+              updateRow(r.key, 'actual_bin_input', v);
               updateRow(r.key, 'actual_bin_id', v);
-              updateRow(r.key, 'actual_bin_input', v == null ? '' : String(v));
             }}
             onPressEnter={() => handleConfirm(r)}
           />

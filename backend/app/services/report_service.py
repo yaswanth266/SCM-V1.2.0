@@ -11,7 +11,6 @@ from app.models.grn import GoodsReceiptNote, GRNItem
 from app.models.outbound import SalesOrder, SalesOrderItem
 from app.models.consumption import ConsumptionEntry, ConsumptionItem
 from app.models.accounts import Invoice, Payment, AccountLedger
-from app.models.logistics import TransportOrder, TransportRequirement
 from app.models.indent import Indent
 from app.models.asset import Asset
 from app.models.approval import ApprovalRequest
@@ -614,65 +613,7 @@ async def project_ledger_report(db: AsyncSession, project_id: int) -> List[Dict]
     } for r in rows]
 
 
-# ==================== LOGISTICS REPORTS ====================
 
-async def transport_summary_report(
-    db: AsyncSession,
-    date_from: Optional[date] = None,
-    date_to: Optional[date] = None,
-) -> List[Dict]:
-    """Transport order summary."""
-    query = (
-        select(
-            TransportOrder.id, TransportOrder.order_number,
-            TransportOrder.vendor_id, TransportOrder.vehicle_number,
-            TransportOrder.transport_cost, TransportOrder.status,
-            TransportOrder.dispatch_date, TransportOrder.actual_delivery_date,
-        )
-        .order_by(TransportOrder.created_at.desc())
-    )
-    conditions = []
-    if date_from:
-        conditions.append(TransportOrder.dispatch_date >= date_from)
-    if date_to:
-        conditions.append(TransportOrder.dispatch_date <= date_to)
-    if conditions:
-        query = query.where(and_(*conditions))
-
-    result = await db.execute(query)
-    return [dict(row._mapping) for row in result.all()]
-
-
-async def transport_cost_report(
-    db: AsyncSession,
-    date_from: Optional[date] = None,
-    date_to: Optional[date] = None,
-    vendor_id: Optional[int] = None,
-) -> List[Dict]:
-    """Transport cost analysis by vendor."""
-    query = (
-        select(
-            Vendor.id.label("vendor_id"), Vendor.name.label("vendor_name"),
-            func.count(TransportOrder.id).label("total_orders"),
-            func.sum(TransportOrder.transport_cost).label("total_cost"),
-            func.avg(TransportOrder.transport_cost).label("avg_cost"),
-        )
-        .join(TransportOrder, TransportOrder.vendor_id == Vendor.id)
-        .group_by(Vendor.id, Vendor.name)
-        .order_by(func.sum(TransportOrder.transport_cost).desc())
-    )
-    conditions = []
-    if date_from:
-        conditions.append(TransportOrder.dispatch_date >= date_from)
-    if date_to:
-        conditions.append(TransportOrder.dispatch_date <= date_to)
-    if vendor_id:
-        conditions.append(TransportOrder.vendor_id == vendor_id)
-    if conditions:
-        query = query.where(and_(*conditions))
-
-    result = await db.execute(query)
-    return [dict(row._mapping) for row in result.all()]
 
 
 # ==================== ASSET REPORTS ====================

@@ -2,6 +2,8 @@ import React, { Suspense, lazy, Component, useEffect, useState } from 'react';
 import { Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
 import { Spin, Result, Button } from 'antd';
 import useAuthStore from './store/authStore';
+import useCarrierAuthStore from './store/carrierAuthStore';
+import useVendorAuthStore from './store/vendorAuthStore';
 import { MODULE_NAVS } from './utils/moduleNavs';
 
 /* Layouts */
@@ -96,8 +98,8 @@ const Putaway = lazy(() => import('./pages/warehouse/Putaway'));
 const FloorPlan = lazy(() => import('./pages/warehouse/FloorPlan'));
 const FloorPlan3D = lazy(() => import('./pages/warehouse/FloorPlan3D'));
 const PutawayForm = lazy(() => import('./pages/warehouse/PutawayForm'));
-const GateEntry = lazy(() => import('./pages/warehouse/GateEntry'));
-const GateEntryForm = lazy(() => import('./pages/warehouse/GateEntryForm'));
+const GateEntry = lazy(() => import('./pages/logistics/GateEntry'));
+const GateEntryForm = lazy(() => import('./pages/logistics/GateEntryForm'));
 const PurchaseReturns = lazy(() => import('./pages/warehouse/PurchaseReturns'));
 const PurchaseReturnForm = lazy(() => import('./pages/warehouse/PurchaseReturnForm'));
 const MaterialIssues = lazy(() => import('./pages/warehouse/MaterialIssues'));
@@ -105,6 +107,11 @@ const MaterialIssueForm = lazy(() => import('./pages/warehouse/MaterialIssueForm
 const Picklist = lazy(() => import('./pages/warehouse/Picklist'));
 const OutwardLabelling = lazy(() => import('./pages/warehouse/OutwardLabelling'));
 const StockSegregation = lazy(() => import('./pages/warehouse/StockSegregation'));
+const MaterialInward = lazy(() => import('./pages/warehouse/MaterialInward'));
+const Dispatch = lazy(() => import('./pages/warehouse/Dispatch'));
+const DispatchForm = lazy(() => import('./pages/warehouse/DispatchForm'));
+const AcknowledgeDelivery = lazy(() => import('./pages/warehouse/AcknowledgeDelivery'));
+
 
 /* Healthcare SCM */
 const Healthcare = lazy(() => import('./pages/Healthcare'));
@@ -118,16 +125,7 @@ const StockAudit = lazy(() => import('./pages/inventory/StockAudit'));
 const StockAuditForm = lazy(() => import('./pages/inventory/StockAuditForm'));
 const Replenishment = lazy(() => import('./pages/inventory/Replenishment'));
 
-/* Logistics */
-const TransportRequirements = lazy(() => import('./pages/logistics/TransportRequirements'));
-const TransportRequirementForm = lazy(() => import('./pages/logistics/TransportRequirementForm'));
-const VendorQuotations = lazy(() => import('./pages/logistics/VendorQuotations'));
-const VendorQuotationForm = lazy(() => import('./pages/logistics/VendorQuotationForm'));
-const TransportOrders = lazy(() => import('./pages/logistics/TransportOrders'));
-const TransportOrderForm = lazy(() => import('./pages/logistics/TransportOrderForm'));
-const ShipmentTracking = lazy(() => import('./pages/logistics/ShipmentTracking'));
-const ShipmentDispatch = lazy(() => import('./pages/logistics/ShipmentDispatch'));
-const FleetDashboard = lazy(() => import('./pages/logistics/FleetDashboard'));
+
 
 /* Indent */
 const Indents = lazy(() => import('./pages/indent/Indents'));
@@ -176,8 +174,21 @@ const ProcurementReports = lazy(() => import('./pages/reports/ProcurementReports
 const ConsumptionReportPage = lazy(() => import('./pages/reports/ConsumptionReportPage'));
 const SalesReports = lazy(() => import('./pages/reports/SalesReports'));
 const AccountsReports = lazy(() => import('./pages/reports/AccountsReports'));
-const LogisticsReports = lazy(() => import('./pages/reports/LogisticsReports'));
+
 const SystemReports = lazy(() => import('./pages/reports/SystemReports'));
+
+/* Logistics */
+const LogisticsDashboard = lazy(() => import('./pages/logistics/LogisticsDashboard'));
+const LogisticsMaster = lazy(() => import('./pages/logistics/LogisticsMaster'));
+const LogisticsDispatch = lazy(() => import('./pages/logistics/LogisticsDispatch'));
+const LogisticsRfq = lazy(() => import('./pages/logistics/LogisticsRfq'));
+const LogisticsSO = lazy(() => import('./pages/logistics/LogisticsSO'));
+
+/* Carrier Portal (transporter self-service) */
+const CarrierPortal = lazy(() => import('./pages/carrier/CarrierPortal'));
+
+/* Supplier Portal (material vendor self-service) */
+const SupplierPortal = lazy(() => import('./pages/supplier/SupplierPortal'));
 
 /* Settings */
 const Users = lazy(() => import('./pages/settings/Users'));
@@ -188,6 +199,7 @@ const SystemSettings = lazy(() => import('./pages/settings/SystemSettings'));
 const Profile = lazy(() => import('./pages/settings/Profile'));
 const ChangePassword = lazy(() => import('./pages/settings/ChangePassword'));
 const Delegations = lazy(() => import('./pages/settings/Delegations'));
+const ApiKeys = lazy(() => import('./pages/settings/ApiKeys'));
 
 
 /* Loading fallback */
@@ -218,6 +230,29 @@ const ProtectedRoute = () => {
     return <Navigate to="/login" replace />;
   }
   return <Outlet />;
+};
+
+/* Carrier-only route guard. Carrier sessions are completely separate from
+   the employee session — their token lives in localStorage under
+   `carrier_token` (see carrierAuthStore). */
+const CarrierProtectedRoute = ({ children }) => {
+  const token = useCarrierAuthStore((s) => s.token);
+  const user = useCarrierAuthStore((s) => s.user);
+  if (!token || !user) {
+    return <Navigate to="/login/transporter" replace />;
+  }
+  return children;
+};
+
+/* Supplier (material vendor) portal route guard. Completely separate from
+   both employee and carrier sessions — token lives in `vendor_token`. */
+const VendorProtectedRoute = ({ children }) => {
+  const token = useVendorAuthStore((s) => s.token);
+  const user = useVendorAuthStore((s) => s.user);
+  if (!token || !user) {
+    return <Navigate to="/login/vendor" replace />;
+  }
+  return children;
 };
 
 /* Permission-guarded route — redirects to launcher if user lacks the required module.
@@ -262,7 +297,9 @@ const PermissionRoute = ({ module, action = 'view', children }) => {
 const KeyRoute = ({ requiredKey, children }) => {
   const hasKey = useAuthStore((s) => s.hasKey);
   const location = useLocation();
-  if (!hasKey(requiredKey)) {
+  const keys = Array.isArray(requiredKey) ? requiredKey : [requiredKey];
+  const matched = keys.some((k) => hasKey(k));
+  if (!matched) {
     if (location.pathname === '/launcher') {
       return (
         <Result
@@ -275,6 +312,16 @@ const KeyRoute = ({ requiredKey, children }) => {
     return <Navigate to="/launcher" replace state={{ from: location }} />;
   }
   return children;
+};
+
+const RedirectToLogisticsDispatch = () => {
+  const { id } = useParams();
+  return <Navigate to={`/logistics/dispatch-orders/${id}`} replace />;
+};
+
+const RedirectToLogisticsAcknowledge = () => {
+  const { id } = useParams();
+  return <Navigate to={`/logistics/dispatch-orders/${id}/acknowledge`} replace />;
 };
 
 const ModuleIndexRedirect = ({ moduleId, fallback }) => {
@@ -328,8 +375,30 @@ const App = () => {
             inside AuthLayout makes the form render with the proper layout. */}
         <Route element={<AuthLayout />}>
           <Route path="/login" element={<Login />} />
+          <Route path="/login/transporter" element={<Login />} />
+          <Route path="/login/vendor" element={<Login />} />
           <Route path="/" element={<Login />} />
         </Route>
+
+        {/* Carrier portal — completely separate from employee session */}
+        <Route
+          path="/carrier"
+          element={
+            <CarrierProtectedRoute>
+              <CarrierPortal />
+            </CarrierProtectedRoute>
+          }
+        />
+
+        {/* Supplier portal — material vendors, completely separate session */}
+        <Route
+          path="/supplier"
+          element={
+            <VendorProtectedRoute>
+              <SupplierPortal />
+            </VendorProtectedRoute>
+          }
+        />
 
         {/* Protected Routes */}
         <Route element={<ProtectedRoute />}>
@@ -399,9 +468,6 @@ const App = () => {
             <Route path="/warehouse/putaway/:id" element={<PermissionRoute module="warehouse"><PutawayForm /></PermissionRoute>} />
             <Route path="/warehouse/floor-plan" element={<KeyRoute requiredKey="warehouse-floor-plan"><FloorPlan /></KeyRoute>} />
             <Route path="/warehouse/floor-plan-3d" element={<KeyRoute requiredKey="warehouse-floor-plan"><FloorPlan3D /></KeyRoute>} />
-            <Route path="/warehouse/gate-entry" element={<KeyRoute requiredKey="warehouse-gate-entry"><GateEntry /></KeyRoute>} />
-            <Route path="/warehouse/gate-entry/new" element={<PermissionRoute module="warehouse"><GateEntryForm /></PermissionRoute>} />
-            <Route path="/warehouse/gate-entry/:id" element={<PermissionRoute module="warehouse"><GateEntryForm /></PermissionRoute>} />
             <Route path="/warehouse/purchase-returns" element={<KeyRoute requiredKey="warehouse-purchase-returns"><PurchaseReturns /></KeyRoute>} />
             <Route path="/warehouse/purchase-returns/new" element={<PermissionRoute module="warehouse"><PurchaseReturnForm /></PermissionRoute>} />
             <Route path="/warehouse/purchase-returns/:id" element={<PermissionRoute module="warehouse"><PurchaseReturnForm /></PermissionRoute>} />
@@ -412,6 +478,20 @@ const App = () => {
             <Route path="/warehouse/qc-outward" element={<KeyRoute requiredKey="warehouse-qc-outward"><QCOutward /></KeyRoute>} />
             <Route path="/warehouse/outward-labelling" element={<KeyRoute requiredKey="warehouse-outward-labelling"><OutwardLabelling /></KeyRoute>} />
             <Route path="/warehouse/stock-segregation" element={<KeyRoute requiredKey="warehouse-stock-segregation"><StockSegregation /></KeyRoute>} />
+            <Route path="/warehouse/material-inward" element={<KeyRoute requiredKey="warehouse-material-inward"><MaterialInward /></KeyRoute>} />
+            
+            {/* Outward Dispatch - Unified under Logistics */}
+            <Route path="/logistics/dispatch-orders" element={<KeyRoute requiredKey="warehouse-dispatch"><Dispatch /></KeyRoute>} />
+            <Route path="/logistics/dispatch-orders/new" element={<PermissionRoute module="logistics"><DispatchForm /></PermissionRoute>} />
+            <Route path="/logistics/dispatch-orders/:id" element={<PermissionRoute module="logistics"><DispatchForm /></PermissionRoute>} />
+            <Route path="/logistics/dispatch-orders/:id/acknowledge" element={<PermissionRoute module="logistics"><AcknowledgeDelivery /></PermissionRoute>} />
+
+            {/* Legacy redirects to unify pipeline routing */}
+            <Route path="/warehouse/dispatch" element={<Navigate to="/logistics/dispatch-orders" replace />} />
+            <Route path="/warehouse/dispatch/new" element={<Navigate to="/logistics/dispatch-orders/new" replace />} />
+            <Route path="/warehouse/dispatch/:id" element={<RedirectToLogisticsDispatch />} />
+            <Route path="/warehouse/dispatch/:id/acknowledge" element={<RedirectToLogisticsAcknowledge />} />
+
 
             {/* Inventory — guarded by 'inventory' permission */}
             <Route path="/inventory" element={<Navigate to="/inventory/stock-balance" replace />} />
@@ -426,19 +506,7 @@ const App = () => {
             <Route path="/inventory/stock-audit/:id" element={<PermissionRoute module="inventory"><StockAuditForm /></PermissionRoute>} />
             <Route path="/inventory/replenishment" element={<KeyRoute requiredKey="inventory-replenishment"><Replenishment /></KeyRoute>} />
 
-            {/* Logistics — guarded by 'logistics' permission */}
-            <Route path="/logistics/transport-requirements" element={<KeyRoute requiredKey="logistics-transport-requirements"><TransportRequirements /></KeyRoute>} />
-            <Route path="/logistics/transport-requirements/new" element={<PermissionRoute module="logistics"><TransportRequirementForm /></PermissionRoute>} />
-            <Route path="/logistics/transport-requirements/:id" element={<PermissionRoute module="logistics"><TransportRequirementForm /></PermissionRoute>} />
-            <Route path="/logistics/vendor-quotations" element={<KeyRoute requiredKey="logistics-vendor-quotations"><VendorQuotations /></KeyRoute>} />
-            <Route path="/logistics/vendor-quotations/new" element={<PermissionRoute module="logistics"><VendorQuotationForm /></PermissionRoute>} />
-            <Route path="/logistics/vendor-quotations/:id" element={<PermissionRoute module="logistics"><VendorQuotationForm /></PermissionRoute>} />
-            <Route path="/logistics/transport-orders" element={<KeyRoute requiredKey="logistics-transport-orders"><TransportOrders /></KeyRoute>} />
-            <Route path="/logistics/transport-orders/new" element={<PermissionRoute module="logistics"><TransportOrderForm /></PermissionRoute>} />
-            <Route path="/logistics/transport-orders/:id" element={<PermissionRoute module="logistics"><TransportOrderForm /></PermissionRoute>} />
-            <Route path="/logistics/shipment-tracking" element={<KeyRoute requiredKey="logistics-shipment-tracking"><ShipmentTracking /></KeyRoute>} />
-            <Route path="/logistics/shipment-dispatch" element={<KeyRoute requiredKey="logistics-shipment-dispatch"><ShipmentDispatch /></KeyRoute>} />
-            <Route path="/logistics/fleet-dashboard" element={<PermissionRoute module="logistics"><FleetDashboard /></PermissionRoute>} />
+
 
             {/* Indent — guarded by 'indent' permission */}
             <Route path="/indent/indents" element={<KeyRoute requiredKey="indent-indents"><Indents /></KeyRoute>} />
@@ -510,8 +578,23 @@ const App = () => {
             <Route path="/reports/consumption" element={<PermissionRoute module="reports"><ConsumptionReportPage /></PermissionRoute>} />
             <Route path="/reports/sales" element={<PermissionRoute module="reports"><SalesReports /></PermissionRoute>} />
             <Route path="/reports/accounts" element={<PermissionRoute module="reports"><AccountsReports /></PermissionRoute>} />
-            <Route path="/reports/logistics" element={<PermissionRoute module="reports"><LogisticsReports /></PermissionRoute>} />
+
             <Route path="/reports/system" element={<PermissionRoute module="reports"><SystemReports /></PermissionRoute>} />
+
+            {/* Logistics Module */}
+            <Route path="/logistics" element={<Navigate to="/logistics/dashboard" replace />} />
+            <Route path="/logistics/dashboard" element={<KeyRoute requiredKey="logistics-dashboard"><LogisticsDashboard /></KeyRoute>} />
+            <Route path="/logistics/master" element={<KeyRoute requiredKey="logistics-master"><LogisticsMaster /></KeyRoute>} />
+            <Route path="/logistics/dispatch" element={<KeyRoute requiredKey="logistics-dispatch"><LogisticsDispatch /></KeyRoute>} />
+            <Route path="/logistics/rfq" element={<KeyRoute requiredKey="logistics-rfq"><LogisticsRfq /></KeyRoute>} />
+            <Route path="/logistics/so" element={<KeyRoute requiredKey="logistics-so"><LogisticsSO /></KeyRoute>} />
+            <Route path="/logistics/so-gating" element={<KeyRoute requiredKey={['logistics-so', 'logistics-so-gating']}><LogisticsSO /></KeyRoute>} />
+            <Route path="/logistics/so-acknowledge" element={<KeyRoute requiredKey={['logistics-so', 'logistics-so-acknowledge']}><AcknowledgeDelivery /></KeyRoute>} />
+            <Route path="/logistics/so-alerts" element={<KeyRoute requiredKey={['logistics-so', 'logistics-so-alerts']}><LogisticsSO /></KeyRoute>} />
+            <Route path="/logistics/gate-entry" element={<KeyRoute requiredKey="logistics-gate-entry"><GateEntry /></KeyRoute>} />
+            <Route path="/logistics/gate-entry/new" element={<PermissionRoute module="logistics"><GateEntryForm /></PermissionRoute>} />
+            <Route path="/logistics/gate-entry/:id" element={<PermissionRoute module="logistics"><GateEntryForm /></PermissionRoute>} />
+
 
             {/* Settings (gated by 'settings' permission; profile/change-password/delegations always allowed) */}
             <Route path="/settings" element={<Navigate to="/settings/profile" replace />} />
@@ -523,6 +606,7 @@ const App = () => {
             <Route path="/settings/roles/new" element={<PermissionRoute module="settings"><RoleForm /></PermissionRoute>} />
             <Route path="/settings/roles/:id" element={<PermissionRoute module="settings"><RoleForm /></PermissionRoute>} />
             <Route path="/settings/system" element={<KeyRoute requiredKey="settings-system"><SystemSettings /></KeyRoute>} />
+            <Route path="/settings/api-keys" element={<PermissionRoute module="settings"><ApiKeys /></PermissionRoute>} />
             <Route path="/settings/profile" element={<Profile />} />
             <Route path="/settings/change-password" element={<ChangePassword />} />
 

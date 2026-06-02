@@ -4,13 +4,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
-from app.models.master import Feature, ItemFeature, UOMCategory, UOMConversion, ItemUOMConversion, VendorType, VendorCategory, VendorVendorType, VendorItemHistory, SpecCategory, Spec, ItemSpec, ItemSpecValue, Office, Position, Employee, UserItemPermission, EmployeeItemPermission, PackagingLevel, ItemPackaging
+from app.models.master import Feature, ItemFeature, UOMCategory, UOMConversion, ItemUOMConversion, VendorType, VendorCategory, VendorVendorType, VendorItemHistory, SpecCategory, Spec, ItemSpec, ItemSpecValue, Office, Position, Employee, UserItemPermission, RoleItemPermission, PackagingLevel, ItemPackaging
+from app.models.vendor_portal import VendorUser
 
 
 async def ensure_user_item_permission_schema(session: AsyncSession) -> None:
     conn = await session.connection()
     await conn.run_sync(UserItemPermission.__table__.create, checkfirst=True)
-    await conn.run_sync(EmployeeItemPermission.__table__.create, checkfirst=True)
+    await conn.run_sync(RoleItemPermission.__table__.create, checkfirst=True)
     idx_exists = (await conn.execute(text("""
         SELECT 1
         FROM information_schema.statistics
@@ -35,30 +36,161 @@ async def ensure_user_item_permission_schema(session: AsyncSession) -> None:
         except OperationalError as exc:
             if "Duplicate key name" not in str(exc):
                 raise
+
+
+async def ensure_supplier_portal_schema(session: AsyncSession) -> None:
+    conn = await session.connection()
+    await conn.run_sync(VendorUser.__table__.create, checkfirst=True)
+
+    columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'vendor_users'
+        """))).all()
+    }
+
+    missing_columns = {
+        "full_name": "ALTER TABLE vendor_users ADD COLUMN full_name VARCHAR(200) NULL",
+        "phone": "ALTER TABLE vendor_users ADD COLUMN phone VARCHAR(20) NULL",
+        "is_active": "ALTER TABLE vendor_users ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1",
+        "must_change_password": "ALTER TABLE vendor_users ADD COLUMN must_change_password TINYINT(1) NOT NULL DEFAULT 1",
+        "failed_login_attempts": "ALTER TABLE vendor_users ADD COLUMN failed_login_attempts INT NOT NULL DEFAULT 0",
+        "locked_until": "ALTER TABLE vendor_users ADD COLUMN locked_until DATETIME NULL",
+        "last_login": "ALTER TABLE vendor_users ADD COLUMN last_login DATETIME NULL",
+        "password_changed_at": "ALTER TABLE vendor_users ADD COLUMN password_changed_at DATETIME NULL",
+        "created_at": "ALTER TABLE vendor_users ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "ALTER TABLE vendor_users ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        "created_by": "ALTER TABLE vendor_users ADD COLUMN created_by BIGINT NULL",
+    }
+    for column_name, ddl in missing_columns.items():
+        if column_name not in columns:
+            await conn.execute(text(ddl))
+
+    indexes = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT index_name
+            FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND table_name = 'vendor_users'
+        """))).all()
+    }
+
+    if "idx_vendor_users_vendor" not in indexes:
+        try:
+            await conn.execute(text("CREATE INDEX idx_vendor_users_vendor ON vendor_users (vendor_id)"))
+        except OperationalError as exc:
+            if "Duplicate key name" not in str(exc):
+                raise
+    if "idx_vendor_users_username" not in indexes:
+        try:
+            await conn.execute(text("CREATE UNIQUE INDEX idx_vendor_users_username ON vendor_users (username)"))
+        except OperationalError as exc:
+            if "Duplicate key name" not in str(exc):
+                raise
+
+
+async def ensure_rfq_schema(session: AsyncSession) -> None:
+    conn = await session.connection()
+
+    from app.models.procurement import RFQ, RFQItem, RFQVendor
+    await conn.run_sync(RFQ.__table__.create, checkfirst=True)
+    await conn.run_sync(RFQItem.__table__.create, checkfirst=True)
+    await conn.run_sync(RFQVendor.__table__.create, checkfirst=True)
+
+    quotation_columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'quotations'
+        """))).all()
+    }
+    if "rfq_number" not in quotation_columns:
+        await conn.execute(text("ALTER TABLE quotations ADD COLUMN rfq_number VARCHAR(50) NULL"))
+    if "with_vehicle" not in quotation_columns:
+        await conn.execute(text("ALTER TABLE quotations ADD COLUMN with_vehicle TINYINT(1) NOT NULL DEFAULT 0"))
+    if "rfq_id" not in quotation_columns:
+        await conn.execute(text("ALTER TABLE quotations ADD COLUMN rfq_id BIGINT NULL"))
+        try:
+            await conn.execute(text("ALTER TABLE quotations ADD CONSTRAINT fk_quotations_rfq_id FOREIGN KEY (rfq_id) REFERENCES rfqs (id) ON DELETE CASCADE"))
+        except Exception:
+            pass
+    if "subtotal" not in quotation_columns:
+        await conn.execute(text("ALTER TABLE quotations ADD COLUMN subtotal DECIMAL(15, 2) NOT NULL DEFAULT 0"))
+    if "vehicle_cost" not in quotation_columns:
+        await conn.execute(text("ALTER TABLE quotations ADD COLUMN vehicle_cost DECIMAL(15, 2) NOT NULL DEFAULT 0"))
+
+    quotation_indexes = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT index_name
+            FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND table_name = 'quotations'
+        """))).all()
+    }
+    if "idx_quotations_rfq_number" not in quotation_indexes:
+        try:
+            await conn.execute(text("CREATE INDEX idx_quotations_rfq_number ON quotations (rfq_number)"))
+        except OperationalError as exc:
+            if "Duplicate key name" not in str(exc):
+                raise
+
+    item_columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'quotation_items'
+        """))).all()
+    }
+    if "expected_delivery" not in item_columns:
+        await conn.execute(text("ALTER TABLE quotation_items ADD COLUMN expected_delivery DATETIME NULL"))
+    if "remarks" not in item_columns:
+        await conn.execute(text("ALTER TABLE quotation_items ADD COLUMN remarks TEXT NULL"))
+
     employee_idx_exists = (await conn.execute(text("""
         SELECT 1
         FROM information_schema.statistics
         WHERE table_schema = DATABASE()
-          AND table_name = 'employee_item_permissions'
-          AND index_name = 'uq_employee_item_permissions_scope'
+          AND table_name = 'role_item_permissions'
+          AND index_name = 'uq_role_item_permissions_scope'
         UNION
         SELECT 1
         FROM information_schema.table_constraints
         WHERE table_schema = DATABASE()
-          AND table_name = 'employee_item_permissions'
-          AND constraint_name = 'uq_employee_item_permissions_scope'
+          AND table_name = 'role_item_permissions'
+          AND constraint_name = 'uq_role_item_permissions_scope'
         LIMIT 1
     """))).scalar_one_or_none()
     if employee_idx_exists is None:
         try:
             await conn.execute(text("""
-                ALTER TABLE employee_item_permissions
-                ADD CONSTRAINT uq_employee_item_permissions_scope
-                UNIQUE (employee_id, entity_type, entity_id, action)
+                ALTER TABLE role_item_permissions
+                ADD CONSTRAINT uq_role_item_permissions_scope
+                UNIQUE (role_id, entity_type, entity_id, action)
             """))
         except OperationalError as exc:
             if "Duplicate key name" not in str(exc):
                 raise
+
+    po_columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'purchase_orders'
+        """))).all()
+    }
+    if "supplier_acknowledgement" not in po_columns:
+        await conn.execute(text("ALTER TABLE purchase_orders ADD COLUMN supplier_acknowledgement VARCHAR(50) NOT NULL DEFAULT 'pending'"))
 
 
 async def ensure_organization_structure_schema(session: AsyncSession) -> None:
@@ -693,3 +825,173 @@ async def ensure_packaging_schema(session: AsyncSession) -> None:
         ]
         session.add_all(levels)
         await session.flush()
+
+
+async def ensure_material_issue_schema(session: AsyncSession) -> None:
+    conn = await session.connection()
+    columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'material_issues'
+        """))).all()
+    }
+
+    if "dispatched_at" not in columns:
+        await conn.execute(text("ALTER TABLE material_issues ADD COLUMN dispatched_at DATETIME NULL"))
+
+    try:
+        await conn.execute(text("""
+            ALTER TABLE material_issues 
+            MODIFY COLUMN status ENUM('draft', 'issued', 'dispatched', 'acknowledged', 'completed', 'cancelled') DEFAULT 'draft'
+        """))
+    except Exception:
+        pass
+
+    items_columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'material_issue_items'
+        """))).all()
+    }
+    if "serial_numbers" not in items_columns:
+        await conn.execute(text("ALTER TABLE material_issue_items ADD COLUMN serial_numbers JSON NULL"))
+
+
+async def ensure_logistics_so_schema(session: AsyncSession) -> None:
+    conn = await session.connection()
+    columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'logistics_service_orders'
+        """))).all()
+    }
+
+    if "arrival_date" not in columns:
+        await conn.execute(text("ALTER TABLE logistics_service_orders ADD COLUMN arrival_date VARCHAR(50) NULL"))
+    if "expected_delivery_date" not in columns:
+        await conn.execute(text("ALTER TABLE logistics_service_orders ADD COLUMN expected_delivery_date DATETIME NULL"))
+
+    columns_rfq = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'logistics_rfq_masters'
+        """))).all()
+    }
+
+    if "expected_delivery_date" not in columns_rfq:
+        await conn.execute(text("ALTER TABLE logistics_rfq_masters ADD COLUMN expected_delivery_date DATETIME NULL"))
+
+
+async def ensure_universal_dispatch_ack_schema(session: AsyncSession) -> None:
+    conn = await session.connection()
+    
+    from app.models.dispatch import (
+        DispatchDeliveryAcknowledgement, 
+        DispatchAcknowledgementItem, 
+        DispatchAcknowledgementDocument,
+        DispatchOrderItem
+    )
+    await conn.run_sync(DispatchDeliveryAcknowledgement.__table__.create, checkfirst=True)
+    await conn.run_sync(DispatchAcknowledgementItem.__table__.create, checkfirst=True)
+    await conn.run_sync(DispatchAcknowledgementDocument.__table__.create, checkfirst=True)
+    await conn.run_sync(DispatchOrderItem.__table__.create, checkfirst=True)
+
+    # Safe dropping of legacy tables
+    try:
+        await conn.execute(text("DROP TABLE IF EXISTS dispatch_item"))
+        await conn.execute(text("DROP TABLE IF EXISTS dispatch_header"))
+    except Exception:
+        pass
+
+    columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'dispatch_orders'
+        """))).all()
+    }
+
+    if "destination_warehouse_id" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN destination_warehouse_id BIGINT NULL"))
+    if "expected_delivery_date" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN expected_delivery_date DATETIME NULL"))
+    if "destination_user_id" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN destination_user_id BIGINT NULL"))
+    if "destination_type" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN destination_type VARCHAR(50) NOT NULL DEFAULT 'USER'"))
+    if "dispatch_type" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN dispatch_type VARCHAR(50) NOT NULL DEFAULT 'THIRD_PARTY'"))
+    if "delivery_acknowledged" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_acknowledged TINYINT(1) NOT NULL DEFAULT 0"))
+    if "delivery_acknowledged_at" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_acknowledged_at DATETIME NULL"))
+    if "delivery_acknowledged_by_id" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_acknowledged_by_id BIGINT NULL"))
+    if "delivery_acknowledged_by_name" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_acknowledged_by_name VARCHAR(100) NULL"))
+    if "delivery_acknowledged_by_designation" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_acknowledged_by_designation VARCHAR(100) NULL"))
+    if "delivery_acknowledged_by_phone" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_acknowledged_by_phone VARCHAR(20) NULL"))
+    if "delivery_acknowledged_by_email" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_acknowledged_by_email VARCHAR(100) NULL"))
+    if "receiver_signature_url" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN receiver_signature_url VARCHAR(500) NULL"))
+    if "receiver_id_proof_type" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN receiver_id_proof_type VARCHAR(50) NOT NULL DEFAULT 'NONE'"))
+    if "receiver_id_proof_number" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN receiver_id_proof_number VARCHAR(50) NULL"))
+    if "delivery_photo_urls" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_photo_urls JSON NULL"))
+    if "goods_condition_on_delivery" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN goods_condition_on_delivery VARCHAR(50) NOT NULL DEFAULT 'GOOD'"))
+    if "delivery_remarks" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_remarks TEXT NULL"))
+    if "material_issue_id" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN material_issue_id BIGINT NULL"))
+    if "delivery_location_latitude" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_location_latitude DECIMAL(10, 8) NULL"))
+    if "delivery_location_longitude" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_location_longitude DECIMAL(11, 8) NULL"))
+    if "delivery_location_verified" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_location_verified TINYINT(1) NOT NULL DEFAULT 0"))
+    
+    try:
+        await conn.execute(text("""
+            ALTER TABLE dispatch_orders 
+            MODIFY COLUMN status ENUM(
+                'draft', 'loading', 'loaded', 'dispatched', 'in_transit',
+                'out_for_delivery', 'delivered', 'acknowledged',
+                'partially_acknowledged', 'rejected', 'returned', 'cancelled'
+            ) DEFAULT 'draft'
+        """))
+    except Exception:
+        pass
+
+    items_cols = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'dispatch_order_items'
+        """))).all()
+    }
+    if "serial_numbers" not in items_cols:
+        await conn.execute(text("ALTER TABLE dispatch_order_items ADD COLUMN serial_numbers JSON NULL"))
+
+

@@ -663,16 +663,11 @@ const PutawayForm = () => {
       title: 'Bin',
       width: 150,
       render: (_, record) => (
-        <Select
-          value={record.suggested_bin_id}
-          options={binOptions[record.key] || []}
-          placeholder="Bin"
-          allowClear
-          showSearch
-          optionFilterProp="label"
+        <Input
+          value={record.suggested_bin_id || ''}
+          placeholder="Enter bin..."
           style={{ width: '100%' }}
-          onChange={(v) => updateItem(record.key, 'suggested_bin_id', v)}
-          disabled={!record.rack_id}
+          onChange={(e) => updateItem(record.key, 'suggested_bin_id', e.target.value)}
         />
       ),
     },

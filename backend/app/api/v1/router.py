@@ -6,10 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.api.v1 import (
     auth, users, masters, masters_phase1, procurement, procurement_demand_pool, warehouse,
-    inventory, indent, consumption, logistics, approval,
+    inventory, indent, consumption, approval,
     accounts, assets, barcode, reports, dashboard, notifications,
     healthcare, outbound, drift_fixes, rules, compliance, documents, mrp, reports_v2, lineage, alerts,
-    rate_contracts, cycle_count, landed_cost, lms, sidebar, packaging
+    rate_contracts, cycle_count, landed_cost, lms, sidebar, packaging, inward, dispatch, api_keys, external,
+    logistics, carrier_auth, carrier_portal,
+    vendor_auth, vendor_portal,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -18,17 +20,21 @@ api_router.include_router(packaging.router)
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
 api_router.include_router(users.router, prefix="/settings/users", tags=["Settings"])
+api_router.include_router(api_keys.router, prefix="/api-keys", tags=["API Keys"])
+api_router.include_router(external.router, prefix="/external", tags=["External Data Access (API Key)"])
 api_router.include_router(masters.router, prefix="/masters", tags=["Master Data"])
 api_router.include_router(masters_phase1.router, prefix="/masters", tags=["Master Data"])
 api_router.include_router(procurement.router, prefix="/procurement", tags=["Procurement"])
 api_router.include_router(procurement_demand_pool.router, prefix="/procurement", tags=["Demand Pool"])
 api_router.include_router(warehouse.router, prefix="/warehouse", tags=["Warehouse / GRN / QI / Putaway"])
+api_router.include_router(inward.router, prefix="/warehouse/inwards", tags=["Warehouse / Material Inward"])
+api_router.include_router(dispatch.router, prefix="/warehouse/dispatch", tags=["Warehouse / Dispatch"])
 api_router.include_router(inventory.router, prefix="/inventory", tags=["Inventory"])
 api_router.include_router(indent.router, prefix="/indents", tags=["Indent Management"])
 api_router.include_router(indent.router, prefix="/indent/indents", tags=["Indent Management"])
 api_router.include_router(indent.ack_router, prefix="/indent", tags=["Indent Acknowledgement"])
 api_router.include_router(consumption.router, prefix="/consumption", tags=["Consumption"])
-api_router.include_router(logistics.router, prefix="/logistics", tags=["Logistics / Transport"])
+
 api_router.include_router(approval.router, prefix="/approvals", tags=["Approval Workflow"])
 api_router.include_router(rules.router, prefix="/automation", tags=["Business Rules Engine"])
 api_router.include_router(accounts.router, prefix="/accounts", tags=["Accounts"])
@@ -51,6 +57,11 @@ api_router.include_router(outbound.router, prefix="/outbound", tags=["Outbound"]
 api_router.include_router(drift_fixes.router, tags=["Drift Fixes"])
 api_router.include_router(lms.router, prefix="/lms", tags=["LMS"])
 api_router.include_router(sidebar.router, tags=["Me / Sidebar"])
+api_router.include_router(logistics.router, prefix="/logistics", tags=["Logistics Management"])
+api_router.include_router(carrier_auth.router, prefix="/carrier-auth", tags=["Carrier Authentication"])
+api_router.include_router(carrier_portal.router, prefix="/carrier", tags=["Carrier Portal"])
+api_router.include_router(vendor_auth.router, prefix="/vendor-auth", tags=["Vendor (Supplier) Authentication"])
+api_router.include_router(vendor_portal.router, prefix="/supplier", tags=["Supplier Portal"])
 
 
 # ── Alias routes: frontend calls paths that don't match backend exactly ──
@@ -285,36 +296,7 @@ async def replenishment_rules_update_alias(
 
 
 
-# NOTE: /logistics/vendor-quotations is now handled by the logistics router directly
 
-
-@alias_router.get("/logistics/fleet-dashboard/summary")
-async def fleet_summary_alias(
-    current_user: User = Depends(get_current_user),
-):
-    return {"active_vehicles": 0, "in_transit": 0, "available": 0, "maintenance": 0}
-
-
-@alias_router.get("/logistics/fleet-dashboard/active-shipments")
-async def fleet_active_alias(
-    current_user: User = Depends(get_current_user),
-):
-    return {"items": [], "total": 0}
-
-
-@alias_router.get("/logistics/fleet-dashboard/charts")
-async def fleet_charts_alias(
-    period: str = Query("month"),
-    current_user: User = Depends(get_current_user),
-):
-    """Fleet dashboard charts - returns time series data for vehicles/shipments."""
-    return {
-        "period": period,
-        "vehicle_utilization": [],
-        "shipment_trend": [],
-        "on_time_delivery": [],
-        "vendor_performance": [],
-    }
 
 
 @alias_router.get("/masters/cost-centers")
@@ -456,7 +438,7 @@ async def settings_roles_list(
 _RESERVED_ROLE_CODES = {
     "super_admin", "admin",
     "warehouse_manager", "purchase_manager", "accounts_manager",
-    "logistics_manager", "project_manager",
+    "project_manager",
     "purchase_officer", "accounts_officer",
     "warehouse_user", "field_staff", "viewer",
 }
@@ -615,8 +597,8 @@ async def settings_role_permissions_update(
     # combinations are silently skipped so the Save button still succeeds
     # for the legitimate ones.
     _ALLOWED_MODULES = {
-        "masters", "procurement", "warehouse", "inventory", "outbound",
-        "logistics", "indent", "consumption", "approvals", "accounts",
+        "masters", "procurement", "warehouse", "inventory", "logistics", "outbound",
+        "indent", "consumption", "approvals", "accounts",
         "assets", "reports", "settings", "dashboard", "healthcare",
         "compliance", "documents", "mrp", "alerts", "users", "roles",
     }

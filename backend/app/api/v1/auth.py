@@ -41,13 +41,9 @@ def _client_ip(request: Request) -> str:
 
 
 import os as _os
-from dotenv import load_dotenv as _load_dotenv
 from limits.storage import MemoryStorage
 
-# Load .env file explicitly for module-level env var reads
-_load_dotenv()
-
-_RATE_LIMIT_STORAGE = _os.getenv("RATE_LIMIT_STORAGE_URI", "redis://localhost:6379/0")
+_RATE_LIMIT_STORAGE = settings.RATE_LIMIT_STORAGE_URI or "redis://localhost:6379/0"
 # Shared storage so per-IP limits hold across uvicorn workers (in-memory backend
 # silently doubled effective limits on multi-worker deploys — Wave 4 verifier V2).
 # For local dev without Redis, use memory:// URI scheme

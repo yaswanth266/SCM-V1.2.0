@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { message } from 'antd';
 import useAuthStore from '../store/authStore';
+import useCarrierAuthStore from '../store/carrierAuthStore';
+import useVendorAuthStore from '../store/vendorAuthStore';
 
 const Eye = ({ open }) => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -33,12 +35,37 @@ const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { login, loading, token } = useAuthStore();
+  const carrierLogin = useCarrierAuthStore((s) => s.login);
+  const carrierLoading = useCarrierAuthStore((s) => s.loading);
+  const carrierToken = useCarrierAuthStore((s) => s.token);
+  const vendorLogin = useVendorAuthStore((s) => s.login);
+  const vendorLoading = useVendorAuthStore((s) => s.loading);
+  const vendorToken = useVendorAuthStore((s) => s.token);
   const [error, setError] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
-  const [tab, setTab] = useState('employee');
+  const [tab, setTab] = useState(() => {
+    if (location.pathname === '/login/transporter') return 'partner';
+    if (location.pathname === '/login/vendor') return 'supplier';
+    return 'employee';
+  });
+
+  const pathname = location.pathname;
+  const isTransporterPage = pathname === '/login/transporter';
+  const isVendorPage = pathname === '/login/vendor';
+  const isEmployeePage = pathname === '/login' || pathname === '/';
+
+  useEffect(() => {
+    if (location.pathname === '/login/transporter') {
+      setTab('partner');
+    } else if (location.pathname === '/login/vendor') {
+      setTab('supplier');
+    } else if (location.pathname === '/login' || location.pathname === '/') {
+      setTab('employee');
+    }
+  }, [location.pathname]);
   // BUG-FE-157: detect Caps Lock so users don't burn lockout attempts on a
   // password they typed in the wrong case.
   const [capsLockOn, setCapsLockOn] = useState(false);
@@ -52,6 +79,20 @@ const Login = () => {
       navigate(redirectTo, { replace: true });
     }
   }, [token, navigate, redirectTo]);
+
+  // Carrier session redirect — independent of employee session.
+  useEffect(() => {
+    if (carrierToken) {
+      navigate('/carrier', { replace: true });
+    }
+  }, [carrierToken, navigate]);
+
+  // Supplier (material vendor) session redirect — independent of both.
+  useEffect(() => {
+    if (vendorToken) {
+      navigate('/supplier', { replace: true });
+    }
+  }, [vendorToken, navigate]);
 
   useEffect(() => {
     // BUG-FE-156: only pre-fill username when the user explicitly opted in
@@ -79,17 +120,19 @@ const Login = () => {
       setError('Please enter your username and password.');
       return;
     }
-    // BUG-FE-159: surface a clear error if a vendor/partner attempts to use
-    // the employee tab (or vice versa). The backend already enforces login
-    // type via vendor_login flag; the UI now conveys the intent so the
-    // toggle is more than cosmetic.
-    const result = await login(username, password, remember, {
-      login_type: tab === 'partner' ? 'vendor' : 'employee',
-    });
+    // Tab routing: partner → carrier auth, supplier → vendor auth, employee → regular auth.
+    let result;
+    if (tab === 'partner') {
+      result = await carrierLogin(username, password);
+    } else if (tab === 'supplier') {
+      result = await vendorLogin(username, password);
+    } else {
+      result = await login(username, password, remember, { login_type: 'employee' });
+    }
     if (!result.success) {
       setError(result.error);
     }
-    // Navigation handled by token-watch useEffect.
+    // Navigation handled by token-watch useEffects.
   };
 
   const handleForgot = () => {
@@ -123,12 +166,31 @@ const Login = () => {
         </header>
         <div className="brand-hero">
           <h1>
-            Supply chain for the{' '}
-            <em>last mile{' '}of{' '}care.</em>
+            {tab === 'partner' ? (
+              <>
+                Transporter Control &{' '}
+                <em>Freight Dispatch.</em>
+              </>
+            ) : tab === 'supplier' ? (
+              <>
+                B2B Procurement &{' '}
+                <em>Material Supply.</em>
+              </>
+            ) : (
+              <>
+                Supply chain for the{' '}
+                <em>last mile&nbsp;of&nbsp;care.</em>
+              </>
+            )}
           </h1>
           <p>
-            Procurement, warehousing, fleet and partner visibility — purpose-built for Bavya
-            Health's 108 ambulances, mobile medical units, NTEP programs and district supply hubs.
+            {tab === 'partner' ? (
+              "Access active service orders, schedule fleet vehicles for gate entry checkpoint check-ins, record live transit delay warning logs, and sign off geofenced digital PODs."
+            ) : tab === 'supplier' ? (
+              "Submit competitive quotation bids on active SCM campaigns, review awarded purchase orders, manage packaging lists, and trace material delivery gating."
+            ) : (
+              "Procurement, warehousing, fleet and partner visibility — purpose-built for Bavya Health's 108 ambulances, mobile medical units, NTEP programs and district supply hubs."
+            )}
           </p>
         </div>
       </section>
@@ -153,39 +215,61 @@ const Login = () => {
         <div className="form-body">
           <form className="form-card" onSubmit={handleSubmit} noValidate>
             <h2>
-              Sign in to <em>Bavya&nbsp;SCM</em>
+              {tab === 'partner' ? (
+                <>Sign in to <em>Transporter Portal</em></>
+              ) : tab === 'supplier' ? (
+                <>Sign in to <em>Vendor Portal</em></>
+              ) : (
+                <>Sign in to <em>Bavya&nbsp;SCM</em></>
+              )}
             </h2>
 
-            <div className="auth-tabs" role="tablist">
-              <button
-                type="button"
-                className={tab === 'employee' ? 'active' : ''}
-                onClick={() => setTab('employee')}
-                role="tab"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                  strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                  <circle cx="12" cy="8" r="4" />
-                  <path d="M4 21a8 8 0 0 1 16 0" />
-                </svg>
-                Employee
-              </button>
-              <button
-                type="button"
-                className={tab === 'partner' ? 'active' : ''}
-                onClick={() => setTab('partner')}
-                role="tab"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                  strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="m7.5 4.27 9 5.15" />
-                  <path d="M21 8 12 2 3 8v8l9 6 9-6V8z" />
-                  <path d="m3.3 7 8.7 5 8.7-5" />
-                  <path d="M12 22V12" />
-                </svg>
-                Vendor / Partner
-              </button>
-            </div>
+            {!(isTransporterPage || isVendorPage || isEmployeePage) && (
+              <div className="auth-tabs" role="tablist">
+                <button
+                  type="button"
+                  className={tab === 'employee' ? 'active' : ''}
+                  onClick={() => setTab('employee')}
+                  role="tab"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="8" r="4" />
+                    <path d="M4 21a8 8 0 0 1 16 0" />
+                  </svg>
+                  Employee
+                </button>
+                <button
+                  type="button"
+                  className={tab === 'partner' ? 'active' : ''}
+                  onClick={() => setTab('partner')}
+                  role="tab"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="m7.5 4.27 9 5.15" />
+                    <path d="M21 8 12 2 3 8v8l9 6 9-6V8z" />
+                    <path d="m3.3 7 8.7 5 8.7-5" />
+                    <path d="M12 22V12" />
+                  </svg>
+                  Transporter
+                </button>
+                <button
+                  type="button"
+                  className={tab === 'supplier' ? 'active' : ''}
+                  onClick={() => setTab('supplier')}
+                  role="tab"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
+                    <line x1="3" y1="6" x2="21" y2="6" />
+                    <path d="M16 10a4 4 0 0 1-8 0" />
+                  </svg>
+                  Supplier
+                </button>
+              </div>
+            )}
 
             {/* BUG-FE-161: surface "Account locked" / "Account disabled"
                 hints with a stronger visual style so users notice they need
@@ -231,7 +315,7 @@ const Login = () => {
                 maxLength={150}
               />
               <label htmlFor="login-username">
-                {tab === 'partner' ? 'Partner username' : 'Employee username'}
+                {tab === 'partner' ? 'Transporter username' : tab === 'supplier' ? 'Supplier username' : 'Employee username'}
               </label>
             </div>
 
@@ -295,10 +379,26 @@ const Login = () => {
               </a>
             </div>
 
-            <button type="submit" className="btn-primary" disabled={loading}>
-              {loading ? 'Signing in…' : 'Sign in'}
-              {!loading && <ArrowRight />}
+            <button type="submit" className="btn-primary" disabled={loading || carrierLoading || vendorLoading}>
+              {(loading || carrierLoading || vendorLoading) ? 'Signing in…' : 'Sign in'}
+              {!(loading || carrierLoading || vendorLoading) && <ArrowRight />}
             </button>
+
+            <div className="alternative-login" style={{ fontSize: '12px', marginTop: '16px', textAlign: 'center', color: '#64748b', lineHeight: '1.6' }}>
+              {tab === 'employee' ? (
+                <span>
+                  Are you a partner? Sign in to{' '}
+                  <a href="#" onClick={(e) => { e.preventDefault(); navigate('/login/transporter'); }} style={{ color: '#096dd9', fontWeight: 600 }}>Transporter Portal</a>
+                  {' or '}
+                  <a href="#" onClick={(e) => { e.preventDefault(); navigate('/login/vendor'); }} style={{ color: '#096dd9', fontWeight: 600 }}>Vendor Portal</a>
+                </span>
+              ) : (
+                <span>
+                  Are you an employee? Sign in to{' '}
+                  <a href="#" onClick={(e) => { e.preventDefault(); navigate('/login'); }} style={{ color: '#096dd9', fontWeight: 600 }}>Employee SCM Portal</a>
+                </span>
+              )}
+            </div>
 
             <div className="help-card">
               <div className="ic">

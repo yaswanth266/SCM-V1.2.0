@@ -254,10 +254,11 @@ const Invoices = () => {
           qty: item.qty || item.quantity || 0,
           uom: item.uom || '',
           rate: item.rate || item.unit_price || 0,
-          discount_percent: item.discount_percent || 0,
-          cgst_percent: item.cgst_percent || 0,
-          sgst_percent: item.sgst_percent || 0,
-          igst_percent: item.igst_percent || 0,
+          discount_percent: item.discount_percent || item.discount_pct || 0,
+          // Backend InvoiceItem serialises as cgst_rate / sgst_rate / igst_rate
+          cgst_percent: item.cgst_percent ?? item.cgst_rate ?? 0,
+          sgst_percent: item.sgst_percent ?? item.sgst_rate ?? 0,
+          igst_percent: item.igst_percent ?? item.igst_rate ?? 0,
           tax_amount: 0,
           amount: 0,
         };
@@ -338,10 +339,13 @@ const Invoices = () => {
           // BUG-FIN-147: backend serializes PO items as `rate`; only fall
           // back to unit_price for legacy callers/payloads.
           rate: item.rate ?? item.unit_price ?? 0,
-          discount_percent: item.discount_percent || 0,
-          cgst_percent: item.cgst_percent || 9,
-          sgst_percent: item.sgst_percent || 9,
-          igst_percent: item.igst_percent || 0,
+          discount_percent: item.discount_percent || item.discount_pct || 0,
+          // BUG-FIN-PO-MAP: POItemResponse returns cgst_rate / sgst_rate / igst_rate,
+          // NOT cgst_percent. The old || 9 fallback silently forced 9% CGST+SGST
+          // on every item even when the PO had IGST-only or different rates.
+          cgst_percent: item.cgst_percent ?? item.cgst_rate ?? 0,
+          sgst_percent: item.sgst_percent ?? item.sgst_rate ?? 0,
+          igst_percent: item.igst_percent ?? item.igst_rate ?? 0,
           tax_amount: 0,
           amount: 0,
         };

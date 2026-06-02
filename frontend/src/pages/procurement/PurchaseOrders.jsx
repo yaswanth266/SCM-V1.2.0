@@ -329,7 +329,29 @@ const PurchaseOrders = () => {
       if (qData.mr_id) {
         form.setFieldsValue({ mr_id: qData.mr_id });
       }
+
+      // Check if selected vendor has GSTIN
+      const vendorGstin = (selectedVendor?.gst_number || '').trim();
+      const hasGstin = !!vendorGstin;
+
       const items = (qData.items || []).map((item, idx) => {
+        let cg = item.cgst_rate || item.cgst_percent || 0;
+        let sg = item.sgst_rate || item.sgst_percent || 0;
+        let ig = item.igst_rate || item.igst_percent || 0;
+        const taxRate = item.tax_rate || 0;
+
+        if (cg === 0 && sg === 0 && ig === 0 && taxRate > 0) {
+          if (hasGstin) {
+            cg = taxRate / 2;
+            sg = taxRate / 2;
+            ig = 0;
+          } else {
+            cg = 0;
+            sg = 0;
+            ig = taxRate;
+          }
+        }
+
         const row = {
           key: item.id || Date.now() + idx,
           item_id: item.item_id,
@@ -340,9 +362,9 @@ const PurchaseOrders = () => {
           uom: item.uom_name || item.uom || '',
           rate: item.rate || item.unit_price || 0,
           discount_percent: item.discount || item.discount_percent || 0,
-          cgst_percent: 9,
-          sgst_percent: 9,
-          igst_percent: 0,
+          cgst_percent: cg,
+          sgst_percent: sg,
+          igst_percent: ig,
           tax_amount: 0,
           amount: 0,
         };
@@ -368,6 +390,10 @@ const PurchaseOrders = () => {
       if (mrData.required_date) patch.expected_delivery_date = dayjs(mrData.required_date);
       if (Object.keys(patch).length) form.setFieldsValue(patch);
 
+      // Check if selected vendor has GSTIN
+      const vendorGstin = (selectedVendor?.gst_number || '').trim();
+      const hasGstin = !!vendorGstin;
+
       const items = (mrData.items || []).map((item, idx) => {
         const row = {
           key: item.id || Date.now() + idx,
@@ -379,9 +405,9 @@ const PurchaseOrders = () => {
           uom: item.uom_name || item.uom || '',
           rate: 0,
           discount_percent: 0,
-          cgst_percent: 9,
-          sgst_percent: 9,
-          igst_percent: 0,
+          cgst_percent: hasGstin ? 9 : 0,
+          sgst_percent: hasGstin ? 9 : 0,
+          igst_percent: hasGstin ? 0 : 18,
           tax_amount: 0,
           amount: 0,
         };
@@ -642,15 +668,32 @@ const PurchaseOrders = () => {
                 updatePoItem(record.key, 'uom_id', item.primary_uom_id || item.uom_id || null);
                 const rate = parseFloat(item.purchase_price || 0);
                 if (rate > 0) updatePoItem(record.key, 'rate', rate);
-                // BUG-PRO-141 fix: the row table renders/edits cgst_percent,
-                // sgst_percent, igst_percent — autofilling cgst_rate (etc.) wrote
-                // to keys nothing else read. Use the *_percent keys so the
-                // ItemSelector's autofilled GST values actually appear in the
-                // visible inputs and feed into recalcItem.
-                updatePoItem(record.key, 'cgst_percent', parseFloat(item.cgst_rate || item.cgst_percent || 0));
-                updatePoItem(record.key, 'sgst_percent', parseFloat(item.sgst_rate || item.sgst_percent || 0));
-                updatePoItem(record.key, 'igst_percent', parseFloat(item.igst_rate || item.igst_percent || 0));
-                updatePoItem(record.key, 'tax_rate', parseFloat(item.tax_rate || 0));
+
+                // Check if selected vendor has GSTIN and split/assign GST rates dynamically
+                const vendorGstin = (selectedVendor?.gst_number || '').trim();
+                const hasGstin = !!vendorGstin;
+
+                let cg = parseFloat(item.cgst_rate || item.cgst_percent || 0);
+                let sg = parseFloat(item.sgst_rate || item.sgst_percent || 0);
+                let ig = parseFloat(item.igst_rate || item.igst_percent || 0);
+                const tax = parseFloat(item.tax_rate || 0);
+
+                if (cg === 0 && sg === 0 && ig === 0 && tax > 0) {
+                  if (hasGstin) {
+                    cg = tax / 2;
+                    sg = tax / 2;
+                    ig = 0;
+                  } else {
+                    cg = 0;
+                    sg = 0;
+                    ig = tax;
+                  }
+                }
+
+                updatePoItem(record.key, 'cgst_percent', cg);
+                updatePoItem(record.key, 'sgst_percent', sg);
+                updatePoItem(record.key, 'igst_percent', ig);
+                updatePoItem(record.key, 'tax_rate', tax);
               }
             }}
             style={{ width: '100%' }}

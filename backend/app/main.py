@@ -25,7 +25,16 @@ from app.utils.exceptions import (
     insufficient_stock_handler,
     validation_exception_handler,
 )
-from app.utils.schema_sync import ensure_feature_schema_on_connection, ensure_vendor_type_schema, ensure_organization_structure_schema
+from app.utils.schema_sync import (
+    ensure_feature_schema_on_connection,
+    ensure_vendor_type_schema,
+    ensure_organization_structure_schema,
+    ensure_supplier_portal_schema,
+    ensure_rfq_schema,
+    ensure_material_issue_schema,
+    ensure_logistics_so_schema,
+    ensure_universal_dispatch_ack_schema,
+)
 from fastapi.exceptions import RequestValidationError
 
 logger = logging.getLogger(__name__)
@@ -77,9 +86,88 @@ async def lifespan(app: FastAPI):
         async with AsyncSessionLocal() as session:
             await ensure_vendor_type_schema(session)
             await ensure_organization_structure_schema(session)
+            await ensure_supplier_portal_schema(session)
+            await ensure_rfq_schema(session)
+            await ensure_material_issue_schema(session)
+            await ensure_logistics_so_schema(session)
+            await ensure_universal_dispatch_ack_schema(session)
             await session.commit()
     except Exception as exc:
         logger.warning("vendor type schema bootstrap failed at startup: %s", exc)
+
+    # Logistics Master Data Seeding
+    try:
+        from app.database import AsyncSessionLocal
+        from app.api.v1.logistics import bootstrap_logistics_data
+        async with AsyncSessionLocal() as session:
+            await bootstrap_logistics_data(session)
+            await session.commit()
+    except Exception as exc:
+        logger.warning("logistics master data seeding failed at startup: %s", exc)
+
+    # Retroactive PO Address Seeding
+    try:
+        from app.database import AsyncSessionLocal
+        from app.models.procurement import PurchaseOrder
+        from app.models.warehouse import Warehouse
+        from sqlalchemy import select, or_
+        from sqlalchemy.orm import selectinload
+        
+        async with AsyncSessionLocal() as session:
+            # Find POs with missing billing or shipping addresses
+            po_query = select(PurchaseOrder).where(
+                or_(PurchaseOrder.billing_address == None, PurchaseOrder.shipping_address == None)
+            )
+            po_result = await session.execute(po_query)
+            pos_to_update = po_result.scalars().all()
+            
+            if pos_to_update:
+                warehouse_cache = {}
+                for po in pos_to_update:
+                    if not po.warehouse_id:
+                        continue
+                        
+                    if po.warehouse_id not in warehouse_cache:
+                        w_res = await session.execute(
+                            select(Warehouse).options(selectinload(Warehouse.organization)).where(Warehouse.id == po.warehouse_id)
+                        )
+                        warehouse_cache[po.warehouse_id] = w_res.scalar_one_or_none()
+                        
+                    warehouse_row = warehouse_cache[po.warehouse_id]
+                    if not warehouse_row:
+                        continue
+                        
+                    # Generate Billing Address
+                    if not po.billing_address and warehouse_row.organization:
+                        org = warehouse_row.organization
+                        org_parts = [
+                            org.name,
+                            org.address,
+                            f"GSTIN: {org.gst_number}" if org.gst_number else None,
+                            f"PAN: {org.pan_number}" if org.pan_number else None,
+                            f"Phone: {org.phone}" if org.phone else None,
+                            f"Email: {org.email}" if org.email else None
+                        ]
+                        po.billing_address = "\n".join([p for p in org_parts if p])
+                        
+                    # Generate Shipping Address
+                    if not po.shipping_address:
+                        ship_parts = [
+                            warehouse_row.name,
+                            warehouse_row.address_line1,
+                            warehouse_row.address_line2,
+                            warehouse_row.city,
+                            warehouse_row.state,
+                            warehouse_row.pincode,
+                            f"Contact: {warehouse_row.contact_person}" if warehouse_row.contact_person else None,
+                            f"Phone: {warehouse_row.phone}" if warehouse_row.phone else None
+                        ]
+                        po.shipping_address = "\n".join([str(p) for p in ship_parts if p])
+                        
+                await session.commit()
+                logger.info(f"Retroactive PO Address Seeding complete. Updated {len(pos_to_update)} POs.")
+    except Exception as exc:
+        logger.warning("Retroactive PO Address Seeding failed at startup: %s", exc)
 
     # 2. APScheduler — daily / 4-hourly notification jobs
     try:

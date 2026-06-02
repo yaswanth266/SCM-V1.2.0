@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   Button, Drawer, Form, Input, InputNumber, Select, Space, DatePicker,
   Popconfirm, message, Row, Col, Table, Card, Descriptions, Modal,
@@ -15,6 +15,7 @@ import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
 import StatusTag from '../../components/StatusTag';
 import ItemSelector from '../../components/ItemSelector';
+import SerialNumbersModal from '../../components/SerialNumbersModal';
 import api from '../../config/api';
 import {
   formatDate, formatCurrency, formatNumber, getErrorMessage,
@@ -28,6 +29,7 @@ const { Text } = Typography;
 const MI_STATUSES = [
   { label: 'Draft', value: 'draft' },
   { label: 'Issued', value: 'issued' },
+  { label: 'Dispatched', value: 'dispatched' },
   { label: 'Acknowledged', value: 'acknowledged' },
   { label: 'Completed', value: 'completed' },
   { label: 'Cancelled', value: 'cancelled' },
@@ -35,6 +37,7 @@ const MI_STATUSES = [
 
 const MaterialIssues = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [viewModalOpen, setViewModalOpen] = useState(false);
   const [viewData, setViewData] = useState(null);
@@ -52,6 +55,7 @@ const MaterialIssues = () => {
   // Drawer state
   const [issueItems, setIssueItems] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
+  const [allWarehouses, setAllWarehouses] = useState([]);
   const [indentOptions, setIndentOptions] = useState([]);
   const [mrOptions, setMrOptions] = useState([]);
   const [uomOptions, setUomOptions] = useState([]);
@@ -67,8 +71,9 @@ const MaterialIssues = () => {
   // --- Lookups ---
   const loadLookups = useCallback(async () => {
     try {
-      const [whRes, uomRes, userRes] = await Promise.allSettled([
+      const [whRes, allWhRes, uomRes, userRes] = await Promise.allSettled([
         api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } }),
+        api.get('/masters/warehouses', { params: { page_size: 200 } }),
         api.get('/masters/uom', { params: { page_size: 200 } }),
         // Bug fix BUG_0064: was calling /settings/users (admin-only) → 403 →
         // empty IssuedTo dropdown for non-admin users. /users/lookup is open
@@ -78,6 +83,15 @@ const MaterialIssues = () => {
       if (whRes.status === 'fulfilled') {
         const w = whRes.value.data;
         setWarehouses(
+          (w.items || w.data || w || []).map((i) => ({
+            label: i.name || i.warehouse_name,
+            value: i.id,
+          }))
+        );
+      }
+      if (allWhRes.status === 'fulfilled') {
+        const w = allWhRes.value.data;
+        setAllWarehouses(
           (w.items || w.data || w || []).map((i) => ({
             label: i.name || i.warehouse_name,
             value: i.id,
@@ -102,31 +116,46 @@ const MaterialIssues = () => {
           }))
         );
       }
-    } catch {
-      // silent
+    } catch (err) {
+      console.error('Error loading lookups:', err);
     }
   }, []);
 
   const loadIndentOptions = useCallback(async (search = '') => {
     try {
+      const warehouseId = form.getFieldValue('warehouse_id');
+      const params = { page_size: 50, search, available_for_issue: true };
+      if (warehouseId) {
+        params.warehouse_id = warehouseId;
+      }
       // Backend filter `available_for_issue=true` covers
       // approved + partially_fulfilled AND drops indents fully issued
       // already, so the same indent can't be picked twice.
-      const res = await api.get('/indent/indents', {
-        params: { page_size: 50, search, available_for_issue: true },
-      });
+      const res = await api.get('/indent/indents', { params });
       const data = res.data;
       const items = data.items || data.data || data || [];
-      setIndentOptions(
-        items.map((ind) => ({
-          label: `${ind.indent_number}${ind.warehouse_name ? ` · ${ind.warehouse_name}` : ''}${ind.raised_by_name ? ` · ${ind.raised_by_name}` : ''}`,
-          value: ind.id,
-        }))
-      );
-    } catch {
-      // silent
+      const newOptions = items.map((ind) => ({
+        label: `${ind.indent_number}${ind.warehouse_name ? ` · ${ind.warehouse_name}` : ''}${ind.raised_by_name ? ` · ${ind.raised_by_name}` : ''}`,
+        value: ind.id,
+      }));
+
+      // Keep the currently selected indent option if it's not in the returned list
+      const currentVal = form.getFieldValue('indent_id');
+      if (currentVal) {
+        setIndentOptions((prev) => {
+          const selectedOpt = prev.find((o) => o.value === currentVal);
+          if (selectedOpt && !newOptions.some((o) => o.value === currentVal)) {
+            return [selectedOpt, ...newOptions];
+          }
+          return newOptions;
+        });
+      } else {
+        setIndentOptions(newOptions);
+      }
+    } catch (err) {
+      console.error('Error loading indent options:', err);
     }
-  }, []);
+  }, [form]);
 
   // Fetch available qty per item for the given warehouse and update stockMap.
   // Used after an indent is picked (so the operator sees stock-vs-requested
@@ -220,10 +249,28 @@ const MaterialIssues = () => {
       const batches = Array.from(batchMap.values());
       const bins = Array.from(binMap.values());
 
+      const serialsMap = {};
+      let itemHasSerial = false;
+      rows.forEach((r) => {
+        if (r.has_serial) {
+          itemHasSerial = true;
+        }
+        const key = `${r.batch_id || 'null'}-${r.bin_id || 'null'}`;
+        if (Array.isArray(r.serial_numbers)) {
+          serialsMap[key] = r.serial_numbers;
+        }
+      });
+
       setItemStockDetails((prev) => ({
         ...prev,
-        [itemId]: { batches, bins },
+        [itemId]: { batches, bins, serialsMap, hasSerial: itemHasSerial },
       }));
+
+      if (itemHasSerial) {
+        setIssueItems((prev) =>
+          prev.map((it) => (it.item_id === itemId ? { ...it, has_serial: true } : it))
+        );
+      }
 
       // Auto-select if there is only one option to save user clicks
       const currentItems = form.getFieldValue('items') || [];
@@ -256,12 +303,24 @@ const MaterialIssues = () => {
   const prefillFromIndent = useCallback(async (indentId) => {
     if (!indentId) {
       setStockMap({});
+      form.setFieldsValue({
+        destination_warehouse_id: undefined,
+        issued_to: undefined,
+      });
       return;
     }
     try {
       const res = await api.get(`/indent/indents/${indentId}`);
       const ind = res.data;
       if (!ind) return;
+
+      // Inject this option into indentOptions so the select can render its human label
+      const optionLabel = `${ind.indent_number}${ind.warehouse_name ? ` · ${ind.warehouse_name}` : ''}${ind.raised_by_name ? ` · ${ind.raised_by_name}` : ''}`;
+      const newOption = { label: optionLabel, value: ind.id };
+      setIndentOptions((prev) => {
+        if (prev.some((opt) => opt.value === ind.id)) return prev;
+        return [newOption, ...prev];
+      });
       // 2026-05-06: vehicle model — if the indent's destination is a
       // virtual warehouse (vehicle / mobile unit), the Material Issue
       // SOURCE must be a real warehouse (where stock lives). Fall back
@@ -279,7 +338,9 @@ const MaterialIssues = () => {
       } catch { /* fall back to indent's warehouse */ }
       form.setFieldsValue({
         warehouse_id: sourceWarehouseId,
+        destination_warehouse_id: ind.warehouse_id,
         department: ind.department || form.getFieldValue('department'),
+        issued_to: ind.raised_by || form.getFieldValue('issued_to'),
       });
       const lines = (ind.items || []).map((it) => ({
         key: `${it.id}-${Date.now()}-${Math.random()}`,
@@ -297,6 +358,8 @@ const MaterialIssues = () => {
         rate: Number(it.rate) || Number(it.purchase_price) || 0,
         amount: 0,
         has_batch: !!it.has_batch,
+        has_serial: !!it.has_serial,
+        serial_numbers: [],
       }));
       setIssueItems(lines.length > 0 ? lines : [createEmptyItem()]);
       const itemIds = lines.map((l) => l.item_id).filter(Boolean);
@@ -326,8 +389,8 @@ const MaterialIssues = () => {
           value: mr.id,
         }))
       );
-    } catch {
-      // silent
+    } catch (err) {
+      console.error('Error loading MR options:', err);
     }
   }, []);
 
@@ -356,6 +419,8 @@ const MaterialIssues = () => {
     rate: 0,
     amount: 0,
     has_batch: false,
+    has_serial: false,
+    serial_numbers: [],
   });
 
   const recalcItem = (item) => {
@@ -452,6 +517,7 @@ const MaterialIssues = () => {
       const data = res.data;
       form.setFieldsValue({
         warehouse_id: data.warehouse_id,
+        destination_warehouse_id: data.destination_warehouse_id,
         indent_id: data.indent_id,
         mr_id: data.mr_id,
         department: data.department,
@@ -472,6 +538,8 @@ const MaterialIssues = () => {
         rate: Number(item.rate || 0),
         amount: Number(item.amount || 0),
         has_batch: !!item.has_batch,
+        has_serial: !!item.has_serial,
+        serial_numbers: item.serial_numbers || [],
       }));
       setIssueItems(items.length > 0 ? items : [createEmptyItem()]);
       // Fetch batch/bin details for all loaded items
@@ -503,6 +571,16 @@ const MaterialIssues = () => {
         message.error('UOM is required for all items — please select each item from the lookup');
         return;
       }
+
+      // Validate serial numbers count for serial-tracked items
+      const invalidSerials = validItems.filter(
+        (i) => i.has_serial && (!i.serial_numbers || i.serial_numbers.length !== Math.round(Number(i.qty)))
+      );
+      if (invalidSerials.length > 0) {
+        message.error('For serial-tracked items, selected serial numbers count must equal the quantity');
+        return;
+      }
+
       setSubmitting(true);
 
       const payload = {
@@ -515,6 +593,7 @@ const MaterialIssues = () => {
           batch_id: item.batch_id || null,
           bin_id: item.bin_id || null,
           rate: item.rate,
+          serial_numbers: item.has_serial ? item.serial_numbers : null,
         })),
       };
 
@@ -542,7 +621,17 @@ const MaterialIssues = () => {
   const handleIssue = async (id) => {
     try {
       await api.post(`/warehouse/material-issues/${id}/issue`);
-      message.success('Material issued successfully');
+      message.success('Material issued successfully, stock reserved');
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      message.error(getErrorMessage(err));
+    }
+  };
+
+  const handleDispatch = async (id) => {
+    try {
+      await api.post(`/warehouse/material-issues/${id}/dispatch`);
+      message.success('Material issue dispatched successfully, stock deducted');
       setRefreshKey((k) => k + 1);
     } catch (err) {
       message.error(getErrorMessage(err));
@@ -594,6 +683,8 @@ const MaterialIssues = () => {
                 // saved without manually picking it. Backend requires uom_id.
                 updateIssueItem(record.key, 'uom_id', item.primary_uom_id || item.uom_id || null);
                 updateIssueItem(record.key, 'has_batch', !!item.has_batch);
+                updateIssueItem(record.key, 'has_serial', !!item.has_serial);
+                updateIssueItem(record.key, 'serial_numbers', []);
                 // Reset batch/bin when item changes
                 updateIssueItem(record.key, 'batch_id', null);
                 updateIssueItem(record.key, 'bin_id', null);
@@ -610,7 +701,7 @@ const MaterialIssues = () => {
         ),
     },
     {
-      title: 'Qty', dataIndex: 'qty', width: 90,
+      title: 'Qty', dataIndex: 'qty', width: 120,
       render: (val, record) => (
         <InputNumber
           min={0}
@@ -659,7 +750,7 @@ const MaterialIssues = () => {
       ),
     },
     {
-      title: 'Batch No.', dataIndex: 'batch_id', width: 170,
+      title: 'Batch No.', dataIndex: 'batch_id', width: 200,
       render: (val, record) => {
         const warehouseId = form.getFieldValue('warehouse_id');
         const details = itemStockDetails[record.item_id] || { batches: [], bins: [] };
@@ -705,7 +796,10 @@ const MaterialIssues = () => {
         return (
           <Select
             value={val === null ? '' : val}
-            onChange={(v) => updateIssueItem(record.key, 'batch_id', v === '' ? null : v)}
+            onChange={(v) => {
+              updateIssueItem(record.key, 'batch_id', v === '' ? null : v);
+              updateIssueItem(record.key, 'serial_numbers', []);
+            }}
             options={details.batches.map((b) => ({
               label: `${b.batch_number}${b.expiry_date ? ` (Exp: ${b.expiry_date})` : ''} - Qty: ${formatNumber(b.qty)}`,
               value: b.id === null ? '' : b.id,
@@ -721,7 +815,7 @@ const MaterialIssues = () => {
       },
     },
     {
-      title: 'Bin Code', dataIndex: 'bin_id', width: 140,
+      title: 'Bin Code', dataIndex: 'bin_id', width: 160,
       render: (val, record) => {
         const warehouseId = form.getFieldValue('warehouse_id');
         const details = itemStockDetails[record.item_id] || { batches: [], bins: [] };
@@ -750,7 +844,10 @@ const MaterialIssues = () => {
         return (
           <Select
             value={val === null ? '' : val}
-            onChange={(v) => updateIssueItem(record.key, 'bin_id', v === '' ? null : v)}
+            onChange={(v) => {
+              updateIssueItem(record.key, 'bin_id', v === '' ? null : v);
+              updateIssueItem(record.key, 'serial_numbers', []);
+            }}
             options={details.bins.map((b) => ({
               label: `${b.code} - Qty: ${formatNumber(b.qty)}`,
               value: b.id === null ? '' : b.id,
@@ -766,7 +863,32 @@ const MaterialIssues = () => {
       },
     },
     {
-      title: 'Rate', dataIndex: 'rate', width: 100,
+      title: 'Serial Numbers',
+      dataIndex: 'serial_numbers',
+      width: 150,
+      render: (val, record) => {
+        // Compute available serials based on selected batch + bin
+        const details = itemStockDetails[record.item_id] || {};
+        const serialsMap = details.serialsMap || {};
+        const key = `${record.batch_id || 'null'}-${record.bin_id || 'null'}`;
+        const availableSerials = serialsMap[key] || [];
+        return (
+          <SerialNumbersModal
+            value={val || []}
+            onChange={(updated) => updateIssueItem(record.key, 'serial_numbers', updated)}
+            itemName={record.item_name}
+            itemCode={record.item_code}
+            quantity={Math.round(Number(record.qty || 0))}
+            hasSerial={record.has_serial}
+            size="small"
+            mode="select"
+            availableSerials={availableSerials}
+          />
+        );
+      },
+    },
+    {
+      title: 'Rate', dataIndex: 'rate', width: 120,
       render: (val, record) => (
         <InputNumber
           min={0}
@@ -807,10 +929,18 @@ const MaterialIssues = () => {
       ),
     },
     {
-      title: 'Warehouse',
+      title: 'Source Warehouse',
       dataIndex: 'warehouse_name',
       key: 'warehouse',
       width: 150,
+      ellipsis: true,
+      render: (v) => v || '-',
+    },
+    {
+      title: 'Destination Warehouse',
+      dataIndex: 'destination_warehouse_name',
+      key: 'destination_warehouse',
+      width: 160,
       ellipsis: true,
       render: (v) => v || '-',
     },
@@ -866,8 +996,8 @@ const MaterialIssues = () => {
               <Tooltip title="Edit">
                 <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
               </Tooltip>
-              <Tooltip title="Issue Material">
-                <Popconfirm title="Issue this material? Stock will be deducted." onConfirm={() => handleIssue(record.id)}>
+              <Tooltip title="Issue Material (Reserve)">
+                <Popconfirm title="Issue this material? Stock will be reserved." onConfirm={() => handleIssue(record.id)}>
                   <Button type="link" size="small" icon={<SendOutlined />} style={{ color: '#eb2f96' }} />
                 </Popconfirm>
               </Tooltip>
@@ -877,6 +1007,13 @@ const MaterialIssues = () => {
             </>
           )}
           {record.status === 'issued' && (
+            <Tooltip title="Dispatch Material">
+              <Popconfirm title="Dispatch this material? Stock will be physically deducted." onConfirm={() => handleDispatch(record.id)}>
+                <Button type="link" size="small" icon={<SendOutlined />} style={{ color: '#1890ff' }} />
+              </Popconfirm>
+            </Tooltip>
+          )}
+          {record.status === 'dispatched' && (
             <Tooltip title="Acknowledge">
               <Popconfirm title="Acknowledge receipt of this material?" onConfirm={() => handleAcknowledge(record.id)}>
                 <Button type="link" size="small" icon={<CheckOutlined />} style={{ color: '#52c41a' }} />
@@ -929,6 +1066,21 @@ const MaterialIssues = () => {
     { title: 'UOM', dataIndex: 'uom_name', width: 80, render: (v) => v || '-' },
     { title: 'Batch', dataIndex: 'batch_id', width: 80, render: (v) => v || '-' },
     { title: 'Bin', dataIndex: 'bin_id', width: 80, render: (v) => v || '-' },
+    {
+      title: 'Serial Numbers',
+      dataIndex: 'serial_numbers',
+      width: 150,
+      render: (serials) =>
+        serials && serials.length > 0 ? (
+          <Tooltip title={serials.join(', ')}>
+            <div style={{ maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {serials.map((s) => <Tag key={s} color="blue">{s}</Tag>)}
+            </div>
+          </Tooltip>
+        ) : (
+          '-'
+        ),
+    },
     { title: 'Rate', dataIndex: 'rate', width: 110, align: 'right', render: (v) => formatCurrency(v) },
     { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right', render: (v) => <Text strong>{formatCurrency(v)}</Text> },
   ];
@@ -1004,6 +1156,10 @@ const MaterialIssues = () => {
                     itemIds.forEach((id) => fetchItemStockDetails(whId, id));
                     // Reset existing batch/bin selections since they are warehouse-specific
                     setIssueItems(issueItems.map(i => ({ ...i, batch_id: null, bin_id: null })));
+                    // NOTE: Do NOT reset indent_id here. The user explicitly selected
+                    // the indent; changing the source warehouse (e.g. from CENTRAL to
+                    // another main warehouse) should not lose the indent reference.
+                    // Indent options are filtered by destination warehouse, not source.
                   }}
                 />
               </Form.Item>
@@ -1033,6 +1189,7 @@ const MaterialIssues = () => {
                   showSearch
                   optionFilterProp="label"
                   allowClear
+                  onFocus={() => loadIndentOptions()}
                   onSearch={(v) => loadIndentOptions(v)}
                   onChange={(v) => prefillFromIndent(v)}
                 />
@@ -1051,6 +1208,28 @@ const MaterialIssues = () => {
               </Form.Item>
             </Col>
             <Col span={8}>
+              <Form.Item
+                noStyle
+                shouldUpdate={(prevValues, currentValues) => prevValues.indent_id !== currentValues.indent_id}
+              >
+                {({ getFieldValue }) => (
+                  <Form.Item name="destination_warehouse_id" label="Destination Warehouse">
+                    <Select
+                      options={allWarehouses}
+                      placeholder="Select destination warehouse"
+                      allowClear
+                      showSearch
+                      optionFilterProp="label"
+                      disabled={!!getFieldValue('indent_id')}
+                    />
+                  </Form.Item>
+                )}
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={8}>
               <Form.Item name="issued_to" label="Issued To">
                 <Select
                   options={userOptions}
@@ -1061,15 +1240,12 @@ const MaterialIssues = () => {
                 />
               </Form.Item>
             </Col>
-          </Row>
-
-          <Row gutter={16}>
             <Col span={8}>
               <Form.Item name="cost_center" label="Cost Center">
                 <Input placeholder="Cost center" />
               </Form.Item>
             </Col>
-            <Col span={16}>
+            <Col span={8}>
               <Form.Item name="remarks" label="Remarks">
                 <Input placeholder="Any remarks" />
               </Form.Item>
@@ -1091,7 +1267,7 @@ const MaterialIssues = () => {
           rowKey="key"
           pagination={false}
           size="small"
-          scroll={{ x: 950 }}
+          scroll={{ x: 1350 }}
           footer={() => (
             <Button type="dashed" onClick={addItemRow} icon={<PlusOutlined />} block>
               Add Item
@@ -1125,11 +1301,16 @@ const MaterialIssues = () => {
           viewData && (
             <Space>
               {viewData.status === 'draft' && (
-                <Popconfirm title="Issue this material? Stock will be deducted." onConfirm={async () => { await handleIssue(viewData.id); setViewModalOpen(false); }}>
+                <Popconfirm title="Issue this material? Stock will be reserved." onConfirm={async () => { await handleIssue(viewData.id); setViewModalOpen(false); }}>
                   <Button type="primary" icon={<SendOutlined />}>Issue</Button>
                 </Popconfirm>
               )}
               {viewData.status === 'issued' && (
+                <Popconfirm title="Dispatch this material? Stock will be physically deducted." onConfirm={async () => { await handleDispatch(viewData.id); setViewModalOpen(false); }}>
+                  <Button type="primary" icon={<SendOutlined />} style={{ background: '#1890ff', borderColor: '#1890ff' }}>Dispatch</Button>
+                </Popconfirm>
+              )}
+              {viewData.status === 'dispatched' && (
                 <Popconfirm title="Acknowledge receipt of this material?" onConfirm={async () => { await handleAcknowledge(viewData.id); setViewModalOpen(false); }}>
                   <Button type="primary" icon={<CheckOutlined />}>Acknowledge</Button>
                 </Popconfirm>
@@ -1147,13 +1328,14 @@ const MaterialIssues = () => {
               <Descriptions.Item label="Issue Number">{viewData.issue_number}</Descriptions.Item>
               <Descriptions.Item label="Status"><StatusTag status={viewData.status} /></Descriptions.Item>
               <Descriptions.Item label="Issue Date">{formatDate(viewData.issue_date)}</Descriptions.Item>
-              <Descriptions.Item label="Warehouse">{viewData.warehouse_name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Source Warehouse">{viewData.warehouse_name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Destination Warehouse">{viewData.destination_warehouse_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Department">{viewData.department || '-'}</Descriptions.Item>
               <Descriptions.Item label="Issued To">{viewData.issued_to_name || viewData.issued_to || '-'}</Descriptions.Item>
               <Descriptions.Item label="MR Reference">{viewData.mr_number || viewData.mr_id || '-'}</Descriptions.Item>
               <Descriptions.Item label="Indent Reference">{viewData.indent_number || viewData.indent_id || '-'}</Descriptions.Item>
               <Descriptions.Item label="Cost Center">{viewData.cost_center || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Remarks" span={3}>{viewData.remarks || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Remarks" span={2}>{viewData.remarks || '-'}</Descriptions.Item>
             </Descriptions>
 
             <Divider orientation="left">Items</Divider>

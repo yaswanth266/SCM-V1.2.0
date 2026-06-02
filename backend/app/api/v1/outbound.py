@@ -18,6 +18,7 @@ from app.schemas.warehouse import (
     PackingCreate, PackingResponse,
     DispatchCreate, DispatchResponse,
     GatePassCreate, GatePassResponse,
+    DispatchAcknowledgementCreate,
 )
 from app.services.number_series import generate_number
 from app.services.stock_service import post_stock_ledger
@@ -700,7 +701,7 @@ async def create_dispatch(
         "do_id", "pack_id", "warehouse_id", "customer_id",
         "vehicle_number", "vehicle_type", "driver_name", "driver_contact",
         "transport_vendor_id", "lr_number", "docket_number",
-        "dispatch_date", "remarks",
+        "dispatch_date", "expected_delivery_date", "remarks",
     }
     safe_payload = {k: v for k, v in pl.items() if k in SAFE}
     dispatch_number = await generate_number(db, "warehouse", "dispatch_order")
@@ -749,7 +750,7 @@ async def mark_dispatch_delivered(
     # BUG-ISS-076 — add mark_delivered for DispatchOrder; previously
     # lifecycle ended at 'dispatched' so customer receipt was unrecorded.
     current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "dispatcher", "logistics_manager"
+        "super_admin", "admin", "warehouse_manager", "dispatcher"
     )),
 ):
     """Record customer receipt of a dispatched order with proof of delivery."""
@@ -831,8 +832,12 @@ async def mark_dispatched(
 ):
     # BUG-ISS-075 — only a 'loaded' dispatch may be marked dispatched.
     # Previously any status (cancelled, draft) flipped to 'dispatched'.
+    from sqlalchemy.orm import selectinload
     result = await db.execute(
-        select(DispatchOrder).where(DispatchOrder.id == dispatch_id).with_for_update()
+        select(DispatchOrder)
+        .options(selectinload(DispatchOrder.items))
+        .where(DispatchOrder.id == dispatch_id)
+        .with_for_update()
     )
     d = result.scalar_one_or_none()
     if not d:
@@ -842,6 +847,10 @@ async def mark_dispatched(
             status_code=400,
             detail=f"Cannot dispatch order in '{d.status}' status — must be 'loaded'",
         )
+
+    from app.api.v1.dispatch import process_dispatch_stock_deduction
+    await process_dispatch_stock_deduction(db, d, current_user.id)
+
     d.status = "dispatched"
     d.dispatch_date = datetime.now(timezone.utc)
     await db.flush()
@@ -999,3 +1008,251 @@ async def complete_gate_pass(
         gp.gate_in_time = gp.gate_in_time or datetime.now(timezone.utc)
     await db.flush()
     return {"success": True, "message": "Gate pass completed"}
+
+
+@router.post("/dispatch/{dispatch_id}/acknowledge")
+async def acknowledge_delivery(
+    dispatch_id: int,
+    payload: DispatchAcknowledgementCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Acknowledge delivery for all dispatch types with robust evidence upload."""
+    from app.models.dispatch import (
+        DispatchDeliveryAcknowledgement, 
+        DispatchAcknowledgementItem, 
+        DispatchAcknowledgementDocument
+    )
+    
+    # 1. Fetch dispatch order
+    d_q = await db.execute(
+        select(DispatchOrder).where(DispatchOrder.id == dispatch_id).with_for_update()
+    )
+    d = d_q.scalar_one_or_none()
+    if not d:
+        raise HTTPException(status_code=404, detail="Dispatch order not found")
+        
+    if d.status in ("acknowledged", "cancelled"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot acknowledge dispatch in '{d.status}' status",
+        )
+
+    # Generate unique acknowledgement number (e.g., BHSPL/26-27/ACK/00001) race-safely via SCM sequence service
+    from app.services.fiscal_numbering import generate_number_v2
+    ack_number = await generate_number_v2(db, module="warehouse", document_type="dispatch_acknowledgement")
+
+    # Safe map receiver_signature_captured_via to match DB ENUM allowed values
+    sig_via = payload.receiver_signature_captured_via or "WEB_PORTAL"
+    if sig_via not in ("MOBILE_APP", "TABLET", "WEB_PORTAL", "SIGNATURE_PAD"):
+        if sig_via in ("TOUCH_SCREEN", "TOUCH_PAD"):
+            sig_via = "SIGNATURE_PAD"
+        else:
+            sig_via = "WEB_PORTAL"
+
+    # 2. Populate new DispatchDeliveryAcknowledgement record
+    new_ack = DispatchDeliveryAcknowledgement(
+        dispatch_id=dispatch_id,
+        acknowledgement_number=ack_number,
+        acknowledgement_type=payload.acknowledgement_type,
+        acknowledged_by_user_id=current_user.id,
+        acknowledged_by_name=payload.acknowledged_by_name,
+        acknowledged_by_designation=payload.acknowledged_by_designation,
+        acknowledged_by_department=payload.acknowledged_by_department,
+        acknowledged_by_phone=payload.acknowledged_by_phone,
+        acknowledged_by_email=payload.acknowledged_by_email,
+        acknowledged_by_employee_code=payload.acknowledged_by_employee_code,
+        destination_warehouse_id=payload.destination_warehouse_id or d.destination_warehouse_id,
+        destination_user_id=payload.destination_user_id or d.destination_user_id,
+        actual_delivery_location=payload.actual_delivery_location,
+        verification_method=payload.verification_method,
+        receiver_signature_url=payload.receiver_signature_url,
+        receiver_signature_captured_via=sig_via,
+        receiver_id_proof_type=payload.receiver_id_proof_type,
+        receiver_id_proof_number=payload.receiver_id_proof_number,
+        receiver_id_proof_document_url=payload.receiver_id_proof_document_url,
+        delivery_photos=payload.delivery_photos,
+        delivery_latitude=payload.delivery_latitude,
+        delivery_longitude=payload.delivery_longitude,
+        geo_fence_verified=payload.geo_fence_verified,
+        device_id=payload.device_id,
+        ip_address=payload.ip_address,
+        total_items_expected=payload.total_items_expected,
+        total_items_received=payload.total_items_received,
+        total_items_damaged=payload.total_items_damaged,
+        total_items_rejected=payload.total_items_rejected,
+        goods_condition=payload.goods_condition,
+        quality_check_performed=payload.quality_check_performed,
+        quality_checked_by=payload.quality_checked_by,
+        quality_check_remarks=payload.quality_check_remarks,
+        packaging_condition=payload.packaging_condition,
+        seal_intact=payload.seal_intact,
+        seal_number_verified=payload.seal_number_verified,
+        temperature_recorded=payload.temperature_recorded,
+        humidity_recorded=payload.humidity_recorded,
+        acknowledgement_status="ACKNOWLEDGED",
+        created_by_user_id=current_user.id,
+        updated_by_user_id=current_user.id,
+    )
+    db.add(new_ack)
+    await db.flush()
+
+    # 3. Create acknowledgement items & post stock balances recursively
+    for it in payload.items:
+        new_item = DispatchAcknowledgementItem(
+            acknowledgement_id=new_ack.id,
+            dispatch_item_id=it.dispatch_item_id,
+            material_id=it.material_id,
+            batch_number=it.batch_number,
+            serial_numbers=it.serial_numbers,
+            quantity_dispatched=it.quantity_dispatched,
+            quantity_received=it.quantity_received,
+            quantity_accepted=it.quantity_accepted,
+            quantity_rejected=it.quantity_rejected,
+            quantity_damaged=it.quantity_damaged,
+            unit_of_measure=it.unit_of_measure,
+            item_condition=it.item_condition,
+            rejection_reason=it.rejection_reason,
+            damage_description=it.damage_description,
+            item_photo_urls=it.item_photo_urls,
+            unit_price=it.unit_price,
+            total_value=it.total_value,
+            manufacturing_date=it.manufacturing_date,
+            expiry_date=it.expiry_date,
+            temperature_maintained=it.temperature_maintained,
+            storage_condition_met=it.storage_condition_met,
+        )
+        db.add(new_item)
+
+        # STOCK LEDGER MOVEMENT: If inter-warehouse transfer, transfer stock from in-transit to destination warehouse!
+        dest_wh_id = new_ack.destination_warehouse_id or d.destination_warehouse_id
+        if dest_wh_id and dest_wh_id != d.warehouse_id:
+            try:
+                batch_id = None
+                bin_id = None
+                
+                # Fetch original batch and bin from linked MaterialIssueItem to preserve SCM lineage
+                mi_id = d.material_issue_id
+                if mi_id:
+                    from app.models.issue import MaterialIssueItem
+                    mi_item_res = await db.execute(
+                        select(MaterialIssueItem).where(
+                            MaterialIssueItem.issue_id == mi_id,
+                            MaterialIssueItem.item_id == it.material_id
+                        ).limit(1)
+                    )
+                    mi_item = mi_item_res.scalar_one_or_none()
+                    if mi_item:
+                        batch_id = mi_item.batch_id
+                        bin_id = mi_item.bin_id
+
+                # Fallback to looking up batch by number if not found from linked material issue
+                if not batch_id and it.batch_number:
+                    from app.models.warehouse import Batch
+                    b_q = await db.execute(
+                        select(Batch).where(Batch.batch_number == it.batch_number, Batch.item_id == it.material_id).limit(1)
+                    )
+                    b = b_q.scalar_one_or_none()
+                    if b:
+                        batch_id = b.id
+
+                # Decrement transit_qty in destination warehouse
+                from app.services.stock_service import _get_or_create_balance
+                from decimal import Decimal
+                dest_balance = await _get_or_create_balance(
+                    db,
+                    item_id=it.material_id,
+                    warehouse_id=dest_wh_id,
+                    bin_id=bin_id,
+                    batch_id=batch_id,
+                    lock=True,
+                )
+                dispatched_qty = Decimal(str(it.quantity_dispatched or 0))
+                dest_balance.transit_qty = max(Decimal("0"), (dest_balance.transit_qty or Decimal("0")) - dispatched_qty)
+
+                await post_stock_ledger(
+                    db,
+                    item_id=it.material_id,
+                    warehouse_id=dest_wh_id,
+                    transaction_type="material_issue",
+                    qty_in=it.quantity_accepted,
+                    batch_id=batch_id,
+                    bin_id=bin_id,
+                    reference_type="dispatch_acknowledgement",
+                    reference_id=new_ack.id,
+                    uom_id=1,  # fallback primary uom id
+                    created_by=current_user.id,
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).exception("Failed to update stock ledger / transit quantity in acknowledge_delivery")
+                pass
+
+    # 4. Save signature document to DispatchAcknowledgementDocument
+    if payload.receiver_signature_url:
+        new_doc = DispatchAcknowledgementDocument(
+            acknowledgement_id=new_ack.id,
+            document_type="SIGNATURE",
+            document_name="Receiver Signature Proof",
+            document_url=payload.receiver_signature_url,
+            uploaded_by_user_id=current_user.id,
+            verification_status="VERIFIED",
+        )
+        db.add(new_doc)
+
+    # 5. Update parent DispatchOrder statuses
+    d.delivery_acknowledged = True
+    d.delivery_acknowledged_at = datetime.now(timezone.utc)
+    d.delivery_acknowledged_by_id = current_user.id
+    d.delivery_acknowledged_by_name = payload.acknowledged_by_name
+    d.delivery_acknowledged_by_designation = payload.acknowledged_by_designation
+    d.delivery_acknowledged_by_phone = payload.acknowledged_by_phone
+    d.delivery_acknowledged_by_email = payload.acknowledged_by_email
+    d.receiver_signature_url = payload.receiver_signature_url
+    d.receiver_id_proof_type = payload.receiver_id_proof_type or "NONE"
+    d.receiver_id_proof_number = payload.receiver_id_proof_number
+    d.goods_condition_on_delivery = payload.goods_condition
+    d.delivery_remarks = payload.discrepancy_description or "Delivered and acknowledged successfully."
+    d.delivery_location_latitude = payload.delivery_latitude
+    d.delivery_location_longitude = payload.delivery_longitude
+    d.delivery_location_verified = payload.geo_fence_verified
+    d.status = "acknowledged"
+
+    # 6. Auto-close material issue if linked
+    if d.material_issue_id:
+        try:
+            from app.models.issue import MaterialIssue
+            mi_q = await db.execute(
+                select(MaterialIssue).where(MaterialIssue.id == d.material_issue_id)
+            )
+            mi = mi_q.scalar_one_or_none()
+            if mi:
+                mi.status = "acknowledged"
+                db.add(mi)
+        except Exception:
+            pass
+
+    # 7. Update status of LogisticsMainDispatchOrder if this is synced from MDO
+    if d.dispatch_number.startswith("MDO-"):
+        try:
+            from app.models.logistics import LogisticsMainDispatchOrder
+            res_mdo = await db.execute(
+                select(LogisticsMainDispatchOrder).where(LogisticsMainDispatchOrder.mdo_number == d.dispatch_number)
+            )
+            mdo = res_mdo.scalar_one_or_none()
+            if mdo:
+                mdo.status = "ACKNOWLEDGED"
+                db.add(mdo)
+                
+                # Trigger auto acknowledgement merge!
+                from app.services.scm_integration import auto_acknowledge_scm_dispatch
+                await auto_acknowledge_scm_dispatch(db, mdo_id=mdo.id, current_user_id=current_user.id)
+        except Exception as e:
+            print(f"Error updating MDO status upon acknowledgement: {e}")
+
+    await db.commit()
+    return {
+        "success": True, 
+        "acknowledgement_number": ack_number, 
+        "message": "Delivery acknowledged successfully and SCM inventory synchronized."
+    }

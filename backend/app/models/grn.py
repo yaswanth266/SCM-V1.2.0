@@ -10,6 +10,7 @@ class GoodsReceiptNote(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     grn_number = Column(String(50), unique=True, nullable=False)
     po_id = Column(BigInteger, ForeignKey("purchase_orders.id"))
+    inward_id = Column(BigInteger, ForeignKey("material_inwards.id"), nullable=True)
     vendor_id = Column(BigInteger, ForeignKey("vendors.id"), nullable=False)
     warehouse_id = Column(BigInteger, ForeignKey("warehouses.id"), nullable=False)
     grn_date = Column(DateTime, nullable=False)
@@ -17,7 +18,8 @@ class GoodsReceiptNote(Base):
     supplier_invoice_date = Column(DateTime)
     vehicle_number = Column(String(50))
     lr_number = Column(String(100))
-    receipt_type = Column(Enum("po_based", "direct", "return", "transfer", name="grn_receipt_type_enum"), default="po_based")
+    po_number = Column(String(50), nullable=True)
+    receipt_type = Column(String(50), default="inward_based")
     # Wave 5 — link transfer GRNs back to the originating stock transfer
     # (BUG-INV-108). Nullable because po_based / direct GRNs don't set it.
     transfer_id = Column(BigInteger, ForeignKey("stock_transfers.id"))
@@ -31,6 +33,7 @@ class GoodsReceiptNote(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     purchase_order = relationship("PurchaseOrder")
+    inward = relationship("MaterialInward")
     vendor = relationship("Vendor")
     warehouse = relationship("Warehouse")
     items = relationship("GRNItem", back_populates="grn", cascade="all, delete-orphan")
@@ -73,6 +76,17 @@ class GRNItem(Base):
     item = relationship("Item")
     uom = relationship("UOM")
     batch = relationship("Batch")
+    serials = relationship("GRNItemSerial", back_populates="grn_item", cascade="all, delete-orphan")
+
+
+class GRNItemSerial(Base):
+    __tablename__ = "grn_item_serials"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    grn_item_id = Column(BigInteger, ForeignKey("grn_items.id", ondelete="CASCADE"), nullable=False)
+    serial_number = Column(String(100), nullable=False)
+
+    grn_item = relationship("GRNItem", back_populates="serials")
 
 
 class QualityInspection(Base):

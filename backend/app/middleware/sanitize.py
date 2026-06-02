@@ -22,7 +22,9 @@ _METHODS_WITH_BODY = {"POST", "PUT", "PATCH"}
 _BYPASS_PATH_SUFFIXES = (
     "/auth/login",
     "/auth/register",
-    "/auth/change-password",
+    "/auth/change-password",       # main employee
+    "/carrier-auth/change-password",  # carrier portal
+    "/vendor-auth/change-password",   # vendor/supplier portal
     "/auth/refresh-token",
     "/reset-password",  # matches /users/{id}/reset-password
 )

@@ -197,9 +197,25 @@ const PurchaseOrderForm = () => {
   const isCancelled = po.status === 'cancelled';
 
   // Calculate total received
-  const totalOrderedQty = poItems.reduce((sum, i) => sum + (i.qty || i.quantity || 0), 0);
-  const totalReceivedQty = poItems.reduce((sum, i) => sum + (i.received_qty || 0), 0);
+  const totalOrderedQty = poItems.reduce((sum, i) => sum + Number(i.qty || i.quantity || 0), 0);
+  const totalReceivedQty = poItems.reduce((sum, i) => sum + Number(i.received_qty || 0), 0);
   const overallProgress = totalOrderedQty > 0 ? Math.round((totalReceivedQty / totalOrderedQty) * 100) : 0;
+
+  // Calculate tax and discount totals dynamically from items
+  const discountTotal = po.discount_amount || po.discount_total || poItems.reduce((sum, i) => sum + (Number(i.qty || 0) * Number(i.rate || 0) * Number(i.discount_percent || i.discount_pct || 0)) / 100, 0);
+  const cgstTotal = po.cgst_amount || po.cgst_total || poItems.reduce((sum, i) => sum + (Number(i.qty || 0) * Number(i.rate || 0) * (1 - Number(i.discount_percent || i.discount_pct || 0)/100) * Number(i.cgst_percent || i.cgst_rate || 0)) / 100, 0);
+  const sgstTotal = po.sgst_amount || po.sgst_total || poItems.reduce((sum, i) => sum + (Number(i.qty || 0) * Number(i.rate || 0) * (1 - Number(i.discount_percent || i.discount_pct || 0)/100) * Number(i.sgst_percent || i.sgst_rate || 0)) / 100, 0);
+  const igstTotal = po.igst_amount || po.igst_total || poItems.reduce((sum, i) => sum + (Number(i.qty || 0) * Number(i.rate || 0) * (1 - Number(i.discount_percent || i.discount_pct || 0)/100) * Number(i.igst_percent || i.igst_rate || 0)) / 100, 0);
+  const taxTotal = po.tax_amount || po.tax_total || (cgstTotal + sgstTotal + igstTotal);
+
+  // Parse vehicle/freight cost from remarks
+  let vehicleCost = 0;
+  if (po.remarks) {
+    const match = po.remarks.match(/Includes vehicle cost:\s*(\d+(\.\d+)?)/);
+    if (match) {
+      vehicleCost = parseFloat(match[1]);
+    }
+  }
 
   return (
     <div>
@@ -314,34 +330,40 @@ const PurchaseOrderForm = () => {
                 <Col span={14}><Text type="secondary">Subtotal:</Text></Col>
                 <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(po.subtotal)}</Text></Col>
               </Row>
-              {(po.discount_total > 0) && (
+              {(discountTotal > 0) && (
                 <Row style={{ padding: '4px 0' }}>
                   <Col span={14}><Text type="secondary">Discount:</Text></Col>
-                  <Col span={10} style={{ textAlign: 'right' }}><Text type="danger">-{formatCurrency(po.discount_total)}</Text></Col>
+                  <Col span={10} style={{ textAlign: 'right' }}><Text type="danger">-{formatCurrency(discountTotal)}</Text></Col>
                 </Row>
               )}
-              {(po.cgst_total > 0) && (
+              {(cgstTotal > 0) && (
                 <Row style={{ padding: '4px 0' }}>
                   <Col span={14}><Text type="secondary">CGST:</Text></Col>
-                  <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(po.cgst_total)}</Text></Col>
+                  <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(cgstTotal)}</Text></Col>
                 </Row>
               )}
-              {(po.sgst_total > 0) && (
+              {(sgstTotal > 0) && (
                 <Row style={{ padding: '4px 0' }}>
                   <Col span={14}><Text type="secondary">SGST:</Text></Col>
-                  <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(po.sgst_total)}</Text></Col>
+                  <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(sgstTotal)}</Text></Col>
                 </Row>
               )}
-              {(po.igst_total > 0) && (
+              {(igstTotal > 0) && (
                 <Row style={{ padding: '4px 0' }}>
                   <Col span={14}><Text type="secondary">IGST:</Text></Col>
-                  <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(po.igst_total)}</Text></Col>
+                  <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(igstTotal)}</Text></Col>
                 </Row>
               )}
               <Row style={{ padding: '4px 0' }}>
                 <Col span={14}><Text type="secondary">Tax Total:</Text></Col>
-                <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(po.tax_total)}</Text></Col>
+                <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(taxTotal)}</Text></Col>
               </Row>
+              {vehicleCost > 0 && (
+                <Row style={{ padding: '4px 0' }}>
+                  <Col span={14}><Text type="secondary">Vehicle / Freight Cost:</Text></Col>
+                  <Col span={10} style={{ textAlign: 'right' }}><Text>+{formatCurrency(vehicleCost)}</Text></Col>
+                </Row>
+              )}
               <Divider style={{ margin: '12px 0' }} />
               <div style={{ textAlign: 'center' }}>
                 <Text type="secondary">Receiving Progress</Text>
@@ -447,7 +469,7 @@ const PurchaseOrderForm = () => {
                       key: 'disc',
                       width: 70,
                       align: 'right',
-                      render: (v) => `${v || 0}%`,
+                      render: (v, r) => `${v || r.discount_pct || 0}%`,
                     },
                     {
                       title: 'CGST%',
@@ -490,14 +512,39 @@ const PurchaseOrderForm = () => {
                       render: (v, r) => <Text strong>{formatCurrency(v || r.total)}</Text>,
                     },
                   ]}
-                  summary={() => (
-                    <Table.Summary>
-                      <Table.Summary.Row>
-                        <Table.Summary.Cell colSpan={12} align="right"><Text strong>Grand Total:</Text></Table.Summary.Cell>
-                        <Table.Summary.Cell align="right"><Text strong style={{ color: '#eb2f96' }}>{formatCurrency(po.grand_total)}</Text></Table.Summary.Cell>
-                      </Table.Summary.Row>
-                    </Table.Summary>
-                  )}
+                  summary={(pageData) => {
+                    let itemsTotal = 0;
+                    pageData.forEach((r) => {
+                      itemsTotal += parseFloat(r.amount || r.total || 0);
+                    });
+                    
+                    let vCost = 0;
+                    if (po.remarks) {
+                      const match = po.remarks.match(/Includes vehicle cost:\s*(\d+(\.\d+)?)/);
+                      if (match) vCost = parseFloat(match[1]);
+                    }
+
+                    return (
+                      <Table.Summary>
+                        {vCost > 0 && (
+                          <>
+                            <Table.Summary.Row>
+                              <Table.Summary.Cell colSpan={12} align="right"><Text type="secondary">Items Subtotal:</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell align="right"><Text type="secondary">{formatCurrency(itemsTotal)}</Text></Table.Summary.Cell>
+                            </Table.Summary.Row>
+                            <Table.Summary.Row>
+                              <Table.Summary.Cell colSpan={12} align="right"><Text type="secondary">Vehicle / Logistics Cost:</Text></Table.Summary.Cell>
+                              <Table.Summary.Cell align="right"><Text type="secondary">+{formatCurrency(vCost)}</Text></Table.Summary.Cell>
+                            </Table.Summary.Row>
+                          </>
+                        )}
+                        <Table.Summary.Row>
+                          <Table.Summary.Cell colSpan={12} align="right"><Text strong>Grand Total:</Text></Table.Summary.Cell>
+                          <Table.Summary.Cell align="right"><Text strong style={{ color: '#eb2f96' }}>{formatCurrency(po.grand_total)}</Text></Table.Summary.Cell>
+                        </Table.Summary.Row>
+                      </Table.Summary>
+                    );
+                  }}
                 />
               ),
             },

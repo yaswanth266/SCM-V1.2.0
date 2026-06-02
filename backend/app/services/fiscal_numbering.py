@@ -32,6 +32,8 @@ DOC_TOKEN_MAP = {
     "transport_requirement": "TR", "transport_quotation": "TQ",
     "transport_order": "TO", "material_dispatch_advice": "MDA",
     "run": "RUN",
+    "material_inward": "INW",
+    "dispatch_acknowledgement": "ACK",
 }
 
 DEFAULT_ORG_PREFIX = "BHSPL"

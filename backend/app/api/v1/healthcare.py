@@ -111,7 +111,7 @@ async def fefo_picking(
         free_qty_expr = (
             func.coalesce(StockBalance.available_qty, 0)
             - func.coalesce(StockBalance.reserved_qty, 0)
-            - func.coalesce(StockBalance.committed_qty, 0)
+            - func.coalesce(StockBalance.transit_qty, 0)
         ).label("free_qty")
         query = (
             select(
@@ -2389,7 +2389,7 @@ async def available_to_promise(
                 StockBalance.item_id,
                 StockBalance.warehouse_id,
                 func.sum(StockBalance.total_qty).label("total_stock"),
-                func.sum(StockBalance.committed_qty).label("committed_qty"),
+                func.sum(StockBalance.transit_qty).label("transit_qty"),
                 func.sum(StockBalance.reserved_qty).label("reserved_qty"),
                 Item.item_code,
                 Item.name.label("item_name"),
@@ -2418,8 +2418,8 @@ async def available_to_promise(
         atp_list: list[dict] = []
         for row in rows:
             total = row.total_stock or Decimal("0")
-            committed = (row.committed_qty or Decimal("0")) + (row.reserved_qty or Decimal("0"))
-            available = total - committed
+            transit = (row.transit_qty or Decimal("0")) + (row.reserved_qty or Decimal("0"))
+            available = total - transit
             atp_list.append(
                 ATPItem(
                     item_id=row.item_id,
@@ -2428,7 +2428,7 @@ async def available_to_promise(
                     warehouse_id=row.warehouse_id,
                     warehouse_name=row.warehouse_name,
                     total_stock=total,
-                    committed_qty=committed,
+                    transit_qty=transit,
                     available_qty=max(available, Decimal("0")),
                 ).model_dump()
             )

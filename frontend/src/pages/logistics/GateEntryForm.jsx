@@ -31,6 +31,8 @@ const GateEntryForm = () => {
   const [actionLoading, setActionLoading] = useState(false);
   const [entry, setEntry] = useState(null);
   const [warehouses, setWarehouses] = useState([]);
+  const [serviceOrderOptions, setServiceOrderOptions] = useState([]);
+  const [gateType, setGateType] = useState('inward');
 
   // Determine default gate type from URL query or referrer
   const getDefaultGateType = () => {
@@ -52,6 +54,28 @@ const GateEntryForm = () => {
     }
   }, []);
 
+  const loadServiceOrderOptions = useCallback(async (search = '') => {
+    try {
+      const res = await api.get('/logistics/so');
+      const data = res.data || [];
+      const filtered = search
+        ? data.filter((so) =>
+            so.so_number?.toLowerCase().includes(search.toLowerCase()) ||
+            so.vendor_name?.toLowerCase().includes(search.toLowerCase())
+          )
+        : data;
+      setServiceOrderOptions(
+        filtered.map((so) => ({
+          label: `${so.so_number} - ${so.vendor_name || ''}`,
+          value: so.id,
+          so: so,
+        }))
+      );
+    } catch {
+      // silent
+    }
+  }, []);
+
   // --- Load existing entry ---
   const fetchEntry = useCallback(async () => {
     if (isNew) return;
@@ -61,7 +85,7 @@ const GateEntryForm = () => {
       setEntry(res.data);
     } catch (err) {
       message.error(getErrorMessage(err));
-      navigate('/warehouse/gate-entry');
+      navigate('/logistics/gate-entry');
     } finally {
       setLoading(false);
     }
@@ -70,11 +94,40 @@ const GateEntryForm = () => {
   useEffect(() => {
     if (isNew) {
       loadWarehouses();
-      form.setFieldsValue({ gate_type: getDefaultGateType() });
+      loadServiceOrderOptions();
+      const defaultType = getDefaultGateType();
+      setGateType(defaultType);
+      form.setFieldsValue({ gate_type: defaultType });
     } else {
       fetchEntry();
     }
-  }, [isNew, fetchEntry, loadWarehouses]);
+  }, [isNew, fetchEntry, loadWarehouses, loadServiceOrderOptions]);
+
+  const getQueryParam = (key) => {
+    const params = new URLSearchParams(location.search);
+    return params.get(key);
+  };
+  const soIdParam = getQueryParam('so_id');
+
+  useEffect(() => {
+    if (isNew && soIdParam && serviceOrderOptions.length > 0) {
+      const soId = parseInt(soIdParam);
+      const selectedOption = serviceOrderOptions.find(o => o.value === soId);
+      if (selectedOption && selectedOption.so) {
+        const so = selectedOption.so;
+        const vehicle = so.vehicles?.[0] || {};
+        const sdoNumbers = so.mappings?.map(m => m.sdo_number).filter(Boolean).join(', ') || '';
+        form.setFieldsValue({
+          so_id: soId,
+          warehouse_id: so.warehouse_id || undefined,
+          vehicle_number: vehicle.vehicle_registration_no || '',
+          person_name: vehicle.driver_name || '',
+          person_contact: vehicle.driver_mobile || '',
+          material_description: sdoNumbers ? `SDOs: ${sdoNumbers}` : 'SCM Materials',
+        });
+      }
+    }
+  }, [isNew, soIdParam, serviceOrderOptions, form]);
 
   // --- Submit new gate entry ---
   const handleSubmit = async () => {
@@ -85,6 +138,7 @@ const GateEntryForm = () => {
       const payload = {
         gate_type: values.gate_type,
         warehouse_id: values.warehouse_id || null,
+        so_id: values.so_id || null,
         vehicle_number: values.vehicle_number || null,
         person_name: values.person_name || null,
         person_contact: values.person_contact || null,
@@ -96,9 +150,9 @@ const GateEntryForm = () => {
       message.success('Gate entry created successfully');
       const newId = res.data?.id;
       if (newId) {
-        navigate(`/warehouse/gate-entry/${newId}`);
+        navigate(`/logistics/gate-entry/${newId}`);
       } else {
-        navigate('/warehouse/gate-entry');
+        navigate('/logistics/gate-entry');
       }
     } catch (err) {
       if (err.errorFields) return; // form validation
@@ -178,7 +232,7 @@ const GateEntryForm = () => {
             )}
             <Button
               icon={<ArrowLeftOutlined />}
-              onClick={() => navigate('/warehouse/gate-entry')}
+              onClick={() => navigate('/logistics/gate-entry')}
             >
               Back
             </Button>
@@ -204,6 +258,11 @@ const GateEntryForm = () => {
             <Descriptions.Item label="Warehouse">
               {entry.warehouse_name || '-'}
             </Descriptions.Item>
+            {entry.so_number && (
+              <Descriptions.Item label="Service Order Reference">
+                {entry.so_number}
+              </Descriptions.Item>
+            )}
             <Descriptions.Item label="Vehicle Number">
               {entry.vehicle_number ? (
                 <Tag icon={<CarOutlined />}>{entry.vehicle_number}</Tag>
@@ -317,7 +376,7 @@ const GateEntryForm = () => {
         <Space>
           <Button
             icon={<ArrowLeftOutlined />}
-            onClick={() => navigate('/warehouse/gate-entry')}
+            onClick={() => navigate('/logistics/gate-entry')}
           >
             Back
           </Button>
@@ -344,9 +403,43 @@ const GateEntryForm = () => {
                     { label: 'Inward', value: 'inward' },
                     { label: 'Outward', value: 'outward' },
                   ]}
+                  onChange={(v) => {
+                    setGateType(v);
+                    form.setFieldsValue({ so_id: undefined });
+                  }}
                 />
               </Form.Item>
             </Col>
+            {gateType === 'inward' && (
+              <Col xs={24} sm={12} md={8}>
+                <Form.Item name="so_id" label="Link to Service Order">
+                  <Select
+                    options={serviceOrderOptions}
+                    placeholder="Select Service Order (optional)"
+                    showSearch
+                    optionFilterProp="label"
+                    allowClear
+                    onSearch={(v) => loadServiceOrderOptions(v)}
+                    onChange={(soId) => {
+                      if (!soId) return;
+                      const selectedOption = serviceOrderOptions.find(o => o.value === soId);
+                      if (selectedOption && selectedOption.so) {
+                        const so = selectedOption.so;
+                        const vehicle = so.vehicles?.[0] || {};
+                        const sdoNumbers = so.mappings?.map(m => m.sdo_number).filter(Boolean).join(', ') || '';
+                        form.setFieldsValue({
+                          warehouse_id: so.warehouse_id || undefined,
+                          vehicle_number: vehicle.vehicle_registration_no || '',
+                          person_name: vehicle.driver_name || '',
+                          person_contact: vehicle.driver_mobile || '',
+                          material_description: sdoNumbers ? `SDOs: ${sdoNumbers}` : 'SCM Materials',
+                        });
+                      }
+                    }}
+                  />
+                </Form.Item>
+              </Col>
+            )}
             <Col xs={24} sm={12} md={8}>
               <Form.Item name="warehouse_id" label="Warehouse" rules={[{ required: true, message: 'Required' }]}>
                 <Select
@@ -408,7 +501,7 @@ const GateEntryForm = () => {
               >
                 Create Gate Entry
               </Button>
-              <Button onClick={() => navigate('/warehouse/gate-entry')}>
+              <Button onClick={() => navigate('/logistics/gate-entry')}>
                 Cancel
               </Button>
             </Space>

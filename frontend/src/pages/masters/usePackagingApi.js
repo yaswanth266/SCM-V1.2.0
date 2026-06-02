@@ -34,10 +34,34 @@ export const usePackagingApi = () => {
             const { data } = await api.get('/packaging-levels');
             return data;
         } catch (error) {
-            message.error("Failed to fetch packaging levels");
+            message.error("Failed to fetch container types");
             return [];
         }
     };
 
-    return { fetchHierarchy, saveHierarchy, fetchLevels };
+    const createLevel = async (payload) => {
+        try {
+            const { data } = await api.post('/packaging-levels', payload);
+            message.success("Container type created successfully!");
+            return data;
+        } catch (error) {
+            const errMsg = error.response?.data?.detail || "Failed to create container type";
+            message.error(errMsg);
+            throw error;
+        }
+    };
+
+    const deleteLevel = async (levelId) => {
+        try {
+            await api.delete(`/packaging-levels/${levelId}`);
+            message.success("Container type deleted successfully!");
+        } catch (error) {
+            const errMsg = error.response?.data?.detail || "Failed to delete container type";
+            message.error(errMsg);
+            throw error;
+        }
+    };
+
+    return { fetchHierarchy, saveHierarchy, fetchLevels, createLevel, deleteLevel };
 };
+

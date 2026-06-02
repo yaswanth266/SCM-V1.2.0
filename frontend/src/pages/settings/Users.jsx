@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   Button, Drawer, Form, Input, Select, Space, Row, Col, Tag,
-  Popconfirm, message, Modal, Divider,
+  Popconfirm, message, Modal, Divider, Tabs, Card, Typography, Table,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined,
@@ -25,11 +25,18 @@ const USER_TYPES = [
 ];
 
 const Users = () => {
+  const { Text } = Typography;
+
   // BUG-AUTH-069 fix: read the logged-in user so the drawer can disable
   // privileged toggles when editing yourself (the backend already refuses
   // these changes, but the UI used to let admins try and then surface a
   // confusing 403).
   const currentUser = useAuthStore((s) => s.user);
+  const rolesList = currentUser?.roles || [];
+  const isAdmin = rolesList.some(r => {
+    const code = typeof r === 'object' ? r.code : r;
+    return code === 'admin' || code === 'super_admin';
+  });
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [form] = Form.useForm();
@@ -47,9 +54,76 @@ const Users = () => {
   const [projects, setProjects] = useState([]);
   const [departments, setDepartments] = useState([]);
 
+  // New sub-tab mapping states
+  const [activeSubTab, setActiveSubTab] = useState('list');
+  const [selectedRoleId, setSelectedRoleId] = useState(undefined);
+  const [selectedUserIds, setSelectedUserIds] = useState([]);
+  const [mappingSearch, setMappingSearch] = useState('');
+  const [mappingSubmitting, setMappingSubmitting] = useState(false);
+  const [allUsers, setAllUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+
   useEffect(() => {
     fetchLookups();
   }, []);
+
+  const fetchAllUsers = async () => {
+    setUsersLoading(true);
+    try {
+      const res = await api.get('/settings/users', { params: { page_size: 10000 } });
+      const d = res.data;
+      const items = d.items || d.data || d || [];
+      setAllUsers(items);
+    } catch (err) {
+      message.error('Failed to load users for mapping');
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeSubTab === 'mapping') {
+      fetchAllUsers();
+    }
+  }, [activeSubTab, refreshKey]);
+
+  const handleAssignRoleToUsers = async () => {
+    if (!selectedRoleId) {
+      message.error('Please select a role first');
+      return;
+    }
+    if (selectedUserIds.length === 0) {
+      message.error('Please select at least one user');
+      return;
+    }
+
+    setMappingSubmitting(true);
+    try {
+      await Promise.all(selectedUserIds.map(async (userId) => {
+        const userObj = allUsers.find(u => u.auth_user_id === userId || u.user_id === userId || u.id === userId);
+        if (!userObj) return;
+
+        const currentRoleIds = userObj.roles?.map(r => typeof r === 'object' ? r.id : r) || [];
+
+        if (currentRoleIds.includes(selectedRoleId)) {
+          return;
+        }
+
+        const updatedRoleIds = [...currentRoleIds, selectedRoleId];
+        await api.post(`/settings/users/${userObj.auth_user_id || userObj.id || userId}/roles`, {
+          role_ids: updatedRoleIds
+        });
+      }));
+
+      message.success('Roles assigned and appended successfully');
+      setSelectedUserIds([]);
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      message.error(getErrorMessage(err) || 'Failed to map roles');
+    } finally {
+      setMappingSubmitting(false);
+    }
+  };
 
   const fetchLookups = async () => {
     try {
@@ -191,7 +265,7 @@ const Users = () => {
       if (editingUser) {
         const payload = { ...values };
         if (!payload.password) delete payload.password;
-        await api.put(`/settings/users/${editingUser.id}`, payload);
+        await api.put(`/settings/users/${editingUser.auth_user_id || editingUser.id}`, payload);
         message.success('User updated successfully');
       } else {
         await api.post('/settings/users', values);
@@ -309,16 +383,21 @@ const Users = () => {
     },
     {
       title: 'Roles',
-      dataIndex: 'roles',
       key: 'roles',
       width: 180,
-      render: (roles) => {
-        if (!roles || roles.length === 0) return '-';
-        return roles.map((r) => {
-          const name = typeof r === 'object' ? r.name : r;
-          const key = typeof r === 'object' ? r.id : r;
-          return <Tag key={key} color="blue">{name}</Tag>;
-        });
+      render: (_, record) => {
+        const roles = record.roles;
+        if (roles && roles.length > 0) {
+          return roles.map((r) => {
+            const name = typeof r === 'object' ? r.name : r;
+            const key = typeof r === 'object' ? r.id : r;
+            return <Tag key={key} color="blue">{name}</Tag>;
+          });
+        }
+        if (record.role_name) {
+          return <Tag color="orange" title="Position-based Role">{record.role_name}</Tag>;
+        }
+        return '-';
       },
     },
     {
@@ -342,6 +421,13 @@ const Users = () => {
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
+          <Button
+            type="link"
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => handleEdit(record)}
+            title="Edit User"
+          />
           {record.has_login && record.role_id && (
             <Button
               type="link"
@@ -409,6 +495,9 @@ const Users = () => {
     <div>
       <PageHeader title="User Management" subtitle="HR employee users with position-based role access">
         <Space>
+          {isAdmin && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>Add User</Button>
+          )}
           <Button icon={<SyncOutlined />} onClick={handleSyncEmployees}>Sync HR API</Button>
           <Button icon={<DownloadOutlined />} onClick={handleExport}>Export</Button>
         </Space>
@@ -487,12 +576,45 @@ const Users = () => {
             </Col>
             <Col span={12}>
               {!editingUser && (
-                <Form.Item name="password" label="Password" rules={[{ required: true, message: 'Password is required' }, { min: 6, message: 'Min 6 characters' }]}>
+                <Form.Item
+                  name="password"
+                  label="Password"
+                  rules={[
+                    { required: true, message: 'Password is required' },
+                    { min: 8, message: 'Password must be at least 8 characters' },
+                    {
+                      validator: (_, value) => {
+                        if (!value) return Promise.resolve();
+                        if (!/[A-Z]/.test(value)) return Promise.reject(new Error('Must include an uppercase letter'));
+                        if (!/[a-z]/.test(value)) return Promise.reject(new Error('Must include a lowercase letter'));
+                        if (!/\d/.test(value)) return Promise.reject(new Error('Must include a digit'));
+                        if (!/[!@#$%^&*(),.?":{}|<>]/.test(value)) return Promise.reject(new Error('Must include a special character'));
+                        return Promise.resolve();
+                      },
+                    },
+                  ]}
+                >
                   <Input.Password placeholder="Enter password" />
                 </Form.Item>
               )}
               {editingUser && (
-                <Form.Item name="password" label="New Password (leave blank to keep)" rules={[{ min: 6, message: 'Min 6 characters' }]}>
+                <Form.Item
+                  name="password"
+                  label="New Password (leave blank to keep)"
+                  rules={[
+                    { min: 8, message: 'Password must be at least 8 characters' },
+                    {
+                      validator: (_, value) => {
+                        if (!value) return Promise.resolve();
+                        if (!/[A-Z]/.test(value)) return Promise.reject(new Error('Must include an uppercase letter'));
+                        if (!/[a-z]/.test(value)) return Promise.reject(new Error('Must include a lowercase letter'));
+                        if (!/\d/.test(value)) return Promise.reject(new Error('Must include a digit'));
+                        if (!/[!@#$%^&*(),.?":{}|<>]/.test(value)) return Promise.reject(new Error('Must include a special character'));
+                        return Promise.resolve();
+                      },
+                    },
+                  ]}
+                >
                   <Input.Password placeholder="Leave blank to keep current" />
                 </Form.Item>
               )}

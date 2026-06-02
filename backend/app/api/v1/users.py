@@ -181,39 +181,93 @@ async def _apply_employee_position_role(db: AsyncSession, employee: Employee, cu
 
 
 def _employee_directory_payload(employee, position=None, role=None, login_user=None):
-    name_parts = (employee.name or employee.employee_code or "").split()
-    first_name = name_parts[0] if name_parts else employee.employee_code
-    last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else None
-    is_active = str(employee.status or "Active").lower() == "active"
-    role_info = RoleInfo(id=role.id, code=role.code, name=role.name) if role else None
+    if employee:
+        name_parts = (employee.name or employee.employee_code or "").split()
+        first_name = name_parts[0] if name_parts else employee.employee_code
+        last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else None
+        is_active = str(employee.status or "Active").lower() == "active"
+        emp_id = employee.id
+        emp_code = employee.employee_code
+        emp_email = employee.email or (login_user.email if login_user else None)
+        emp_name = employee.name
+        emp_phone = employee.phone
+        created_at = employee.created_at
+        pos_id = employee.position_id
+    else:
+        first_name = (login_user.first_name if login_user else "") or ""
+        last_name = (login_user.last_name if login_user else "") or ""
+        is_active = login_user.is_active if login_user else True
+        emp_id = None
+        emp_code = login_user.employee_code if login_user else None
+        emp_email = login_user.email if login_user else None
+        emp_name = f"{first_name} {last_name}".strip() or (login_user.username if login_user else "")
+        emp_phone = login_user.phone if login_user else None
+        created_at = login_user.created_at if login_user else None
+        pos_id = None
+
+    role_list = []
+    if login_user and login_user.roles:
+        for ur in login_user.roles:
+            if ur.role:
+                role_list.append({
+                    "id": ur.role.id,
+                    "code": ur.role.code,
+                    "name": ur.role.name
+                })
+    if not role_list and role:
+        role_list.append({
+            "id": role.id,
+            "code": role.code,
+            "name": role.name
+        })
+
+    warehouse_list = []
+    if login_user and login_user.warehouses:
+        for uw in login_user.warehouses:
+            warehouse_list.append({
+                "id": uw.warehouse_id,
+                "warehouse_id": uw.warehouse_id
+            })
+
+    project_list = []
+    if login_user and login_user.projects:
+        for up in login_user.projects:
+            if up.project:
+                project_list.append({
+                    "id": up.project.id,
+                    "name": up.project.name
+                })
+
     return {
-        "id": employee.id,
-        "employee_id": employee.id,
+        "id": emp_id or (login_user.id if login_user else None),
+        "employee_id": emp_id,
         "auth_user_id": login_user.id if login_user else None,
         "user_id": login_user.id if login_user else None,
-        "employee_code": employee.employee_code,
-        "username": login_user.username if login_user else employee.employee_code,
-        "email": employee.email or (login_user.email if login_user else None),
+        "employee_code": emp_code,
+        "username": login_user.username if login_user else emp_code,
+        "email": emp_email,
         "first_name": first_name,
         "last_name": last_name,
-        "full_name": employee.name,
-        "phone": employee.phone,
+        "full_name": emp_name,
+        "phone": emp_phone,
         "user_type": login_user.user_type if login_user else "employee",
-        "department": position.department if position else None,
-        "designation": position.name if position else None,
-        "position_id": employee.position_id,
+        "department": (position.department if position else None) or (login_user.department if login_user else None),
+        "designation": (position.name if position else None) or (login_user.designation if login_user else None),
+        "position_id": pos_id,
         "position_code": position.code if position else None,
         "position_name": position.name if position else None,
-        "role_id": role.id if role else None,
-        "role_name": role.name if role else (position.role_name if position else None),
-        "role_code": role.code if role else None,
-        "roles": [role_info] if role_info else [],
+        "role_id": role_list[0]["id"] if role_list else (role.id if role else None),
+        "role_name": role_list[0]["name"] if role_list else (role.name if role else (position.role_name if position else None)),
+        "role_code": role_list[0]["code"] if role_list else (role.code if role else None),
+        "roles": role_list,
+        "warehouses": warehouse_list,
+        "projects": project_list,
         "is_active": is_active,
         "status": "active" if is_active else "inactive",
         "login_enabled": bool(login_user and login_user.is_active),
         "has_login": bool(login_user),
         "last_login": login_user.last_login if login_user else None,
-        "created_at": employee.created_at,
+        "created_at": created_at,
     }
 
 
@@ -414,23 +468,30 @@ async def list_users(
 
     query = (
         select(Employee, Position, Role, User)
+        .select_from(User)
+        .join(Employee, User.employee_id == Employee.id, isouter=True)
         .join(Position, Employee.position_id == Position.id, isouter=True)
         .join(Role, Position.role_id == Role.id, isouter=True)
-        .join(User, User.employee_id == Employee.id, isouter=True)
+        .options(
+            selectinload(User.roles).selectinload(UserRole.role),
+            selectinload(User.warehouses),
+            selectinload(User.projects).selectinload(UserProject.project),
+        )
     )
     count_query = (
-        select(func.count(Employee.id))
+        select(func.count(User.id))
+        .select_from(User)
+        .join(Employee, User.employee_id == Employee.id, isouter=True)
         .join(Position, Employee.position_id == Position.id, isouter=True)
         .join(Role, Position.role_id == Role.id, isouter=True)
-        .join(User, User.employee_id == Employee.id, isouter=True)
     )
 
     # BUG-AUTH-065 fix: scope user listings to the caller's organisation
     # unless the caller is super_admin (treated as global). Without this
     # filter a tenant admin sees every user across every tenant.
     if not await _is_super_admin(db, current_user.id) and current_user.organization_id:
-        query = query.where(or_(User.id.is_(None), User.organization_id == current_user.organization_id))
-        count_query = count_query.where(or_(User.id.is_(None), User.organization_id == current_user.organization_id))
+        query = query.where(User.organization_id == current_user.organization_id)
+        count_query = count_query.where(User.organization_id == current_user.organization_id)
 
     # Support both is_active (bool) and status (string) params.
     # BUG-AUTH-070 fix: previously precedence was undocumented; if a caller
@@ -445,14 +506,12 @@ async def list_users(
                 detail="Conflicting filters: pass either is_active OR status, not both with different values",
             )
     if is_active is not None:
-        status_values = ["Active", "active"] if is_active else ["Inactive", "inactive", "Relieved", "relieved"]
-        query = query.where(Employee.status.in_(status_values))
-        count_query = count_query.where(Employee.status.in_(status_values))
+        query = query.where(User.is_active == is_active)
+        count_query = count_query.where(User.is_active == is_active)
     elif status:
         active_val = status.lower() == 'active'
-        status_values = ["Active", "active"] if active_val else ["Inactive", "inactive", "Relieved", "relieved"]
-        query = query.where(Employee.status.in_(status_values))
-        count_query = count_query.where(Employee.status.in_(status_values))
+        query = query.where(User.is_active == active_val)
+        count_query = count_query.where(User.is_active == active_val)
     if user_type:
         query = query.where(User.user_type == user_type)
         count_query = count_query.where(User.user_type == user_type)
@@ -475,12 +534,15 @@ async def list_users(
             Role.name.ilike(s),
             Role.code.ilike(s),
             User.username.ilike(s),
+            User.first_name.ilike(s),
+            User.last_name.ilike(s),
+            User.email.ilike(s),
         )
         query = query.where(condition)
         count_query = count_query.where(condition)
 
     total = (await db.execute(count_query)).scalar()
-    result = await db.execute(query.order_by(Employee.name.asc(), Employee.employee_code.asc()).offset(offset).limit(limit))
+    result = await db.execute(query.order_by(User.username.asc()).offset(offset).limit(limit))
     rows = result.all()
 
     items = [_employee_directory_payload(employee, position, role, login_user) for employee, position, role, login_user in rows]

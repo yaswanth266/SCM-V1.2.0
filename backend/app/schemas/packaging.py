@@ -30,3 +30,9 @@ class ItemPackagingResponse(BaseModel):
     level: Optional[PackagingLevelResponse] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class PackagingLevelCreate(BaseModel):
+    level_name: str
+    level_order: int
+

@@ -85,7 +85,6 @@ const Replenishment = () => {
       const payload = {
         pick_bin_id: values.pick_bin,
         reserve_bin_id: values.reserve_bin,
-        replenish_qty: values.replenish_qty,
         item_id: values.item_id,
         pick_bin: values.pick_bin,
         reserve_bin: values.reserve_bin,

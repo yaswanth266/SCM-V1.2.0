@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   Button, Card, Row, Col, Select, Switch, Input, InputNumber, Modal, Table, Descriptions,
-  message, Tag, Tooltip, Tabs, Space, Typography, Badge, Form, DatePicker,
+  message, Tag, Tooltip, Tabs, Space, Typography, Badge, Form, DatePicker, Popover, List,
 } from 'antd';
 import {
   AppstoreOutlined, WarningOutlined, ClockCircleOutlined,
@@ -254,7 +254,7 @@ const StockBalance = () => {
         'Expiry Date': r.expiry_date ? formatDate(r.expiry_date) : '',
         'Available Qty': r.available_qty || 0,
         'Reserved Qty': r.reserved_qty || 0,
-        'Committed Qty': r.committed_qty || 0,
+        'Transit Qty': r.transit_qty || 0,
         'Total Qty': r.total_qty || 0,
         'Valuation Rate': r.valuation_rate || 0,
         'Stock Value': r.stock_value || 0,
@@ -367,6 +367,41 @@ const StockBalance = () => {
       },
     },
     {
+      title: 'S.No.',
+      dataIndex: 'serial_numbers',
+      width: 130,
+      render: (serials, record) => {
+        if (!record.has_serial) return '-';
+        const list = serials || [];
+        if (list.length === 0) return <Text type="secondary">None</Text>;
+        const popoverContent = (
+          <div style={{ maxHeight: 200, overflowY: 'auto', minWidth: 160 }}>
+            <List
+              size="small"
+              dataSource={list}
+              renderItem={(sn) => (
+                <List.Item style={{ padding: '2px 0' }}>
+                  <Tag color="blue">{sn}</Tag>
+                </List.Item>
+              )}
+            />
+          </div>
+        );
+        return (
+          <Popover
+            content={popoverContent}
+            title="Serial Numbers"
+            trigger="click"
+            placement="bottom"
+          >
+            <Button type="link" size="small" style={{ padding: 0 }}>
+              View ({list.length})
+            </Button>
+          </Popover>
+        );
+      },
+    },
+    {
       title: 'Available Qty',
       dataIndex: 'available_qty',
       width: 110,
@@ -384,8 +419,8 @@ const StockBalance = () => {
       ),
     },
     {
-      title: 'Committed Qty',
-      dataIndex: 'committed_qty',
+      title: 'Transit Qty',
+      dataIndex: 'transit_qty',
       width: 120,
       align: 'right',
       render: (val) => (
@@ -485,6 +520,41 @@ const StockBalance = () => {
       render: (val) => formatDate(val),
     },
     {
+      title: 'S.No.',
+      dataIndex: 'serial_numbers',
+      width: 130,
+      render: (serials, record) => {
+        if (!record.has_serial) return '-';
+        const list = serials || [];
+        if (list.length === 0) return <Text type="secondary">None</Text>;
+        const popoverContent = (
+          <div style={{ maxHeight: 200, overflowY: 'auto', minWidth: 160 }}>
+            <List
+              size="small"
+              dataSource={list}
+              renderItem={(sn) => (
+                <List.Item style={{ padding: '2px 0' }}>
+                  <Tag color="blue">{sn}</Tag>
+                </List.Item>
+              )}
+            />
+          </div>
+        );
+        return (
+          <Popover
+            content={popoverContent}
+            title="Serial Numbers"
+            trigger="click"
+            placement="bottom"
+          >
+            <Button type="link" size="small" style={{ padding: 0 }}>
+              View ({list.length})
+            </Button>
+          </Popover>
+        );
+      },
+    },
+    {
       title: 'UOM',
       dataIndex: 'uom_name',
       width: 80,
@@ -502,6 +572,15 @@ const StockBalance = () => {
       width: 100,
       align: 'right',
       render: (val) => formatNumber(val || 0),
+    },
+    {
+      title: 'Transit Qty',
+      dataIndex: 'transit_qty',
+      width: 110,
+      align: 'right',
+      render: (val) => (
+        <Text type={val > 0 ? 'warning' : 'secondary'}>{formatNumber(val || 0)}</Text>
+      ),
     },
     {
       title: 'Total Qty',
@@ -690,37 +769,42 @@ const StockBalance = () => {
               (acc, row) => ({
                 available: acc.available + Math.round((Number(row.available_qty) || 0) * 1000),
                 reserved: acc.reserved + Math.round((Number(row.reserved_qty) || 0) * 1000),
+                transit: acc.transit + Math.round((Number(row.transit_qty) || 0) * 1000),
                 total: acc.total + Math.round((Number(row.total_qty) || 0) * 1000),
                 valueCents: acc.valueCents + Math.round((Number(row.stock_value) || 0) * 100),
               }),
-              { available: 0, reserved: 0, total: 0, valueCents: 0 }
+              { available: 0, reserved: 0, transit: 0, total: 0, valueCents: 0 }
             );
             const totals = {
               available: totalsScaled.available / 1000,
               reserved: totalsScaled.reserved / 1000,
+              transit: totalsScaled.transit / 1000,
               total: totalsScaled.total / 1000,
               value: totalsScaled.valueCents / 100,
             };
             return (
               <Table.Summary.Row>
-                <Table.Summary.Cell index={0} colSpan={8}>
+                <Table.Summary.Cell index={0} colSpan={9}>
                   <Text strong>Total</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={8} align="right">
+                <Table.Summary.Cell index={9} align="right">
                   <Text strong>{formatNumber(totals.available)}</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={9} align="right">
+                <Table.Summary.Cell index={10} align="right">
                   <Text strong>{formatNumber(totals.reserved)}</Text>
                 </Table.Summary.Cell>
-                <Table.Summary.Cell index={10} align="right">
-                  <Text strong>{formatNumber(totals.total)}</Text>
-                </Table.Summary.Cell>
                 <Table.Summary.Cell index={11} align="right">
+                  <Text strong>{formatNumber(totals.transit)}</Text>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={12} align="right">
-                  <Text strong>{formatCurrency(totals.value)}</Text>
+                  <Text strong>{formatNumber(totals.total)}</Text>
                 </Table.Summary.Cell>
                 <Table.Summary.Cell index={13} align="right">
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={14} align="right">
+                  <Text strong>{formatCurrency(totals.value)}</Text>
+                </Table.Summary.Cell>
+                <Table.Summary.Cell index={15} align="right">
                 </Table.Summary.Cell>
               </Table.Summary.Row>
             );

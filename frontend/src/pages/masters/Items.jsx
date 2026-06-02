@@ -1,11 +1,11 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   Button, Drawer, Form, Input, Select, InputNumber, Switch, Space,
-  Popconfirm, message, Row, Col, Divider, Tabs, Spin, TreeSelect,
+  Popconfirm, message, Row, Col, Divider, Tabs, Spin, TreeSelect, Modal,
 } from 'antd';
 import {
-  PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined,
-  DownloadOutlined,
+  PlusOutlined, EditOutlined, EyeOutlined,
+  DownloadOutlined, CheckCircleOutlined, StopOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import PageHeader from '../../components/PageHeader';
@@ -13,7 +13,6 @@ import DataTable from '../../components/DataTable';
 import StatusTag from '../../components/StatusTag';
 import api from '../../config/api';
 import { formatCurrency, getErrorMessage, downloadExcel } from '../../utils/helpers';
-import { ITEM_OWNERSHIP } from '../../utils/constants';
 
 const Items = () => {
   const navigate = useNavigate();
@@ -21,6 +20,7 @@ const Items = () => {
   const initialSearch = searchParams.get('search') || '';
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [editingItem, setEditingItem] = useState(null);
+  const [deactivateError, setDeactivateError] = useState(null);
   const [form] = Form.useForm();
   const [submitting, setSubmitting] = useState(false);
   const [categories, setCategories] = useState([]);
@@ -385,14 +385,36 @@ const Items = () => {
     setDrawerOpen(true);
   };
 
-  const handleDelete = async (id) => {
+  const handleToggleStatus = async (record) => {
     try {
-      await api.delete(`/masters/items/${id}`);
-      message.success('Item deleted successfully');
-      // Force DataTable remount by changing key, triggering a fresh fetch
+      const isActivating = record.is_active === false;
+      if (isActivating) {
+        await api.put(`/masters/items/${record.id}`, { is_active: true });
+        message.success('Item activated successfully');
+      } else {
+        await api.delete(`/masters/items/${record.id}`);
+        message.success('Item deactivated successfully');
+      }
       setRefreshKey((k) => k + 1);
     } catch (err) {
-      message.error(getErrorMessage(err));
+      const errorMsg = getErrorMessage(err);
+      if (errorMsg.includes('stock') || errorMsg.includes('quantity')) {
+        setDeactivateError({
+          title: 'Deactivation Gated',
+          subtitle: 'Active Stock in Warehouse',
+          message: errorMsg,
+          type: 'stock'
+        });
+      } else if (errorMsg.includes('vendor') || errorMsg.includes('vendors')) {
+        setDeactivateError({
+          title: 'Deactivation Gated',
+          subtitle: 'Active Vendor Linkages',
+          message: errorMsg,
+          type: 'vendors'
+        });
+      } else {
+        message.error(errorMsg);
+      }
     }
   };
 
@@ -402,6 +424,35 @@ const Items = () => {
     setSubmitting(true);
     try {
       const values = await form.validateFields();
+
+      // Validate required dynamic attributes
+      const missingAttrs = categoryAttributes.filter(a => {
+        if (!a.is_required) return false;
+        const v = attrValues[a.id];
+        return !v || v.value === undefined || v.value === null || String(v.value).trim() === '';
+      });
+      if (missingAttrs.length > 0) {
+        message.error(`Please fill required attribute: ${missingAttrs[0].name}`);
+        setSubmitting(false);
+        return;
+      }
+
+      // Validate required dynamic specs
+      const missingSpecs = categorySpecs.filter(s => {
+        if (!s.is_required) return false;
+        const v = specValues[s.spec_id];
+        if (!v) return true;
+        const hasVal = v.value != null && String(v.value).trim() !== '';
+        const hasMin = v.min_value != null && String(v.min_value).trim() !== '';
+        const hasMax = v.max_value != null && String(v.max_value).trim() !== '';
+        return !(hasVal || hasMin || hasMax);
+      });
+      if (missingSpecs.length > 0) {
+        message.error(`Please fill required spec: ${missingSpecs[0].spec_name || missingSpecs[0].name}`);
+        setSubmitting(false);
+        return;
+      }
+
       const { status, ...rest } = values;
       delete rest.secondary_uom_id;
       delete rest.sku;
@@ -681,13 +732,19 @@ const Items = () => {
             onClick={() => handleEdit(record)}
           />
           <Popconfirm
-            title="Delete this item?"
-            description="This action cannot be undone."
-            onConfirm={() => handleDelete(record.id)}
-            okText="Delete"
-            okButtonProps={{ danger: true }}
+            title={record.is_active === false ? "Activate this item?" : "Deactivate this item?"}
+            description={record.is_active === false ? "This will make the item active and transactable." : "This will make the item inactive."}
+            onConfirm={() => handleToggleStatus(record)}
+            okText="Confirm"
+            cancelText="Cancel"
           >
-            <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+            <Button
+              type="link"
+              size="small"
+              danger={record.is_active !== false}
+              style={{ color: record.is_active === false ? '#52c41a' : undefined }}
+              icon={record.is_active === false ? <CheckCircleOutlined /> : <StopOutlined />}
+            />
           </Popconfirm>
         </Space>
       ),
@@ -937,6 +994,7 @@ const Items = () => {
                               <Select
                                 placeholder="Select Level 1"
                                 value={level1Id}
+                                disabled={!!editingItem}
                                 allowClear
                                 showSearch
                                 optionFilterProp="label"
@@ -971,7 +1029,7 @@ const Items = () => {
                               <Select
                                 placeholder="Select Level 2"
                                 value={level2Id}
-                                disabled={!level1Id}
+                                disabled={!!editingItem || !level1Id}
                                 allowClear
                                 showSearch
                                 optionFilterProp="label"
@@ -1001,7 +1059,7 @@ const Items = () => {
                               <Select
                                 placeholder="Select Level 3"
                                 value={level3Id}
-                                disabled={!level2Id}
+                                disabled={!!editingItem || !level2Id}
                                 allowClear
                                 showSearch
                                 optionFilterProp="label"
@@ -1055,6 +1113,7 @@ const Items = () => {
                           rules={[{ required: true, message: 'Item code is required' }]}
                         >
                           <Input
+                            disabled={!!editingItem}
                             readOnly={!editingItem}
                             placeholder="Select Level 1, Level 2, and Level 3 categories"
                           />
@@ -1081,7 +1140,19 @@ const Items = () => {
                           label="Item Type"
                           rules={[{ required: true, message: 'Select item type' }]}
                         >
-                          <Select placeholder="Select type" options={uniqueItemTypes} />
+                          <Select
+                            placeholder="Select type"
+                            options={uniqueItemTypes}
+                            onChange={(val) => {
+                              if (val) {
+                                const valLower = val.toLowerCase();
+                                const assetKeywords = ['asset', 'equipment', 'laptop', 'computer', 'it', 'fixed'];
+                                if (assetKeywords.some(kw => valLower.includes(kw))) {
+                                  form.setFieldsValue({ has_serial: true });
+                                }
+                              }
+                            }}
+                          />
                         </Form.Item>
                       </Col>
 
@@ -1375,7 +1446,24 @@ const Items = () => {
                         </Form.Item>
                       </Col>
                       <Col span={8}>
-                        <Form.Item name="min_order_qty" label="Min Order Qty">
+                        <Form.Item
+                          name="min_order_qty"
+                          label="Min Order Qty"
+                          dependencies={['max_order_qty']}
+                          rules={[
+                            ({ getFieldValue }) => ({
+                              validator(_, value) {
+                                const minVal = value !== undefined && value !== null ? Number(value) : 0;
+                                const maxVal = getFieldValue('max_order_qty');
+                                const maxValNum = maxVal !== undefined && maxVal !== null ? Number(maxVal) : 0;
+                                if (maxValNum > 0 && minVal >= maxValNum) {
+                                  return Promise.reject(new Error('Min Order Qty must be less than Max Order Qty'));
+                                }
+                                return Promise.resolve();
+                              },
+                            }),
+                          ]}
+                        >
                           <InputNumber min={0} style={{ width: '100%' }} placeholder="0" />
                         </Form.Item>
                       </Col>
@@ -1465,34 +1553,6 @@ const Items = () => {
                 label: 'Additional',
                 children: (
                   <>
-                    <Divider orientation="left">Identity</Divider>
-                    <Row gutter={16}>
-                      <Col span={24}>
-                        <Form.Item name="ownership" label="Ownership">
-                          <Select allowClear placeholder="Who owns this item?" options={ITEM_OWNERSHIP} />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-
-                    <Divider orientation="left">Brand / Source</Divider>
-                    <Row gutter={16}>
-
-                      <Col span={6}>
-                        <Form.Item name="manufacturer" label="Manufacturer">
-                          <Input placeholder="Producer" />
-                        </Form.Item>
-                      </Col>
-                      <Col span={6}>
-                        <Form.Item name="marketer" label="Marketer">
-                          <Input placeholder="Marketing company" />
-                        </Form.Item>
-                      </Col>
-                      <Col span={6}>
-                        <Form.Item name="distributor" label="Distributor">
-                          <Input placeholder="Distributor" />
-                        </Form.Item>
-                      </Col>
-                    </Row>
 
                     <Divider orientation="left">Healthcare / Valuation</Divider>
                     <Row gutter={16}>
@@ -1536,6 +1596,129 @@ const Items = () => {
           />
         </Form>
       </Drawer>
+
+      <Modal
+        open={!!deactivateError}
+        onCancel={() => setDeactivateError(null)}
+        footer={null}
+        closable={true}
+        centered
+        width={480}
+        styles={{ body: { padding: 0 } }}
+        style={{ borderRadius: 20, overflow: 'hidden' }}
+      >
+        <div style={{
+          background: 'linear-gradient(135deg, #2A0E2F 0%, #1A0A21 100%)',
+          padding: '40px 32px',
+          color: '#fff',
+          textAlign: 'center',
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          {/* Glowing circle background decoration */}
+          <div style={{
+            position: 'absolute',
+            top: '-50px',
+            right: '-50px',
+            width: '150px',
+            height: '150px',
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(240, 144, 0, 0.18) 0%, transparent 70%)',
+            filter: 'blur(10px)',
+            pointerEvents: 'none'
+          }} />
+          <div style={{
+            position: 'absolute',
+            bottom: '-50px',
+            left: '-50px',
+            width: '150px',
+            height: '150px',
+            borderRadius: '50%',
+            background: 'radial-gradient(circle, rgba(216, 0, 72, 0.18) 0%, transparent 70%)',
+            filter: 'blur(10px)',
+            pointerEvents: 'none'
+          }} />
+
+          {/* Warning Icon Badge */}
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: '64px',
+            height: '64px',
+            borderRadius: '20px',
+            background: 'rgba(255, 255, 255, 0.08)',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.3)',
+            backdropFilter: 'blur(8px)',
+            marginBottom: '20px',
+            color: '#F5A623',
+            fontSize: '28px'
+          }}>
+            ⚠️
+          </div>
+
+          <h2 style={{
+            fontFamily: "var(--bavya-display)",
+            color: '#fff',
+            fontSize: '22px',
+            fontWeight: 700,
+            margin: '0 0 4px 0',
+            letterSpacing: '-0.01em'
+          }}>
+            {deactivateError?.title}
+          </h2>
+          <p style={{
+            fontFamily: "var(--bavya-body)",
+            color: 'rgba(255, 255, 255, 0.65)',
+            fontSize: '11px',
+            fontWeight: 600,
+            margin: '0 0 24px 0',
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em'
+          }}>
+            {deactivateError?.subtitle}
+          </p>
+
+          <div style={{
+            background: 'rgba(255, 255, 255, 0.04)',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            borderRadius: '14px',
+            padding: '20px',
+            textAlign: 'left',
+            marginBottom: '28px',
+            backdropFilter: 'blur(4px)'
+          }}>
+            <p style={{
+              fontFamily: "var(--bavya-body)",
+              color: '#F4EEEA',
+              fontSize: '14px',
+              lineHeight: '1.6',
+              margin: 0
+            }}>
+              {deactivateError?.message}
+            </p>
+          </div>
+
+          <Button
+            type="primary"
+            onClick={() => setDeactivateError(null)}
+            style={{
+              width: '100%',
+              height: '44px',
+              borderRadius: '12px',
+              background: 'linear-gradient(90deg, #D80048 0%, #900078 100%)',
+              border: 0,
+              fontWeight: 600,
+              fontSize: '14px',
+              boxShadow: '0 4px 12px rgba(216, 0, 72, 0.25)',
+              cursor: 'pointer'
+            }}
+          >
+            Understood
+          </Button>
+        </div>
+      </Modal>
     </div>
   );
 };

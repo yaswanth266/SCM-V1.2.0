@@ -27,7 +27,7 @@ const { TextArea } = Input;
 const { Text } = Typography;
 
 const RECEIPT_TYPES = [
-  { label: 'PO Based', value: 'po_based' },
+  { label: 'Inward Based', value: 'inward_based' },
   { label: 'Direct', value: 'direct' },
   { label: 'Return', value: 'return' },
   { label: 'Transfer', value: 'transfer' },
@@ -72,7 +72,7 @@ const GRNForm = () => {
   const [grnItems, setGrnItems] = useState([]);
 
   // Receipt type
-  const [receiptType, setReceiptType] = useState('po_based');
+  const [receiptType, setReceiptType] = useState('inward_based');
 
   // Lookups
   const [vendors, setVendors] = useState([]);
@@ -81,6 +81,9 @@ const GRNForm = () => {
   const [poOptions, setPoOptions] = useState([]);
   const [selectedPO, setSelectedPO] = useState(null);
   const [loadingPO, setLoadingPO] = useState(false);
+  const [inwardOptions, setInwardOptions] = useState([]);
+  const [loadingInwards, setLoadingInwards] = useState(false);
+  const [selectedInward, setSelectedInward] = useState(null);
 
   // --- Empty item row ---
   const createEmptyItem = () => ({
@@ -102,6 +105,9 @@ const GRNForm = () => {
     rate: 0,
     amount: 0,
     remarks: '',
+    serial_numbers: [],
+    item_type: null,
+    has_serial: false,
   });
 
   // --- Load lookups ---
@@ -168,6 +174,153 @@ const GRNForm = () => {
     }
   }, []);
 
+  // --- Inward Options ---
+  const loadInwardOptions = useCallback(async (search = '') => {
+    setLoadingInwards(true);
+    try {
+      const res = await api.get('/warehouse/inwards', {
+        params: { page_size: 100, search, status: 'received' },
+      });
+      const data = res.data;
+      const items = data.items || data.data || data || [];
+      setInwardOptions(
+        items.map((inw) => ({
+          label: `${inw.inward_number} - ${inw.vendor_name || inw.vendor_name_manual || ''}`,
+          value: inw.id,
+          inward: inw,
+        }))
+      );
+    } catch {
+      // silent
+    } finally {
+      setLoadingInwards(false);
+    }
+  }, []);
+
+  // Fetch item_type and has_serial for any rows that are missing it (e.g. loaded from PO/inward)
+  const enrichItemTypes = async (rows) => {
+    const missing = rows.filter(r => r.item_id && !r.item_type && !r.has_serial);
+    if (missing.length === 0) return rows;
+    try {
+      const ids = [...new Set(missing.map(r => r.item_id))];
+      const results = await Promise.allSettled(
+        ids.map(id => api.get(`/masters/items/${id}`))
+      );
+      const typeMap = {};
+      results.forEach((res, i) => {
+        if (res.status === 'fulfilled') {
+          typeMap[ids[i]] = {
+            item_type: res.value.data?.item_type || null,
+            has_serial: !!(res.value.data?.has_serial),
+          };
+        }
+      });
+      return rows.map(r => ({
+        ...r,
+        item_type: r.item_type || typeMap[r.item_id]?.item_type || null,
+        has_serial: r.has_serial || typeMap[r.item_id]?.has_serial || false,
+      }));
+    } catch {
+      return rows;
+    }
+  };
+
+  // --- Inward Selection ---
+  const handleInwardSelect = async (inwardId) => {
+    if (!inwardId) {
+      setSelectedInward(null);
+      setSelectedPO(null);
+      setGrnItems([createEmptyItem()]);
+      form.setFieldsValue({ po_number: null });
+      return;
+    }
+    setLoadingPO(true);
+    try {
+      const res = await api.get(`/warehouse/inwards/${inwardId}`);
+      const inwardData = res.data;
+      setSelectedInward(inwardData);
+
+      // Auto-fill vendor
+      if (inwardData.vendor_id) {
+        form.setFieldsValue({ vendor_id: inwardData.vendor_id });
+      }
+
+      // Auto-fill warehouse
+      if (inwardData.warehouse_id) {
+        form.setFieldsValue({ warehouse_id: inwardData.warehouse_id });
+      }
+
+      // Auto-fill PO number from inward
+      form.setFieldsValue({ po_number: inwardData.po_number || null });
+
+      // Auto-fill vehicle number
+      if (inwardData.vehicle_number) {
+        form.setFieldsValue({ vehicle_number: inwardData.vehicle_number });
+      }
+
+      // If inward is PO-linked, fetch PO to get rates and po_item_id mapping
+      let poItemsMap = {};
+      if (inwardData.po_id) {
+        try {
+          const poRes = await api.get(`/procurement/purchase-orders/${inwardData.po_id}`);
+          const poData = poRes.data;
+          setSelectedPO(poData);
+          form.setFieldsValue({ po_id: inwardData.po_id });
+
+          if (poData.items) {
+            poData.items.forEach((item) => {
+              poItemsMap[item.item_id] = item;
+            });
+          }
+        } catch (poErr) {
+          console.error('Failed to fetch related PO', poErr);
+        }
+      } else {
+        setSelectedPO(null);
+        form.setFieldsValue({ po_id: undefined });
+      }
+
+      // Auto-fill items from inward
+      const items = (inwardData.items || []).map((item, idx) => {
+        const poItem = poItemsMap[item.item_id];
+        const rate = poItem ? (poItem.rate || poItem.unit_price || 0) : 0;
+        const po_item_id = poItem ? poItem.id : null;
+        const ordered_qty = poItem ? (poItem.qty || poItem.quantity || 0) : (item.ordered_qty || 0);
+
+        return {
+          key: item.id || Date.now() + idx,
+          item_id: item.item_id,
+          item_name: item.item_name || item.item_name_manual || '',
+          item_code: item.item_code || '',
+          po_item_id: po_item_id,
+          ordered_qty: ordered_qty,
+          received_qty: item.received_qty || 0,
+          accepted_qty: item.received_qty || 0,
+          rejected_qty: 0,
+          damaged_qty: 0,
+          uom_id: item.uom_id,
+          uom: item.uom_name || item.uom_manual || '',
+          batch_number: '',
+          manufacturing_date: null,
+          expiry_date: null,
+          rate: rate,
+          amount: Number(((item.received_qty || 0) * rate).toFixed(2)),
+          remarks: '',
+          serial_numbers: [],
+          item_type: null,
+          has_serial: false,
+        };
+      });
+      const enriched = await enrichItemTypes(items);
+      setGrnItems(enriched.length > 0 ? enriched : [createEmptyItem()]);
+      message.success('Material Inward items loaded successfully');
+    } catch (err) {
+      message.error(getErrorMessage(err));
+    } finally {
+      setLoadingPO(false);
+    }
+  };
+
   // --- Init ---
   useEffect(() => {
     // BUG-INV-129: don't race lookups against PO auto-load with a 500ms timer.
@@ -185,9 +338,10 @@ const GRNForm = () => {
         return;
       }
       await loadPOOptions();
+      await loadInwardOptions();
       if (cancelled) return;
       form.setFieldsValue({
-        receipt_type: 'po_based',
+        receipt_type: 'inward_based',
         grn_date: dayjs(),
       });
       setGrnItems([createEmptyItem()]);
@@ -213,7 +367,7 @@ const GRNForm = () => {
       const res = await api.get(`/warehouse/grn/${id}`);
       const data = res.data;
       setGrn(data);
-      setReceiptType(data.receipt_type || 'po_based');
+      setReceiptType(data.receipt_type || 'inward_based');
       form.setFieldsValue({
         ...data,
         grn_date: data.grn_date ? dayjs(data.grn_date) : null,
@@ -235,6 +389,9 @@ const GRNForm = () => {
         rate: item.rate || 0,
         amount: item.amount || 0,
         remarks: item.remarks || '',
+        serial_numbers: item.serial_numbers || [],
+        item_type: item.item_type || null,
+        has_serial: !!(item.has_serial),
       }));
       setGrnItems(items.length > 0 ? items : [createEmptyItem()]);
     } catch (err) {
@@ -291,9 +448,13 @@ const GRNForm = () => {
           discount_pct: parseFloat(item.discount_pct || 0),
           amount: Number((pendingQty * rate).toFixed(2)),
           remarks: '',
+          serial_numbers: [],
+          item_type: item.item_type || null,
+          has_serial: !!(item.has_serial),
         };
       });
-      setGrnItems(items.length > 0 ? items : [createEmptyItem()]);
+      const enriched = await enrichItemTypes(items);
+      setGrnItems(enriched.length > 0 ? enriched : [createEmptyItem()]);
       message.success('PO items loaded');
     } catch (err) {
       message.error(getErrorMessage(err));
@@ -316,8 +477,22 @@ const GRNForm = () => {
       prev.map((item) => {
         if (item.key !== key) return item;
         const updated = { ...item, [field]: value };
-        // Recalculate amount when received_qty or rate changes
         if (field === 'received_qty' || field === 'rate') {
+          updated.amount = Number(((updated.received_qty || 0) * (updated.rate || 0)).toFixed(2));
+        }
+        return updated;
+      })
+    );
+  };
+
+  // Atomic multi-field update — avoids React state batching issues from
+  // multiple sequential setGrnItems calls overwriting each other
+  const mergeItemRow = (key, fields) => {
+    setGrnItems((prev) =>
+      prev.map((row) => {
+        if (row.key !== key) return row;
+        const updated = { ...row, ...fields };
+        if ('received_qty' in fields || 'rate' in fields) {
           updated.amount = Number(((updated.received_qty || 0) * (updated.rate || 0)).toFixed(2));
         }
         return updated;
@@ -328,11 +503,14 @@ const GRNForm = () => {
   // --- Receipt type change ---
   const handleReceiptTypeChange = (value) => {
     setReceiptType(value);
-    if (value !== 'po_based') {
+    if (value !== 'inward_based') {
       setSelectedPO(null);
-      // Clear po_id value AND reset its validation errors so it doesn't
-      // trigger "field required" when the form is submitted for non-PO types
+      setSelectedInward(null);
+      // Clear inward/po_id value AND reset its validation errors so it doesn't
+      // trigger "field required" when the form is submitted for non-inward types
       form.setFields([{ name: 'po_id', value: null, errors: [] }]);
+      form.setFields([{ name: 'inward_id', value: null, errors: [] }]);
+      form.setFieldsValue({ po_number: null });
       setGrnItems([createEmptyItem()]);
     }
   };
@@ -346,7 +524,7 @@ const GRNForm = () => {
     try {
       // For non-PO receipt types, clear po_id from form store so it doesn't
       // trigger validation errors (Ant Design can retain hidden field state)
-      if (receiptType !== 'po_based') {
+      if (receiptType !== 'inward_based') {
         form.setFields([{ name: 'po_id', value: null, errors: [] }]);
       }
       const values = await form.validateFields();
@@ -390,7 +568,9 @@ const GRNForm = () => {
       setSubmitting(true);
 
       const payload = {
-        po_id: receiptType === 'po_based' ? (values.po_id || null) : null,
+        po_id: selectedPO?.id || values.po_id || null,
+        inward_id: selectedInward?.id || values.inward_id || null,
+        po_number: selectedPO?.po_number || selectedInward?.po_number || grn?.po_number || values.po_number || null,
         vendor_id: values.vendor_id,
         warehouse_id: values.warehouse_id,
         grn_date: formatDateForAPI(values.grn_date),
@@ -486,7 +666,7 @@ const GRNForm = () => {
   if (!isNew && grn && !editMode) {
     const grnItemsList = grn.items || [];
     const statusIdx = GRN_STATUS_FLOW.indexOf(grn.status);
-    const typeMap = { po_based: 'PO Based', direct: 'Direct', transfer: 'Transfer', return: 'Return' };
+    const typeMap = { inward_based: 'Inward Based', po_based: 'PO Based', direct: 'Direct', transfer: 'Transfer', return: 'Return' };
 
     return (
       <div>
@@ -550,6 +730,7 @@ const GRNForm = () => {
             <Descriptions.Item label="Vendor">{grn.vendor_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="Warehouse">{grn.warehouse_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="PO Reference">{grn.po_number || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Inward Reference">{grn.inward_number || '-'}</Descriptions.Item>
             <Descriptions.Item label="Supplier Invoice">{grn.supplier_invoice || '-'}</Descriptions.Item>
             <Descriptions.Item label="Supplier Invoice Date">{formatDate(grn.supplier_invoice_date)}</Descriptions.Item>
             <Descriptions.Item label="Vehicle Number">{grn.vehicle_number || '-'}</Descriptions.Item>
@@ -593,6 +774,25 @@ const GRNForm = () => {
               { title: 'Rate', dataIndex: 'rate', width: 100, align: 'right', render: (v) => formatCurrency(v) },
               { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right', render: (v) => <Text strong>{formatCurrency(v)}</Text> },
               { title: 'Remarks', dataIndex: 'remarks', width: 150, ellipsis: true, render: (v) => v || '-' },
+              {
+                title: 'Serial Numbers',
+                dataIndex: 'serial_numbers',
+                width: 200,
+                render: (v, r) => {
+                  if (!r.has_serial) return <Text type="secondary">-</Text>;
+                  const sns = Array.isArray(v) ? v.filter(Boolean) : [];
+                  if (sns.length === 0) return <Text type="danger">None recorded</Text>;
+                  return (
+                    <div>
+                      {sns.map((sn, i) => (
+                        <div key={i} style={{ fontSize: 12 }}>
+                          <Text type="secondary">{i + 1}.</Text> <Tag style={{ marginBottom: 2 }}>{sn}</Tag>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                },
+              },
             ]}
             summary={() => (
               <Table.Summary>
@@ -620,6 +820,8 @@ const GRNForm = () => {
   // ============================
   // CREATE / EDIT MODE
   // ============================
+  const hasAnySerial = grnItems.some(i => i.has_serial);
+
   const itemColumns = [
     { title: '#', width: 35, render: (_, __, idx) => idx + 1 },
     {
@@ -632,15 +834,35 @@ const GRNForm = () => {
         ) : (
           <ItemSelector
             value={val}
-            onChange={(itemId, item) => {
-              updateItemRow(record.key, 'item_id', itemId);
-              if (item) {
-                updateItemRow(record.key, 'item_name', item.item_name || item.name || '');
-                updateItemRow(record.key, 'item_code', item.item_code || item.code || '');
-                updateItemRow(record.key, 'uom_id', item.primary_uom_id || null);
-                updateItemRow(record.key, 'uom', item.primary_uom?.name || item.primary_uom_name || item.uom || '');
-                updateItemRow(record.key, 'rate', item.last_purchase_rate || item.rate || 0);
+            onChange={async (itemId, item) => {
+              if (!itemId) {
+                mergeItemRow(record.key, {
+                  item_id: null, item_name: '', item_code: '',
+                  uom_id: null, uom: '', rate: 0, amount: 0,
+                  item_type: null, serial_numbers: [],
+                });
+                return;
               }
+              // Start with what ItemSelector gave us
+              let itemType = item?.item_type || null;
+              // If item_type is missing (shouldn't happen, but defensive), fetch it
+              if (!itemType && itemId) {
+                try {
+                  const r = await api.get(`/masters/items/${itemId}`);
+                  itemType = r.data?.item_type || null;
+                } catch { /* silent */ }
+              }
+              mergeItemRow(record.key, {
+                item_id: itemId,
+                item_name: item?.item_name || item?.name || '',
+                item_code: item?.item_code || item?.code || '',
+                uom_id: item?.primary_uom_id || null,
+                uom: item?.primary_uom?.name || item?.primary_uom_name || item?.uom || '',
+                rate: item?.last_purchase_rate || item?.rate || 0,
+                item_type: itemType,
+                has_serial: !!(item?.has_serial),
+                serial_numbers: [],
+              });
             }}
             style={{ width: '100%' }}
           />
@@ -814,23 +1036,30 @@ const GRNForm = () => {
                 />
               </Form.Item>
             </Col>
-            {receiptType === 'po_based' && (
+            {receiptType === 'inward_based' && (
               <Col xs={24} sm={8}>
-                <Form.Item name="po_id" label="Purchase Order" rules={[{ required: receiptType === 'po_based', message: 'PO is required for PO-based receipt' }]}>
+                <Form.Item name="inward_id" label="Material Inward" rules={[{ required: true, message: 'Select a Material Inward' }]}>
                   <Select
-                    options={poOptions}
-                    placeholder="Search and select PO..."
+                    options={inwardOptions}
+                    placeholder="Search and select Material Inward..."
                     showSearch
                     optionFilterProp="label"
                     allowClear
-                    onChange={handlePOSelect}
-                    onSearch={(v) => loadPOOptions(v)}
-                    loading={loadingPO}
+                    onChange={handleInwardSelect}
+                    onSearch={(v) => loadInwardOptions(v)}
+                    loading={loadingInwards}
                   />
                 </Form.Item>
               </Col>
             )}
-            <Col xs={24} sm={8}>
+            {receiptType === 'inward_based' && (
+              <Col xs={24} sm={4}>
+                <Form.Item name="po_number" label="PO Number">
+                  <Input disabled placeholder="Auto from Inward" />
+                </Form.Item>
+              </Col>
+            )}
+            <Col xs={24} sm={receiptType === 'inward_based' ? 4 : 8}>
               <Form.Item name="grn_date" label="GRN Date" rules={[{ required: true, message: 'Required' }]}>
                 <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
               </Form.Item>

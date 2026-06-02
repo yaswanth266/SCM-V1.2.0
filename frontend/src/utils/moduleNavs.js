@@ -36,8 +36,8 @@ export const MODULE_NAVS = {
       { label: 'Demand Pool',       path: '/procurement/demand-pool' },
       { label: 'MR List',           path: '/procurement/material-requests' },
       { label: 'MR Board',          path: '/procurement/material-requests/kanban' },
-      { label: 'Quotations',        path: '/procurement/quotations' },
-      { label: 'Compare Quotations',path: '/procurement/quotation-comparison' },
+      { label: 'RFQs',              path: '/procurement/quotations' },
+      { label: 'Compare RFQs',      path: '/procurement/quotation-comparison' },
       { label: 'Purchase Orders',   path: '/procurement/purchase-orders' },
     ],
   },
@@ -48,12 +48,26 @@ export const MODULE_NAVS = {
     tabs: [
       { label: 'Floor Plan',          path: '/warehouse/floor-plan' },
       { label: '3D View',             path: '/warehouse/floor-plan-3d' },
-      { label: 'Gate Entry',          path: '/warehouse/gate-entry' },
+      { label: 'Material Inward',     path: '/warehouse/material-inward' },
       { label: 'GRN',                 path: '/warehouse/grn' },
       { label: 'Quality Inspection',  path: '/warehouse/quality-inspection' },
       { label: 'Putaway',             path: '/warehouse/putaway' },
       { label: 'Material Issues',     path: '/warehouse/material-issues' },
       { label: 'Purchase Returns',    path: '/warehouse/purchase-returns' },
+    ],
+  },
+  logistics: {
+    label: 'Logistics',
+    matchPrefix: '/logistics',
+    color: '#096dd9',
+    tabs: [
+      { label: 'Overview', path: '/logistics/dashboard' },
+      { label: 'Master Data', path: '/logistics/master' },
+      { label: 'Dispatch Plans', path: '/logistics/dispatch' },
+      { label: 'RFQ Bidding', path: '/logistics/rfq' },
+      { label: 'Service Orders', path: '/logistics/so' },
+      { label: 'Gating Checkpoints', path: '/logistics/so-gating' },
+      { label: 'Acknowledge Delivery', path: '/logistics/so-acknowledge' },
     ],
   },
   inventory: {
@@ -68,18 +82,7 @@ export const MODULE_NAVS = {
       { label: 'Replenishment',   path: '/inventory/replenishment' },
     ],
   },
-  logistics: {
-    label: 'Logistics',
-    matchPrefix: '/logistics',
-    color: '#F09000',
-    tabs: [
-      { label: 'Transport Requirements', path: '/logistics/transport-requirements' },
-      { label: 'Vendor Quotations',      path: '/logistics/vendor-quotations' },
-      { label: 'Transport Orders',       path: '/logistics/transport-orders' },
-      { label: 'Shipment Tracking',      path: '/logistics/shipment-tracking' },
-      { label: 'Fleet Dashboard',        path: '/logistics/fleet-dashboard' },
-    ],
-  },
+
   indent: {
     label: 'Indent',
     matchPrefix: '/indent',
@@ -152,7 +155,6 @@ export const MODULE_NAVS = {
       { label: 'Inventory',   path: '/reports/inventory' },
       { label: 'Procurement', path: '/reports/procurement' },
       { label: 'Consumption', path: '/reports/consumption' },
-      { label: 'Logistics',   path: '/reports/logistics' },
     ],
   },
   settings: {
@@ -166,6 +168,7 @@ export const MODULE_NAVS = {
       { label: 'Users',           path: '/settings/users' },
       { label: 'Roles',           path: '/settings/roles' },
       { label: 'System Settings', path: '/settings/system' },
+      { label: 'API Keys',        path: '/settings/api-keys' },
     ],
   },
   healthcare: {

@@ -20,7 +20,6 @@ const MODULE_OPTIONS = [
   { label: 'Procurement', value: 'procurement' },
   { label: 'Indent', value: 'indent' },
   { label: 'Warehouse', value: 'warehouse' },
-  { label: 'Logistics', value: 'logistics' },
 ];
 
 const DOC_TYPE_MAP = {
@@ -38,10 +37,6 @@ const DOC_TYPE_MAP = {
     { label: 'Stock Transfer', value: 'stock_transfer' },
     { label: 'GRN', value: 'grn' },
     { label: 'Stock Adjustment', value: 'stock_adjustment' },
-  ],
-  logistics: [
-    { label: 'Transport Order', value: 'transport_order' },
-    { label: 'Shipment', value: 'shipment' },
   ],
 };
 

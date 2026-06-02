@@ -30,22 +30,6 @@ const ItemDetail = () => {
   const [transLoading, setTransLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('stock');
 
-  useEffect(() => {
-    if (id) {
-      fetchItem();
-    }
-  }, [id]);
-
-  useEffect(() => {
-    if (item) {
-      if (activeTab === 'stock') fetchStock();
-      else if (activeTab === 'vendors') fetchVendors();
-      else if (activeTab === 'price_history') fetchPriceHistory();
-      else if (activeTab === 'packing') fetchPacking();
-      else if (activeTab === 'transactions') fetchTransactions();
-    }
-  }, [activeTab, item]);
-
   const fetchItem = async () => {
     setLoading(true);
     try {
@@ -58,6 +42,62 @@ const ItemDetail = () => {
       setLoading(false);
     }
   };
+
+  const [categoryAttributes, setCategoryAttributes] = useState([]);
+  const [attrValues, setAttrValues] = useState({});
+  const [categorySpecs, setCategorySpecs] = useState([]);
+  const [specValues, setSpecValues] = useState({});
+  const [uoms, setUoms] = useState([]);
+
+  const loadItemAttributesAndSpecs = async (itemId, categoryId) => {
+    if (!categoryId) return;
+    try {
+      const [attrDefRes, specDefRes, attrValRes, specValRes] = await Promise.all([
+        api.get('/masters/item-attributes', { params: { category_id: categoryId } }),
+        api.get('/masters/item-specs', { params: { item_category_id: categoryId } }),
+        api.get(`/masters/items/${itemId}/attribute-values`),
+        api.get(`/masters/items/${itemId}/spec-values`),
+      ]);
+      setCategoryAttributes(attrDefRes.data || []);
+      setCategorySpecs(specDefRes.data || []);
+      const aMap = {};
+      (attrValRes.data || []).forEach(v => { aMap[v.attribute_id] = v; });
+      setAttrValues(aMap);
+      const sMap = {};
+      (specValRes.data || []).forEach(v => { sMap[v.spec_id] = v; });
+      setSpecValues(sMap);
+    } catch (err) {
+      console.error('Failed to load attributes/specs:', err);
+    }
+  };
+
+  const fetchUOMs = async () => {
+    try {
+      const res = await api.get('/masters/uom', { params: { page_size: 200 } });
+      const data = res.data;
+      setUoms(data.items || data.data || data || []);
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (id) {
+      fetchItem();
+      fetchUOMs();
+    }
+  }, [id]);
+
+  useEffect(() => {
+    if (item) {
+      const catId = item.category_id || item.category?.id;
+      if (catId) loadItemAttributesAndSpecs(item.id, catId);
+
+      if (activeTab === 'stock') fetchStock();
+      else if (activeTab === 'vendors') fetchVendors();
+      else if (activeTab === 'price_history') fetchPriceHistory();
+      else if (activeTab === 'packing') fetchPacking();
+      else if (activeTab === 'transactions') fetchTransactions();
+    }
+  }, [activeTab, item]);
 
   const fetchStock = async () => {
     setStockLoading(true);
@@ -175,6 +215,30 @@ const ItemDetail = () => {
     { title: 'Balance Qty', dataIndex: 'balance_qty', key: 'bal', align: 'right', render: (v) => formatNumber(v) },
     { title: 'Rate', dataIndex: 'rate', key: 'rate', align: 'right', render: (v) => formatCurrency(v) },
   ];
+  const attributeColumns = [
+    { title: 'Attribute', dataIndex: 'name', key: 'name' },
+    { title: 'Value', key: 'value', render: (_, r) => {
+      const v = attrValues[r.id];
+      if (!v) return '-';
+      const uom = uoms.find(u => u.id === v.uom_id);
+      return `${v.value || ''} ${uom ? (uom.abbreviation || uom.name) : ''}`.trim() || '-';
+    }},
+  ];
+
+  const specColumns = [
+    { title: 'Spec', dataIndex: 'spec_name', key: 'name' },
+    { title: 'Value', key: 'value', render: (_, r) => {
+      const v = specValues[r.spec_id];
+      if (!v) return '-';
+      const uom = uoms.find(u => u.id === (v.uom_id || r.uom_id || r.spec_uom_id));
+      const uomStr = uom ? (uom.abbreviation || uom.name) : '';
+      if (r.spec_data_type === 'range') {
+        if (!v.min_value && !v.max_value) return '-';
+        return `${v.min_value || '0'} - ${v.max_value || '∞'} ${uomStr}`.trim();
+      }
+      return `${v.value || ''} ${uomStr}`.trim() || '-';
+    }},
+  ];
 
   if (loading) {
     return (
@@ -217,35 +281,50 @@ const ItemDetail = () => {
       <Card style={{ marginBottom: 16 }}>
         <Row gutter={24}>
           <Col xs={24} md={16}>
-            <Descriptions column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered>
+            <Descriptions title="Basic" column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered style={{ marginBottom: 24 }}>
               <Descriptions.Item label="Item Code">{item.item_code}</Descriptions.Item>
               <Descriptions.Item label="Name">{item.name}</Descriptions.Item>
               <Descriptions.Item label="Type">{itemTypeName}</Descriptions.Item>
               <Descriptions.Item label="Category">{item.category?.name || item.category_name || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Primary UOM">{item.primary_uom?.name || item.primary_uom_name || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Secondary UOM">{item.secondary_uom?.name || item.secondary_uom_name || '-'}</Descriptions.Item>
-              <Descriptions.Item label="HSN Code">{item.hsn_code || '-'}</Descriptions.Item>
-              <Descriptions.Item label="SKU">{item.sku || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Barcode Type">{barcodeTypeName}</Descriptions.Item>
+              <Descriptions.Item label="Brand">{item.brand || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Manufacturer">{item.manufacturer || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Dosage Form">{item.dosage_form || '-'}</Descriptions.Item>
               <Descriptions.Item label="Status"><StatusTag status={item.status || (item.is_active === false ? 'inactive' : 'active')} /></Descriptions.Item>
+            </Descriptions>
+
+            <Descriptions title="Units & Identification" column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered style={{ marginBottom: 24 }}>
+              <Descriptions.Item label="Primary UOM">{item.primary_uom?.name || item.primary_uom_name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Conversion Factor">{item.conversion_factor || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Pack Size">{item.pack_size || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Barcode Type">{barcodeTypeName}</Descriptions.Item>
+              <Descriptions.Item label="Barcode Value">{item.barcode_value || '-'}</Descriptions.Item>
+              <Descriptions.Item label="HSN Code">{item.hsn_code || '-'}</Descriptions.Item>
+            </Descriptions>
+
+            <Descriptions title="Tracking & Stock" column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered style={{ marginBottom: 24 }}>
               <Descriptions.Item label="Has Batch">{item.has_batch ? 'Yes' : 'No'}</Descriptions.Item>
               <Descriptions.Item label="Has Serial">{item.has_serial ? 'Yes' : 'No'}</Descriptions.Item>
               <Descriptions.Item label="Has Expiry">{item.has_expiry ? 'Yes' : 'No'}</Descriptions.Item>
               <Descriptions.Item label="Shelf Life">{item.shelf_life_days ? `${item.shelf_life_days} days` : '-'}</Descriptions.Item>
               <Descriptions.Item label="Safety Stock">{item.safety_stock ?? '-'}</Descriptions.Item>
               <Descriptions.Item label="Reorder Level">{item.reorder_level ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label="Reorder Qty">{item.reorder_qty ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label="Lead Time">{item.lead_time_days ? `${item.lead_time_days} days` : '-'}</Descriptions.Item>
+              <Descriptions.Item label="Minimum Stock">{item.minimum_stock ?? '-'}</Descriptions.Item>
+              <Descriptions.Item label="Maximum Stock">{item.maximum_stock ?? '-'}</Descriptions.Item>
+            </Descriptions>
+
+            <Descriptions title="Pricing & Compliance" column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered>
               <Descriptions.Item label="Purchase Price">{formatCurrency(item.purchase_price)}</Descriptions.Item>
               <Descriptions.Item label="Selling Price">{formatCurrency(item.selling_price)}</Descriptions.Item>
               <Descriptions.Item label="MRP">{formatCurrency(item.mrp)}</Descriptions.Item>
-              <Descriptions.Item label="Tax Rate">{item.tax_rate != null ? `${item.tax_rate}%` : '-'}</Descriptions.Item>
-              <Descriptions.Item label="CGST">{item.cgst_rate != null ? `${item.cgst_rate}%` : '-'}</Descriptions.Item>
-              <Descriptions.Item label="SGST">{item.sgst_rate != null ? `${item.sgst_rate}%` : '-'}</Descriptions.Item>
-              <Descriptions.Item label="IGST">{item.igst_rate != null ? `${item.igst_rate}%` : '-'}</Descriptions.Item>
+              <Descriptions.Item label="Discount %">{item.discount_percent != null ? `${item.discount_percent}%` : '-'}</Descriptions.Item>
+              <Descriptions.Item label="Valuation Method">{item.valuation_method ? item.valuation_method.toUpperCase() : '-'}</Descriptions.Item>
+              <Descriptions.Item label="GST Rate">{item.gst_rate != null ? `${item.gst_rate}%` : (item.tax_rate != null ? `${item.tax_rate}%` : '-')}</Descriptions.Item>
+              <Descriptions.Item label="Controlled Substance">{item.is_controlled_substance ? 'Yes' : 'No'}</Descriptions.Item>
+              <Descriptions.Item label="Schedule Type">{item.schedule_type || '-'}</Descriptions.Item>
             </Descriptions>
+
             {item.description && (
-              <div style={{ marginTop: 12 }}>
+              <div style={{ marginTop: 24 }}>
                 <strong>Description:</strong>
                 <p style={{ marginTop: 4, color: 'rgba(0,0,0,0.65)' }}>{item.description}</p>
               </div>
@@ -339,6 +418,34 @@ const ItemDetail = () => {
                   loading={transLoading}
                   rowKey={(r) => r.id || `${r.voucher_no}-${r.posting_date}`}
                   pagination={{ pageSize: 20, showSizeChanger: true, showTotal: (t, r) => `${r[0]}-${r[1]} of ${t}` }}
+                  scroll={{ x: 'max-content' }}
+                  size="small"
+                />
+              ),
+            },
+            {
+              key: 'attributes',
+              label: 'Attributes',
+              children: (
+                <Table
+                  columns={attributeColumns}
+                  dataSource={categoryAttributes}
+                  rowKey="id"
+                  pagination={false}
+                  scroll={{ x: 'max-content' }}
+                  size="small"
+                />
+              ),
+            },
+            {
+              key: 'specs',
+              label: 'Specs',
+              children: (
+                <Table
+                  columns={specColumns}
+                  dataSource={categorySpecs}
+                  rowKey="id"
+                  pagination={false}
                   scroll={{ x: 'max-content' }}
                   size="small"
                 />

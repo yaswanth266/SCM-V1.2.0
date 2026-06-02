@@ -95,6 +95,11 @@ class QuotationItemCreate(BaseModel):
     rate: Decimal
     discount_pct: Decimal = Decimal("0")
     tax_rate: Decimal = Decimal("0")
+    cgst_rate: Decimal = Decimal("0")
+    sgst_rate: Decimal = Decimal("0")
+    igst_rate: Decimal = Decimal("0")
+    expected_delivery: Optional[date] = None
+    remarks: Optional[str] = None
 
     @field_validator("qty")
     @classmethod
@@ -110,7 +115,7 @@ class QuotationItemCreate(BaseModel):
             raise ValueError("Rate cannot be negative")
         return v
 
-    @field_validator("discount_pct", "tax_rate")
+    @field_validator("discount_pct", "tax_rate", "cgst_rate", "sgst_rate", "igst_rate")
     @classmethod
     def validate_pct(cls, v):
         if v is not None and (v < 0 or v > 100):
@@ -118,6 +123,8 @@ class QuotationItemCreate(BaseModel):
         return v
 
 class QuotationCreate(BaseModel):
+    rfq_id: Optional[int] = None
+    rfq_number: Optional[str] = None
     mr_id: Optional[int] = None
     vendor_id: int
     quotation_date: date
@@ -125,6 +132,8 @@ class QuotationCreate(BaseModel):
     currency: str = "INR"
     delivery_days: Optional[int] = None
     payment_terms: Optional[str] = None
+    with_vehicle: Optional[bool] = False
+    vehicle_cost: Optional[Decimal] = Decimal("0")
     remarks: Optional[str] = None
     items: List[QuotationItemCreate]
 
@@ -144,10 +153,38 @@ class QuotationCreate(BaseModel):
             raise ValueError("Valid until date cannot be in the past")
         return self
 
+class QuotationItemUpdate(BaseModel):
+    """Item payload for QuotationUpdate (line-level GST split)."""
+    item_id: int
+    qty: Decimal
+    uom_id: int
+    rate: Decimal
+    discount_pct: Decimal = Decimal("0")
+    cgst_rate: Decimal = Decimal("0")
+    sgst_rate: Decimal = Decimal("0")
+    igst_rate: Decimal = Decimal("0")
+    tax_rate: Decimal = Decimal("0")
+    amount: Decimal = Decimal("0")
+    expected_delivery: Optional[date] = None
+    remarks: Optional[str] = None
+
 class QuotationUpdate(BaseModel):
     valid_until: Optional[date] = None
     status: Optional[str] = None
     remarks: Optional[str] = None
+    # Allow financial header fields (sent by frontend on edit)
+    total_amount: Optional[Decimal] = None
+    subtotal: Optional[Decimal] = None
+    cgst_amount: Optional[Decimal] = None
+    sgst_amount: Optional[Decimal] = None
+    igst_amount: Optional[Decimal] = None
+    tax_amount: Optional[Decimal] = None
+    grand_total: Optional[Decimal] = None
+    delivery_days: Optional[int] = None
+    payment_terms: Optional[str] = None
+    currency: Optional[str] = None
+    # Items — when provided, replace existing items entirely
+    items: Optional[List[QuotationItemUpdate]] = None
 
 class QuotationItemResponse(BaseModel):
     id: int
@@ -157,26 +194,90 @@ class QuotationItemResponse(BaseModel):
     rate: Decimal
     discount_pct: Decimal
     tax_rate: Decimal
+    cgst_rate: Decimal
+    sgst_rate: Decimal
+    igst_rate: Decimal
     amount: Decimal
+    expected_delivery: Optional[datetime] = None
+    remarks: Optional[str] = None
     model_config = {"from_attributes": True}
 
 class QuotationResponse(BaseModel):
     id: int
+    rfq_id: Optional[int] = None
+    rfq_number: Optional[str] = None
     quotation_number: str
     mr_id: Optional[int] = None
     vendor_id: int
     quotation_date: datetime
     valid_until: Optional[datetime] = None
+    subtotal: Decimal = Decimal("0")
     total_amount: Decimal
+    cgst_amount: Decimal = Decimal("0")
+    sgst_amount: Decimal = Decimal("0")
+    igst_amount: Decimal = Decimal("0")
     tax_amount: Decimal
+    vehicle_cost: Decimal = Decimal("0")
     grand_total: Decimal
     currency: str
     delivery_days: Optional[int] = None
+    with_vehicle: Optional[bool] = False
     status: str
     remarks: Optional[str] = None
     created_at: Optional[datetime] = None
     items: List[QuotationItemResponse] = []
     model_config = {"from_attributes": True}
+
+
+class RFQItemCreate(QuotationItemCreate):
+    rate: Decimal = Decimal("0")
+
+
+class RFQCreate(BaseModel):
+    mr_id: Optional[int] = None
+    title: Optional[str] = None
+    vendor_ids: List[int]
+    rfq_date: date
+    valid_until: Optional[date] = None
+    currency: str = "INR"
+    delivery_days: Optional[int] = None
+    payment_terms: Optional[str] = None
+    with_vehicle: Optional[bool] = False
+    remarks: Optional[str] = None
+    items: List[RFQItemCreate]
+
+    @field_validator("vendor_ids")
+    @classmethod
+    def validate_vendors_not_empty(cls, v):
+        if not v:
+            raise ValueError("At least one supplier is required")
+        return v
+
+    @field_validator("items")
+    @classmethod
+    def validate_rfq_items_not_empty(cls, v):
+        if not v:
+            raise ValueError("At least one RFQ item is required")
+        return v
+
+    @model_validator(mode="after")
+    def validate_valid_until(self):
+        if self.valid_until and self.rfq_date and self.valid_until < self.rfq_date:
+            raise ValueError("RFQ valid until date must be >= RFQ date")
+        return self
+
+
+class SplitAwardItem(BaseModel):
+    item_id: int
+    vendor_id: int
+    qty: Decimal
+    rate: Decimal
+    quotation_id: int
+
+class SplitPORequest(BaseModel):
+    rfq_number: str
+    mr_id: Optional[int] = None
+    awards: List[SplitAwardItem]
 
 # ---- Purchase Order ----
 class POItemCreate(BaseModel):
@@ -289,6 +390,7 @@ class POItemResponse(BaseModel):
     igst_rate: Decimal
     tax_amount: Decimal
     amount: Decimal
+    item_type: Optional[str] = None
     model_config = {"from_attributes": True}
 
 class POResponse(BaseModel):
@@ -302,12 +404,20 @@ class POResponse(BaseModel):
     warehouse_id: Optional[int] = None
     po_date: datetime
     expected_delivery_date: Optional[datetime] = None
+    billing_address: Optional[str] = None
+    shipping_address: Optional[str] = None
     subtotal: Decimal
     discount_amount: Decimal
+    cgst_amount: Decimal = Decimal("0")
+    sgst_amount: Decimal = Decimal("0")
+    igst_amount: Decimal = Decimal("0")
     tax_amount: Decimal
     grand_total: Decimal
     payment_terms_days: int
+    payment_terms: Optional[str] = None
     status: str
+    remarks: Optional[str] = None
+    supplier_acknowledgement: Optional[str] = "pending"
     attachment_url: Optional[str] = None
     approved_by: Optional[int] = None
     approved_date: Optional[datetime] = None
@@ -326,6 +436,7 @@ class POListResponse(BaseModel):
     subtotal: Optional[Decimal] = None
     grand_total: Decimal
     status: str
+    supplier_acknowledgement: Optional[str] = "pending"
     created_at: Optional[datetime] = None
     items: List[POItemResponse] = []
     model_config = {"from_attributes": True}

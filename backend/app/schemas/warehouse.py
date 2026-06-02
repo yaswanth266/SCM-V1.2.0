@@ -1,5 +1,5 @@
 from pydantic import BaseModel, field_validator, model_validator
-from typing import List, Optional
+from typing import List, Optional, Union
 from datetime import datetime, date
 from decimal import Decimal
 
@@ -29,6 +29,7 @@ class GRNItemCreate(BaseModel):
     accepted_qty: Decimal = Decimal("0")
     rejected_qty: Decimal = Decimal("0")
     remarks: Optional[str] = None
+    serial_numbers: Optional[List[str]] = None
 
     @field_validator("received_qty", "ordered_qty")
     @classmethod
@@ -70,6 +71,8 @@ class GRNItemCreate(BaseModel):
 
 class GRNCreate(BaseModel):
     po_id: Optional[int] = None
+    inward_id: Optional[int] = None
+    po_number: Optional[str] = None
     vendor_id: int
     warehouse_id: int
     grn_date: date
@@ -77,7 +80,7 @@ class GRNCreate(BaseModel):
     supplier_invoice_date: Optional[date] = None
     vehicle_number: Optional[str] = None
     lr_number: Optional[str] = None
-    receipt_type: str = "po_based"
+    receipt_type: str = "inward_based"
     remarks: Optional[str] = None
     items: List[GRNItemCreate]
     # BUG-INV-013/125: allow the frontend to flag a GRN as "save as draft" so
@@ -134,6 +137,8 @@ class GRNItemResponse(BaseModel):
     rate: Decimal
     amount: Decimal
     qi_status: str
+    item_type: Optional[str] = None
+    serial_numbers: List[str] = []
     model_config = {"from_attributes": True}
 
 class GRNResponse(BaseModel):
@@ -141,6 +146,8 @@ class GRNResponse(BaseModel):
     grn_number: str
     po_id: Optional[int] = None
     po_number: Optional[str] = None
+    inward_id: Optional[int] = None
+    inward_number: Optional[str] = None
     vendor_id: int
     vendor_name: Optional[str] = None
     warehouse_id: int
@@ -215,23 +222,24 @@ class QIResponse(BaseModel):
 
 # ---- Putaway ----
 class PutawayItemCreate(BaseModel):
-    grn_item_id: int
+    grn_item_id: Optional[int] = None
     item_id: int
     qty: Decimal
-    uom_id: int
+    uom_id: Optional[int] = None
     batch_id: Optional[int] = None
-    suggested_bin_id: Optional[int] = None
+    suggested_bin_id: Optional[Union[int, str]] = None
 
 class PutawayCreate(BaseModel):
-    grn_id: int
+    grn_id: Optional[int] = None
     warehouse_id: int
     putaway_type: str = "system_directed"
     assigned_to: Optional[int] = None
     items: List[PutawayItemCreate]
 
 class PutawayItemUpdate(BaseModel):
-    actual_bin_id: int
+    actual_bin_id: Union[int, str]
     status: str = "done"
+    serial_numbers: Optional[List[str]] = None
 
 class PutawayItemResponse(BaseModel):
     id: int
@@ -247,6 +255,8 @@ class PutawayItemResponse(BaseModel):
     suggested_bin_id: Optional[int] = None
     actual_bin_id: Optional[int] = None
     status: str
+    has_serial: bool = False
+    serial_numbers: List[str] = []
     model_config = {"from_attributes": True}
 
 
@@ -282,6 +292,7 @@ class MaterialIssueItemCreate(BaseModel):
     prescriber_license: Optional[str] = None
     patient_name: Optional[str] = None
     patient_id_text: Optional[str] = None
+    serial_numbers: Optional[List[str]] = None
 
     @field_validator("qty")
     @classmethod
@@ -301,6 +312,7 @@ class MaterialIssueCreate(BaseModel):
     mr_id: Optional[int] = None
     indent_id: Optional[int] = None
     warehouse_id: int
+    destination_warehouse_id: Optional[int] = None
     issue_date: date
     department: Optional[str] = None
     issued_to: Optional[int] = None
@@ -331,6 +343,7 @@ class MaterialIssueUpdate(BaseModel):
     mr_id: Optional[int] = None
     indent_id: Optional[int] = None
     warehouse_id: Optional[int] = None
+    destination_warehouse_id: Optional[int] = None
     issue_date: Optional[date] = None
     department: Optional[str] = None
     issued_to: Optional[int] = None
@@ -360,11 +373,14 @@ class MaterialIssueItemResponse(BaseModel):
     item_code: Optional[str] = None
     uom_name: Optional[str] = None
     batch_id: Optional[int] = None
+    batch_number: Optional[str] = None
     qty: Decimal
     uom_id: int
     bin_id: Optional[int] = None
     rate: Decimal
     amount: Decimal
+    serial_numbers: Optional[List[str]] = None
+    has_serial: bool = False
     model_config = {"from_attributes": True}
 
 class MaterialIssueResponse(BaseModel):
@@ -374,6 +390,8 @@ class MaterialIssueResponse(BaseModel):
     indent_id: Optional[int] = None
     warehouse_id: int
     warehouse_name: Optional[str] = None
+    destination_warehouse_id: Optional[int] = None
+    destination_warehouse_name: Optional[str] = None
     issue_date: datetime
     department: Optional[str] = None
     issued_to: Optional[int] = None
@@ -450,6 +468,11 @@ class DispatchCreate(BaseModel):
     pack_id: Optional[int] = None
     warehouse_id: int
     customer_id: Optional[int] = None
+    destination_user_id: Optional[int] = None
+    destination_warehouse_id: Optional[int] = None
+    destination_type: Optional[str] = "USER"
+    dispatch_type: Optional[str] = "THIRD_PARTY"
+    material_issue_id: Optional[int] = None
     vehicle_number: Optional[str] = None
     vehicle_type: Optional[str] = None
     driver_name: Optional[str] = None
@@ -458,6 +481,7 @@ class DispatchCreate(BaseModel):
     lr_number: Optional[str] = None
     docket_number: Optional[str] = None
     dispatch_date: Optional[datetime] = None
+    expected_delivery_date: Optional[datetime] = None
     remarks: Optional[str] = None
 
 class DispatchResponse(BaseModel):
@@ -467,14 +491,137 @@ class DispatchResponse(BaseModel):
     status: str
     vehicle_number: Optional[str] = None
     dispatch_date: Optional[datetime] = None
+    expected_delivery_date: Optional[datetime] = None
     created_at: Optional[datetime] = None
+    destination_user_id: Optional[int] = None
+    destination_warehouse_id: Optional[int] = None
+    destination_type: Optional[str] = None
+    dispatch_type: Optional[str] = None
+    delivery_acknowledged: bool = False
+    delivery_acknowledged_at: Optional[datetime] = None
+    delivery_acknowledged_by_id: Optional[int] = None
+    delivery_acknowledged_by_name: Optional[str] = None
+    delivery_acknowledged_by_designation: Optional[str] = None
+    delivery_acknowledged_by_phone: Optional[str] = None
+    delivery_acknowledged_by_email: Optional[str] = None
+    receiver_signature_url: Optional[str] = None
+    receiver_id_proof_type: Optional[str] = None
+    receiver_id_proof_number: Optional[str] = None
+    delivery_photo_urls: Optional[List[str]] = None
+    goods_condition_on_delivery: Optional[str] = None
+    delivery_remarks: Optional[str] = None
+    material_issue_id: Optional[int] = None
+    delivery_location_latitude: Optional[Decimal] = None
+    delivery_location_longitude: Optional[Decimal] = None
+    delivery_location_verified: bool = False
     model_config = {"from_attributes": True}
+
+
+# ---- Universal Acknowledgement Schemas ----
+class DispatchAcknowledgementItemCreate(BaseModel):
+    dispatch_item_id: Optional[int] = None
+    material_id: int
+    batch_number: Optional[str] = None
+    serial_numbers: Optional[List[str]] = None
+    quantity_dispatched: Decimal
+    quantity_received: Decimal
+    quantity_accepted: Decimal
+    quantity_rejected: Decimal = Decimal("0")
+    quantity_damaged: Decimal = Decimal("0")
+    unit_of_measure: str = "Pcs"
+    item_condition: str = "GOOD"
+    rejection_reason: Optional[str] = None
+    damage_description: Optional[str] = None
+    item_photo_urls: Optional[List[str]] = None
+    unit_price: Optional[Decimal] = None
+    total_value: Optional[Decimal] = None
+    manufacturing_date: Optional[date] = None
+    expiry_date: Optional[date] = None
+    temperature_maintained: Optional[bool] = None
+    storage_condition_met: Optional[bool] = None
+    remarks: Optional[str] = None
+
+    @field_validator("item_condition")
+    @classmethod
+    def _validate_item_condition(cls, v: str) -> str:
+        """Map unrecognised condition values to valid DB ENUM members.
+        DB ENUM: GOOD | DAMAGED | EXPIRED | DEFECTIVE | WRONG_ITEM
+        'PARTIAL' (formerly sent by frontend) → 'DAMAGED' is the closest match.
+        """
+        _VALID = {"GOOD", "DAMAGED", "EXPIRED", "DEFECTIVE", "WRONG_ITEM"}
+        if v and v.upper() in _VALID:
+            return v.upper()
+        # Any unrecognised value (e.g. 'PARTIAL') → 'DAMAGED'
+        return "DAMAGED"
+
+    @field_validator("unit_of_measure")
+    @classmethod
+    def _validate_uom(cls, v: str) -> str:
+        """Ensure unit_of_measure is never blank (DB column is NOT NULL)."""
+        return (v or "").strip() or "Pcs"
+
+class DispatchAcknowledgementCreate(BaseModel):
+    acknowledgement_type: str  # FULL_DELIVERY, PARTIAL_DELIVERY, DAMAGED_DELIVERY, REJECTED, CONDITIONAL
+    acknowledged_by_name: str
+    acknowledged_by_designation: Optional[str] = None
+    acknowledged_by_department: Optional[str] = None
+    acknowledged_by_phone: str
+    acknowledged_by_email: Optional[str] = None
+    acknowledged_by_employee_code: Optional[str] = None
+    
+    # Destination Info
+    destination_warehouse_id: Optional[int] = None
+    destination_user_id: Optional[int] = None
+    actual_delivery_location: Optional[str] = None
+    
+    # Evidence & Security
+    verification_method: str = "DIGITAL_SIGNATURE"
+    receiver_signature_url: Optional[str] = None
+    receiver_signature_captured_via: Optional[str] = "MOBILE_APP"
+    receiver_id_proof_type: Optional[str] = "NONE"
+    receiver_id_proof_number: Optional[str] = None
+    receiver_id_proof_document_url: Optional[str] = None
+    delivery_photos: Optional[dict] = None  # JSON of photos
+    
+    # Geo
+    delivery_latitude: Optional[Decimal] = None
+    delivery_longitude: Optional[Decimal] = None
+    geo_fence_verified: bool = False
+    device_id: Optional[str] = None
+    ip_address: Optional[str] = None
+    
+    # Condition & Inspection
+    total_items_expected: int
+    total_items_received: int
+    total_items_damaged: int = 0
+    total_items_rejected: int = 0
+    goods_condition: str = "GOOD"
+    quality_check_performed: bool = False
+    quality_checked_by: Optional[str] = None
+    quality_check_remarks: Optional[str] = None
+    
+    # Package parameters
+    packaging_condition: Optional[str] = "INTACT"
+    seal_intact: bool = True
+    seal_number_verified: Optional[str] = None
+    temperature_recorded: Optional[Decimal] = None
+    humidity_recorded: Optional[Decimal] = None
+    
+    # Discrepancy management
+    discrepancy_reported: bool = False
+    discrepancy_type: Optional[str] = None
+    discrepancy_description: Optional[str] = None
+    
+    # line items
+    items: List[DispatchAcknowledgementItemCreate]
+
 
 # ---- Gate Pass ----
 class GatePassCreate(BaseModel):
     gate_type: str
     dispatch_id: Optional[int] = None
     grn_id: Optional[int] = None
+    so_id: Optional[int] = None
     warehouse_id: int
     vehicle_number: Optional[str] = None
     person_name: Optional[str] = None
@@ -506,6 +653,8 @@ class GatePassResponse(BaseModel):
     gate_in_time: Optional[datetime] = None
     gate_out_time: Optional[datetime] = None
     created_at: Optional[datetime] = None
+    so_id: Optional[int] = None
+    so_number: Optional[str] = None
     model_config = {"from_attributes": True}
 
 # ---- Sales Order ----
@@ -655,3 +804,88 @@ class PurchaseReturnResponse(BaseModel):
     created_at: Optional[datetime] = None
     items: List[PurchaseReturnItemResponse] = []
     model_config = {"from_attributes": True}
+
+
+# ---- Material Inward ----
+
+class MaterialInwardItemCreate(BaseModel):
+    item_id: Optional[int] = None
+    item_name_manual: Optional[str] = None
+    ordered_qty: Decimal = Decimal("0")
+    received_qty: Decimal
+    uom_id: Optional[int] = None
+    uom_manual: Optional[str] = None
+    remarks: Optional[str] = None
+
+    @field_validator("received_qty")
+    @classmethod
+    def val_qty(cls, v):
+        if v <= 0:
+            raise ValueError("Received quantity must be greater than zero")
+        return v
+
+
+class MaterialInwardCreate(BaseModel):
+    po_id: Optional[int] = None
+    po_number: Optional[str] = None
+    vendor_id: Optional[int] = None
+    vendor_name_manual: Optional[str] = None
+    warehouse_id: int
+    received_date: datetime
+    vehicle_number: Optional[str] = None
+    driver_name: Optional[str] = None
+    remarks: Optional[str] = None
+    items: List[MaterialInwardItemCreate]
+
+    @field_validator("items")
+    @classmethod
+    def val_items_not_empty(cls, v):
+        if not v or len(v) == 0:
+            raise ValueError("At least one item is required")
+        return v
+
+
+class MaterialInwardItemResponse(BaseModel):
+    id: int
+    inward_id: int
+    item_id: Optional[int] = None
+    item_name_manual: Optional[str] = None
+    ordered_qty: Decimal
+    received_qty: Decimal
+    uom_id: Optional[int] = None
+    uom_manual: Optional[str] = None
+    remarks: Optional[str] = None
+    
+    # Display helpers
+    item_code: Optional[str] = None
+    item_name: Optional[str] = None
+    uom_name: Optional[str] = None
+    item_type: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class MaterialInwardResponse(BaseModel):
+    id: int
+    inward_number: str
+    po_id: Optional[int] = None
+    po_number: Optional[str] = None
+    vendor_id: Optional[int] = None
+    vendor_name_manual: Optional[str] = None
+    warehouse_id: int
+    received_date: datetime
+    vehicle_number: Optional[str] = None
+    driver_name: Optional[str] = None
+    remarks: Optional[str] = None
+    status: str
+    created_by: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+
+    # Display names
+    warehouse_name: Optional[str] = None
+    vendor_name: Optional[str] = None
+    items: List[MaterialInwardItemResponse]
+
+    model_config = {"from_attributes": True}
+

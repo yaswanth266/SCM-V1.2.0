@@ -16,7 +16,7 @@ import ItemSelector from '../../components/ItemSelector';
 import api from '../../config/api';
 import {
   formatDate, formatCurrency, getErrorMessage, formatDateForAPI,
-  calcTaxAmount,
+  calcTaxAmount, handleFormValidationFailed,
 } from '../../utils/helpers';
 import { DATE_FORMAT } from '../../utils/constants';
 
@@ -140,7 +140,45 @@ const InvoiceForm = () => {
       const validItems = invoiceItems.filter((item) => item.item_id);
       if (validItems.length === 0) {
         message.error('Please add at least one item');
+        const tbl = document.querySelector('.ant-table');
+        if (tbl) {
+          tbl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          tbl.style.border = '1.5px dashed #FF4D4F';
+          tbl.style.backgroundColor = '#FFF2F0';
+          setTimeout(() => {
+            tbl.style.border = '';
+            tbl.style.backgroundColor = '';
+          }, 3000);
+        }
         return;
+      }
+      // Validate each item has required fields
+      for (const item of validItems) {
+        if (!item.qty || item.qty <= 0) {
+          message.error('Each item must have a quantity greater than 0');
+          const rowInputs = document.querySelectorAll('.ant-input-number');
+          rowInputs.forEach((inp) => {
+            const val = parseFloat(inp.querySelector('input')?.value || '0');
+            if (val <= 0 || isNaN(val)) {
+              inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              inp.style.border = '1.5px solid #FF4D4F';
+              inp.style.backgroundColor = '#FFF2F0';
+              setTimeout(() => {
+                inp.style.border = '';
+                inp.style.backgroundColor = '';
+              }, 3000);
+            }
+          });
+          return;
+        }
+        if (item.rate < 0) {
+          message.error('Rate cannot be negative');
+          return;
+        }
+        if (item.discount_pct < 0 || item.discount_pct > 100) {
+          message.error('Discount percentage must be between 0% and 100%');
+          return;
+        }
       }
       setSubmitting(true);
 
@@ -172,7 +210,10 @@ const InvoiceForm = () => {
         fetchInvoice();
       }
     } catch (err) {
-      if (err.errorFields) return;
+      if (err.errorFields) {
+        handleFormValidationFailed(err);
+        return;
+      }
       message.error(getErrorMessage(err));
     } finally {
       setSubmitting(false);
@@ -426,19 +467,46 @@ const InvoiceForm = () => {
     {
       title: 'CGST %', dataIndex: 'cgst_rate', width: 85,
       render: (val, record) => (
-        <Select value={val} onChange={(v) => updateItemRow(record.key, 'cgst_rate', v)} options={TAX_RATE_OPTIONS} style={{ width: '100%' }} />
+        <Select 
+          value={val} 
+          onChange={(v) => {
+            updateItemRow(record.key, 'cgst_rate', v);
+            if (v > 0) updateItemRow(record.key, 'igst_rate', 0);
+          }} 
+          options={TAX_RATE_OPTIONS} 
+          style={{ width: '100%' }} 
+        />
       ),
     },
     {
       title: 'SGST %', dataIndex: 'sgst_rate', width: 85,
       render: (val, record) => (
-        <Select value={val} onChange={(v) => updateItemRow(record.key, 'sgst_rate', v)} options={TAX_RATE_OPTIONS} style={{ width: '100%' }} />
+        <Select 
+          value={val} 
+          onChange={(v) => {
+            updateItemRow(record.key, 'sgst_rate', v);
+            if (v > 0) updateItemRow(record.key, 'igst_rate', 0);
+          }} 
+          options={TAX_RATE_OPTIONS} 
+          style={{ width: '100%' }} 
+        />
       ),
     },
     {
       title: 'IGST %', dataIndex: 'igst_rate', width: 85,
       render: (val, record) => (
-        <Select value={val} onChange={(v) => updateItemRow(record.key, 'igst_rate', v)} options={TAX_RATE_OPTIONS} style={{ width: '100%' }} />
+        <Select 
+          value={val} 
+          onChange={(v) => {
+            updateItemRow(record.key, 'igst_rate', v);
+            if (v > 0) {
+              updateItemRow(record.key, 'cgst_rate', 0);
+              updateItemRow(record.key, 'sgst_rate', 0);
+            }
+          }} 
+          options={TAX_RATE_OPTIONS} 
+          style={{ width: '100%' }} 
+        />
       ),
     },
     {
@@ -463,7 +531,7 @@ const InvoiceForm = () => {
       </PageHeader>
 
       <Card>
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" scrollToFirstError={true}>
           <Row gutter={16}>
             <Col span={6}>
               <Form.Item name="party_id" label="Vendor" rules={[{ required: true, message: 'Required' }]}>
@@ -484,22 +552,91 @@ const InvoiceForm = () => {
           </Row>
           <Row gutter={16}>
             <Col span={6}>
-              <Form.Item name="invoice_date" label="Invoice Date" rules={[{ required: true, message: 'Required' }]}>
-                <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
+              <Form.Item
+                name="invoice_date"
+                label="Invoice Date"
+                rules={[
+                  { required: true, message: 'Invoice Date is required' },
+                  {
+                    validator: (_, value) => {
+                      if (value && value.isAfter(dayjs(), 'day')) {
+                        return Promise.reject(new Error('Invoice Date cannot be in the future'));
+                      }
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
+              >
+                <DatePicker 
+                  style={{ width: '100%' }} 
+                  format={DATE_FORMAT} 
+                  disabledDate={(current) => current && current.isAfter(dayjs(), 'day')}
+                />
               </Form.Item>
             </Col>
             <Col span={6}>
-              <Form.Item name="due_date" label="Due Date" rules={[{ required: true, message: 'Required' }]}>
-                <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
+              <Form.Item
+                name="due_date"
+                label="Due Date"
+                rules={[
+                  { required: true, message: 'Due Date is required' },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      const invDate = getFieldValue('invoice_date');
+                      if (value && invDate && value.isBefore(invDate, 'day')) {
+                        return Promise.reject(new Error('Due Date must be on or after the Invoice Date'));
+                      }
+                      return Promise.resolve();
+                    },
+                  }),
+                ]}
+              >
+                <DatePicker 
+                  style={{ width: '100%' }} 
+                  format={DATE_FORMAT} 
+                  disabledDate={(current) => {
+                    const invDate = form.getFieldValue('invoice_date');
+                    if (invDate) {
+                      return current && current.isBefore(invDate, 'day');
+                    }
+                    return false;
+                  }}
+                />
               </Form.Item>
             </Col>
             <Col span={6}>
-              <Form.Item name="po_id" label="PO Reference">
+              <Form.Item
+                name="po_id"
+                label="PO Reference"
+                rules={[
+                  {
+                    validator: (_, value) => {
+                      if (value != null && value <= 0) {
+                        return Promise.reject(new Error('PO Reference ID must be a positive number'));
+                      }
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
+              >
                 <InputNumber style={{ width: '100%' }} placeholder="PO ID (optional)" min={1} />
               </Form.Item>
             </Col>
             <Col span={6}>
-              <Form.Item name="so_id" label="SO Reference">
+              <Form.Item
+                name="so_id"
+                label="SO Reference"
+                rules={[
+                  {
+                    validator: (_, value) => {
+                      if (value != null && value <= 0) {
+                        return Promise.reject(new Error('SO Reference ID must be a positive number'));
+                      }
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
+              >
                 <InputNumber style={{ width: '100%' }} placeholder="SO ID (optional)" min={1} />
               </Form.Item>
             </Col>

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Text, Boolean, DateTime, Enum, ForeignKey, Integer, Index
+from sqlalchemy import Column, BigInteger, String, Text, Boolean, DateTime, Enum, ForeignKey, Integer, Index, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.database import Base
@@ -198,4 +198,26 @@ class PasswordHistory(Base):
 
     __table_args__ = (
         Index("idx_ph_user", "user_id", "changed_at"),
+    )
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(255), nullable=False)
+    key_hash = Column(String(128), unique=True, nullable=False)
+    scopes = Column(Text, nullable=True)  # JSON string array of scopes
+    linked_user_ids = Column(JSON, nullable=True)  # JSON array of user IDs
+    expires_at = Column(DateTime, nullable=True)
+    is_active = Column(Boolean, default=True)
+    last_used_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User")
+
+    __table_args__ = (
+        Index("idx_api_key_user", "user_id"),
+        Index("idx_api_key_hash", "key_hash"),
     )

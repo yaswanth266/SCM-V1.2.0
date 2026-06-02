@@ -39,17 +39,14 @@ _ALL_KEYS: Set[str] = {
     'procurement-purchase-orders',
     'warehouse',
     'warehouse-floor-plan',
-    'warehouse-gate-entry', 'warehouse-grn', 'warehouse-quality-inspection',
+    'logistics-gate-entry', 'warehouse-grn', 'warehouse-quality-inspection',
     'warehouse-putaway', 'warehouse-purchase-returns',
-    'warehouse-material-issues',
+    'warehouse-material-issues', 'warehouse-material-inward',
+    'warehouse-dispatch',
     'inventory',
     'inventory-stock-balance', 'inventory-stock-ledger',
     'inventory-stock-transfer', 'inventory-stock-audit',
     'inventory-replenishment',
-    'logistics',
-    'logistics-transport-requirements', 'logistics-vendor-quotations',
-    'logistics-transport-orders', 'logistics-shipment-tracking',
-    'logistics-fleet-dashboard',
     'indent', 'indent-indents', 'indent-acknowledgement',
     'consumption', 'consumption-entry', 'consumption-reports',
     'approvals', 'approvals-pending', 'approvals-workflow-config',
@@ -60,8 +57,9 @@ _ALL_KEYS: Set[str] = {
     'healthcare', 'healthcare-dashboard',
     'reports',
     'reports-inventory', 'reports-procurement', 'reports-consumption',
-    'reports-accounts', 'reports-logistics', 'reports-system',
+    'reports-accounts', 'reports-system',
     'settings', 'settings-users', 'settings-roles', 'settings-system',
+    'logistics', 'logistics-dashboard', 'logistics-master', 'logistics-dispatch', 'logistics-rfq', 'logistics-so', 'logistics-gate-entry',
 }
 
 
@@ -77,7 +75,7 @@ _ROLE_KEYS = {
         'dashboard', 'lms',
         'indent', 'indent-indents', 'indent-acknowledgement',
         'consumption', 'consumption-entry',
-        'inventory', 'inventory-stock-balance',
+        'inventory', 'inventory-stock-balance', 'inventory-stock-ledger',
     },
     'field_supervisor': {
         # Supervisor's only write-action is approval. Indent + consumption
@@ -86,7 +84,7 @@ _ROLE_KEYS = {
         # they actually do.
         'dashboard', 'lms',
         'approvals', 'approvals-pending',
-        'inventory', 'inventory-stock-balance',
+        'inventory', 'inventory-stock-balance', 'inventory-stock-ledger',
     },
     'warehouse_manager': {
         # Orchestrator role: approves indents at L2 (Approvals), then makes
@@ -98,34 +96,33 @@ _ROLE_KEYS = {
         'approvals', 'approvals-pending',
         'procurement', 'procurement-demand-pool',
         'warehouse', 'warehouse-floor-plan',
-        'warehouse-gate-entry', 'warehouse-grn',
+        'warehouse-grn',
         'warehouse-quality-inspection', 'warehouse-putaway',
-        'warehouse-material-issues',
+        'warehouse-material-issues', 'warehouse-material-inward',
+        'warehouse-dispatch',
         'inventory', 'inventory-stock-balance', 'inventory-stock-ledger',
         'inventory-stock-transfer', 'inventory-stock-audit',
         'inventory-replenishment',
         'reports', 'reports-inventory',
+        'logistics', 'logistics-dashboard', 'logistics-master', 'logistics-dispatch', 'logistics-rfq', 'logistics-so', 'logistics-gate-entry',
     },
     'warehouse_operator': {
         'dashboard', 'lms',
-        'warehouse', 'warehouse-gate-entry', 'warehouse-purchase-returns',
-        'inventory', 'inventory-stock-balance',
+        'warehouse', 'warehouse-purchase-returns',
+        'warehouse-material-inward', 'warehouse-dispatch',
+        'inventory', 'inventory-stock-balance', 'inventory-stock-ledger',
+        'logistics', 'logistics-gate-entry',
     },
     'store_keeper': {
         'dashboard', 'lms',
         'warehouse', 'warehouse-grn', 'warehouse-putaway',
-        'warehouse-material-issues',
-        'inventory', 'inventory-stock-balance', 'inventory-stock-transfer',
+        'warehouse-material-issues', 'warehouse-material-inward',
+        'warehouse-dispatch',
+        'inventory', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-stock-transfer',
     },
     'quality_inspector': {
         'dashboard', 'lms',
         'warehouse', 'warehouse-quality-inspection',
-    },
-    'logistics_manager': {
-        'dashboard', 'lms',
-        'logistics', 'logistics-transport-requirements',
-        'logistics-vendor-quotations', 'logistics-transport-orders',
-        'logistics-shipment-tracking', 'logistics-fleet-dashboard',
     },
     'purchase_officer': {
         'dashboard', 'lms',
@@ -145,7 +142,7 @@ _ROLE_KEYS = {
     'viewer': {
         'dashboard', 'lms',
         'reports', 'reports-inventory', 'reports-procurement',
-        'reports-consumption', 'reports-accounts', 'reports-logistics',
+        'reports-consumption', 'reports-accounts',
     },
     'accounts_manager': {
         'dashboard', 'lms',
@@ -165,7 +162,7 @@ _ROLE_KEYS = {
         # inbox; reports give project-wide visibility.
         'dashboard', 'lms',
         'approvals', 'approvals-pending',
-        'inventory', 'inventory-stock-balance',
+        'inventory', 'inventory-stock-balance', 'inventory-stock-ledger',
         'reports', 'reports-inventory', 'reports-procurement',
         'reports-consumption',
     },
@@ -213,9 +210,14 @@ async def allowed_keys_for_role(db: AsyncSession, role: Role) -> List[str]:
         dynamic_keys.add(key)
         if "-" in key:
             dynamic_keys.add(key.split("-", 1)[0])
-    if dynamic_keys:
-        return sorted(dynamic_keys)
-    return sorted(_allowed_for_role(role.code))
+
+    keys = list(dynamic_keys) if dynamic_keys else list(_allowed_for_role(role.code))
+    if role.code in {"field_staff", "field_supervisor"}:
+        # Ensure field staff/supervisors can always access stock balance and stock ledger
+        for k in ["inventory", "inventory-stock-balance", "inventory-stock-ledger"]:
+            if k not in keys:
+                keys.append(k)
+    return sorted(keys)
 
 
 async def _resolve_active_role(db: AsyncSession, user: User) -> Role:

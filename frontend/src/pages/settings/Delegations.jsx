@@ -22,7 +22,6 @@ const MODULE_OPTIONS = [
   { value: 'indent',       label: 'Indent' },
   { value: 'warehouse',    label: 'Warehouse' },
   { value: 'inventory',    label: 'Inventory' },
-  { value: 'logistics',    label: 'Logistics' },
 ];
 
 const Delegations = () => {

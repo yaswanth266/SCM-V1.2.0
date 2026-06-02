@@ -12,12 +12,14 @@ from app.models.procurement import (
     MaterialRequest, MaterialRequestItem, MrIndentLink,
     Quotation, QuotationItem,
     PurchaseOrder, PurchaseOrderItem,
+    RFQ, RFQItem, RFQVendor,
 )
 from app.models.indent import Indent, IndentItem
 from app.schemas.procurement import (
     MRCreate, MRUpdate, MRResponse,
-    QuotationCreate, QuotationUpdate, QuotationResponse,
+    QuotationCreate, QuotationUpdate, QuotationResponse, RFQCreate,
     POCreate, POUpdate, POResponse, POListResponse,
+    SplitPORequest,
 )
 from app.services.number_series import generate_number
 from app.services.approval_service import submit_for_approval
@@ -33,6 +35,7 @@ PO_CREATOR_ROLES = ("super_admin", "purchase_manager", "purchase_officer", "admi
 PO_APPROVER_ROLES = ("super_admin", "purchase_manager", "admin")
 QUOTATION_ROLES = ("super_admin", "purchase_manager", "purchase_officer", "admin")
 from app.utils.helpers import paginate_params, build_paginated_response, apply_search_filter, calculate_line_amount
+from app.utils.schema_sync import ensure_rfq_schema
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -277,6 +280,242 @@ async def approve_material_request(
 
 # ==================== QUOTATIONS ====================
 
+def _rfq_key(q: Quotation) -> str:
+    return q.rfq_number or q.quotation_number
+
+
+async def _quotation_to_response_dict(db: AsyncSession, q: Quotation) -> dict:
+    data = QuotationResponse.model_validate(q).model_dump()
+    data["rfq_number"] = _rfq_key(q)
+    data["vendor_name"] = q.vendor.name if q.vendor else None
+    if q.mr_id:
+        mr_r = await db.execute(select(MaterialRequest).where(MaterialRequest.id == q.mr_id))
+        mr = mr_r.scalar_one_or_none()
+        data["mr_number"] = mr.mr_number if mr else None
+    for i, item in enumerate(q.items):
+        if i < len(data.get("items", [])):
+            if item.item:
+                data["items"][i]["item_name"] = item.item.name
+                data["items"][i]["item_code"] = item.item.item_code
+            if item.uom:
+                data["items"][i]["uom_name"] = item.uom.name
+                data["items"][i]["uom"] = item.uom.name
+    return data
+
+
+@router.get("/rfqs")
+async def list_rfqs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=500),
+    search: str = Query(None),
+    status: str = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("procurement", "view", "quotations")),
+):
+    await ensure_rfq_schema(db)
+    q_result = await db.execute(
+        select(RFQ)
+        .options(selectinload(RFQ.vendors).selectinload(RFQVendor.vendor), selectinload(RFQ.quotations))
+        .order_by(RFQ.id.desc())
+    )
+    rows = q_result.scalars().all()
+
+    items = []
+    for r in rows:
+        if search and search.lower() not in r.rfq_number.lower():
+            continue
+        if status and r.status != status:
+            continue
+        
+        vendor_names = [v.vendor.name for v in r.vendors if v.vendor and v.vendor.name]
+        items.append({
+            "id": r.id,
+            "rfq_number": r.rfq_number,
+            "mr_id": r.mr_id,
+            "rfq_date": r.rfq_date,
+            "valid_until": r.valid_until,
+            "payment_terms": r.payment_terms,
+            "with_vehicle": r.with_vehicle,
+            "remarks": r.remarks,
+            "status": r.status,
+            "vendor_count": len(r.vendors),
+            "quotation_count": len(r.quotations),
+            "submitted_count": len([q for q in r.quotations if q.status == "submitted"]),
+            "accepted_count": len([q for q in r.quotations if q.status == "accepted"]),
+            "vendor_names": vendor_names,
+        })
+
+    mr_ids = {item["mr_id"] for item in items if item["mr_id"]}
+    mr_number_map: dict[int, str] = {}
+    if mr_ids:
+        mr_r = await db.execute(select(MaterialRequest.id, MaterialRequest.mr_number).where(MaterialRequest.id.in_(mr_ids)))
+        mr_number_map = {row[0]: row[1] for row in mr_r.all()}
+    for item in items:
+        item["mr_number"] = mr_number_map.get(item["mr_id"])
+
+    total = len(items)
+    offset, limit = paginate_params(page, page_size)
+    return build_paginated_response(items[offset:offset + limit], total, page, page_size)
+
+
+@router.get("/rfqs/{rfq_number:path}")
+async def get_rfq(
+    rfq_number: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("procurement", "view", "quotations")),
+):
+    await ensure_rfq_schema(db)
+    # Segregated RFQ details loading
+    rfq_res = await db.execute(
+        select(RFQ)
+        .options(
+            selectinload(RFQ.items).selectinload(RFQItem.item),
+            selectinload(RFQ.items).selectinload(RFQItem.uom),
+        )
+        .where(RFQ.rfq_number == rfq_number)
+    )
+    rfq_row = rfq_res.scalar_one_or_none()
+    if not rfq_row:
+        raise HTTPException(status_code=404, detail="RFQ not found")
+
+    # Fetch corresponding quotations
+    q_result = await db.execute(
+        select(Quotation)
+        .options(
+            selectinload(Quotation.vendor),
+            selectinload(Quotation.items).selectinload(QuotationItem.item),
+            selectinload(Quotation.items).selectinload(QuotationItem.uom),
+        )
+        .where(Quotation.rfq_id == rfq_row.id)
+        .order_by(Quotation.id.asc())
+    )
+    quotations = q_result.scalars().unique().all()
+
+    # Pre-fill response details
+    data = {
+        "id": rfq_row.id,
+        "rfq_number": rfq_row.rfq_number,
+        "mr_id": rfq_row.mr_id,
+        "rfq_date": rfq_row.rfq_date,
+        "valid_until": rfq_row.valid_until,
+        "payment_terms": rfq_row.payment_terms,
+        "with_vehicle": rfq_row.with_vehicle,
+        "remarks": rfq_row.remarks,
+        "items": [
+            {
+                "id": line.id,
+                "item_id": line.item_id,
+                "item_code": line.item.item_code if line.item else "",
+                "item_name": line.item.name if line.item else "",
+                "qty": line.qty,
+                "uom": line.uom.name if line.uom else "",
+                "remarks": line.remarks,
+            }
+            for line in rfq_row.items
+        ],
+        "quotations": [await _quotation_to_response_dict(db, q) for q in quotations],
+    }
+    if rfq_row.mr_id:
+        mr_r = await db.execute(select(MaterialRequest).where(MaterialRequest.id == rfq_row.mr_id))
+        mr = mr_r.scalar_one_or_none()
+        if mr:
+            data["mr_number"] = mr.mr_number
+    return data
+
+
+@router.post("/rfqs", status_code=201)
+async def create_rfq(
+    payload: RFQCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_any_role(*QUOTATION_ROLES)),
+):
+    await ensure_rfq_schema(db)
+    rfq_number = await generate_number(db, "procurement", "rfq")
+    
+    # 1. Create RFQ Sourcing Event
+    rfq = RFQ(
+        rfq_number=rfq_number,
+        mr_id=payload.mr_id,
+        title=payload.title,
+        rfq_date=payload.rfq_date,
+        valid_until=payload.valid_until,
+        payment_terms=payload.payment_terms,
+        with_vehicle=payload.with_vehicle,
+        remarks=payload.remarks,
+        status="draft",
+        created_by=current_user.id,
+    )
+    db.add(rfq)
+    await db.flush()
+
+    # 2. Add RFQ Items
+    for item in payload.items:
+        rfq_item = RFQItem(
+            rfq_id=rfq.id,
+            item_id=item.item_id,
+            qty=item.qty,
+            uom_id=item.uom_id,
+            remarks=item.remarks,
+        )
+        db.add(rfq_item)
+
+    created_ids = []
+    unique_vendor_ids = list(dict.fromkeys(payload.vendor_ids))
+    
+    # 3. Invite Vendors (and pre-fill Quotation drafts)
+    for vendor_id in unique_vendor_ids:
+        db.add(RFQVendor(
+            rfq_id=rfq.id,
+            vendor_id=vendor_id,
+            status="invited",
+        ))
+        
+        quotation_number = await generate_number(db, "procurement", "quotation")
+        q = Quotation(
+            rfq_id=rfq.id,
+            rfq_number=rfq_number,
+            quotation_number=quotation_number,
+            mr_id=payload.mr_id,
+            vendor_id=vendor_id,
+            quotation_date=payload.rfq_date,
+            valid_until=payload.valid_until,
+            currency=payload.currency,
+            delivery_days=payload.delivery_days,
+            payment_terms=payload.payment_terms,
+            with_vehicle=payload.with_vehicle,
+            remarks=payload.remarks,
+            status="draft",
+            submitted_by=None,
+        )
+        db.add(q)
+        await db.flush()
+        created_ids.append(q.id)
+        
+        for item in payload.items:
+            calc = calculate_line_amount(item.qty, item.rate, item.discount_pct, item.tax_rate)
+            db.add(QuotationItem(
+                quotation_id=q.id,
+                item_id=item.item_id,
+                qty=item.qty,
+                uom_id=item.uom_id,
+                rate=item.rate,
+                discount_pct=item.discount_pct,
+                tax_rate=item.tax_rate,
+                amount=calc["total_amount"],
+                expected_delivery=(
+                    datetime.combine(item.expected_delivery, datetime.min.time(), tzinfo=timezone.utc)
+                    if item.expected_delivery else None
+                ),
+                remarks=item.remarks,
+            ))
+            
+    await db.flush()
+    return {
+        "rfq_number": rfq_number,
+        "quotation_ids": created_ids,
+        "message": f"RFQ {rfq_number} created and assigned to {len(unique_vendor_ids)} supplier(s)",
+    }
+
 @router.get("/quotations")
 async def list_quotations(
     page: int = Query(1, ge=1),
@@ -289,6 +528,7 @@ async def list_quotations(
     # R-001: read-level RBAC enforcement
     current_user: User = Depends(require_permission("procurement", "view", "quotations")),
 ):
+    await ensure_rfq_schema(db)
     offset, limit = paginate_params(page, page_size)
     query = select(Quotation).options(
         selectinload(Quotation.vendor),
@@ -348,6 +588,7 @@ async def get_quotation(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    await ensure_rfq_schema(db)
     """Quotation detail with display-friendly relationship fields.
 
     Removed response_model so mr_number, vendor_name and per-item uom get
@@ -397,13 +638,23 @@ async def create_quotation(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_any_role(*QUOTATION_ROLES)),
 ):
+    await ensure_rfq_schema(db)
     if not payload.items:
         raise HTTPException(status_code=422, detail="At least one item is required")
     q_number = await generate_number(db, "procurement", "quotation")
-    total_amount = Decimal("0")
-    tax_amount = Decimal("0")
+    total_cgst = Decimal("0")
+    total_sgst = Decimal("0")
+    total_igst = Decimal("0")
+    subtotal = Decimal("0")
+    total_tax = Decimal("0")
+
+    # Check vendor once
+    from app.models.master import Vendor as _Vendor
+    vendor_row = (await db.execute(select(_Vendor).where(_Vendor.id == payload.vendor_id))).scalar_one_or_none()
+    has_gstin = bool((getattr(vendor_row, "gst_number", None) or "").strip()) if vendor_row else False
 
     q = Quotation(
+        rfq_number=payload.rfq_number,
         quotation_number=q_number,
         mr_id=payload.mr_id,
         vendor_id=payload.vendor_id,
@@ -419,26 +670,56 @@ async def create_quotation(
     await db.flush()
 
     for item in payload.items:
-        calc = calculate_line_amount(item.qty, item.rate, item.discount_pct, item.tax_rate)
+        base = item.qty * item.rate
+        discount = base * item.discount_pct / Decimal("100")
+        net = base - discount
+
+        cgst_rate = Decimal(str(item.cgst_rate or 0))
+        sgst_rate = Decimal(str(item.sgst_rate or 0))
+        igst_rate = Decimal(str(item.igst_rate or 0))
+        tax_rate = Decimal(str(item.tax_rate or 0))
+
+        if cgst_rate == 0 and sgst_rate == 0 and igst_rate == 0 and tax_rate > 0:
+            if has_gstin:
+                cgst_rate = tax_rate / Decimal("2")
+                sgst_rate = tax_rate / Decimal("2")
+            else:
+                igst_rate = tax_rate
+        else:
+            tax_rate = cgst_rate + sgst_rate + igst_rate
+
+        cgst = net * cgst_rate / Decimal("100")
+        sgst = net * sgst_rate / Decimal("100")
+        igst = net * igst_rate / Decimal("100")
+        item_tax = cgst + sgst + igst
+        amount = net + item_tax
+
         qi = QuotationItem(
             quotation_id=q.id, item_id=item.item_id, qty=item.qty,
             uom_id=item.uom_id, rate=item.rate, discount_pct=item.discount_pct,
-            tax_rate=item.tax_rate, amount=calc["total_amount"],
+            tax_rate=tax_rate, cgst_rate=cgst_rate, sgst_rate=sgst_rate, igst_rate=igst_rate,
+            amount=amount,
+            expected_delivery=(
+                datetime.combine(item.expected_delivery, datetime.min.time(), tzinfo=timezone.utc)
+                if item.expected_delivery else None
+            ),
+            remarks=item.remarks,
         )
         db.add(qi)
-        total_amount += calc["net_amount"]
-        tax_amount += calc["tax_amount"]
+        subtotal += net
+        total_cgst += cgst
+        total_sgst += sgst
+        total_igst += igst
+        total_tax += item_tax
 
-    q.total_amount = total_amount
-    q.tax_amount = tax_amount
-    q.grand_total = total_amount + tax_amount
+    q.subtotal = subtotal
+    q.total_amount = subtotal
+    q.cgst_amount = total_cgst
+    q.sgst_amount = total_sgst
+    q.igst_amount = total_igst
+    q.tax_amount = total_tax
+    q.grand_total = subtotal + total_tax
     q.status = "submitted"
-    await db.flush()
-
-    # 2026-05-06 — quotations are NOT approved via the workflow engine.
-    # Admin / super_admin do the finalization on the Quotation Comparison
-    # screen (pick winning vendor → convert to PO). The PO itself still
-    # has its own admin → super_admin chain.
     return {"id": q.id, "quotation_number": q_number, "message": "Quotation submitted"}
 
 
@@ -452,7 +733,7 @@ async def update_quotation(
     # user mutate quotation fields.
     current_user: User = Depends(require_any_role(*QUOTATION_ROLES)),
 ):
-    result = await db.execute(select(Quotation).where(Quotation.id == quotation_id))
+    result = await db.execute(select(Quotation).options(selectinload(Quotation.items)).where(Quotation.id == quotation_id))
     q = result.scalar_one_or_none()
     if not q:
         raise HTTPException(status_code=404, detail="Quotation not found")
@@ -463,11 +744,82 @@ async def update_quotation(
         "status",
         "quotation_number",
         "vendor_id",
+        "items",  # handled separately below
     }
     for k, v in payload.model_dump(exclude_unset=True).items():
         if k in _QUOTATION_PUT_DENY:
             continue
-        setattr(q, k, v)
+        if hasattr(q, k):
+            setattr(q, k, v)
+
+    # If items are provided, replace existing items and recalculate all totals
+    if payload.items is not None:
+        # Check vendor GSTIN for CGST/SGST compliance
+        from app.models.master import Vendor as _Vendor
+        vendor_row = (await db.execute(select(_Vendor).where(_Vendor.id == q.vendor_id))).scalar_one_or_none()
+        has_gstin = bool((getattr(vendor_row, "gst_number", None) or "").strip()) if vendor_row else False
+
+        # Delete old items
+        for old_item in q.items:
+            await db.delete(old_item)
+        await db.flush()
+
+        subtotal = Decimal("0")
+        total_cgst = Decimal("0")
+        total_sgst = Decimal("0")
+        total_igst = Decimal("0")
+        total_tax = Decimal("0")
+
+        for item in payload.items:
+            base = item.qty * item.rate
+            discount = base * item.discount_pct / Decimal("100")
+            net = base - discount
+
+            cgst_rate = Decimal(str(item.cgst_rate or 0))
+            sgst_rate = Decimal(str(item.sgst_rate or 0))
+            igst_rate = Decimal(str(item.igst_rate or 0))
+            tax_rate = Decimal(str(item.tax_rate or 0))
+
+            if cgst_rate == 0 and sgst_rate == 0 and igst_rate == 0 and tax_rate > 0:
+                if has_gstin:
+                    cgst_rate = tax_rate / Decimal("2")
+                    sgst_rate = tax_rate / Decimal("2")
+                else:
+                    igst_rate = tax_rate
+            else:
+                tax_rate = cgst_rate + sgst_rate + igst_rate
+
+            cgst = net * cgst_rate / Decimal("100")
+            sgst = net * sgst_rate / Decimal("100")
+            igst = net * igst_rate / Decimal("100")
+            item_tax = cgst + sgst + igst
+            amount = net + item_tax
+
+            db.add(QuotationItem(
+                quotation_id=q.id, item_id=item.item_id, qty=item.qty,
+                uom_id=item.uom_id, rate=item.rate, discount_pct=item.discount_pct,
+                tax_rate=tax_rate, cgst_rate=cgst_rate, sgst_rate=sgst_rate, igst_rate=igst_rate,
+                amount=amount,
+                expected_delivery=(
+                    datetime.combine(item.expected_delivery, datetime.min.time(), tzinfo=timezone.utc)
+                    if item.expected_delivery else None
+                ),
+                remarks=item.remarks,
+            ))
+            subtotal += net
+            total_cgst += cgst
+            total_sgst += sgst
+            total_igst += igst
+            total_tax += item_tax
+
+        q.subtotal = subtotal
+        q.total_amount = subtotal
+        q.cgst_amount = total_cgst
+        q.sgst_amount = total_sgst
+        q.igst_amount = total_igst
+        q.tax_amount = total_tax
+        q.grand_total = subtotal + total_tax
+
     await db.flush()
     return {"success": True, "message": "Quotation updated"}
 
@@ -1564,6 +1916,40 @@ async def create_po_from_quotation(
     except Exception:
         pass
 
+    # Fetch warehouse to dynamically generate billing and shipping addresses
+    billing_address = None
+    shipping_address = None
+    if source_warehouse_id:
+        from app.models.warehouse import Warehouse
+        w_res = await db.execute(
+            select(Warehouse).options(sl(Warehouse.organization)).where(Warehouse.id == source_warehouse_id)
+        )
+        warehouse_row = w_res.scalar_one_or_none()
+        if warehouse_row:
+            if warehouse_row.organization:
+                org = warehouse_row.organization
+                org_parts = [
+                    org.name,
+                    org.address,
+                    f"GSTIN: {org.gst_number}" if org.gst_number else None,
+                    f"PAN: {org.pan_number}" if org.pan_number else None,
+                    f"Phone: {org.phone}" if org.phone else None,
+                    f"Email: {org.email}" if org.email else None
+                ]
+                billing_address = "\n".join([p for p in org_parts if p])
+            
+            ship_parts = [
+                warehouse_row.name,
+                warehouse_row.address_line1,
+                warehouse_row.address_line2,
+                warehouse_row.city,
+                warehouse_row.state,
+                warehouse_row.pincode,
+                f"Contact: {warehouse_row.contact_person}" if warehouse_row.contact_person else None,
+                f"Phone: {warehouse_row.phone}" if warehouse_row.phone else None
+            ]
+            shipping_address = "\n".join([str(p) for p in ship_parts if p])
+
     po_number = await generate_number(db, "procurement", "purchase_order")
     subtotal = Decimal("0")
     total_tax = Decimal("0")
@@ -1577,6 +1963,8 @@ async def create_po_from_quotation(
         project_id=source_project_id,
         po_date=datetime.now(timezone.utc).date(),
         expected_delivery_date=source_expected_delivery,
+        billing_address=billing_address,
+        shipping_address=shipping_address,
         # BUG-PRO-056 fix: payment_terms_days is the credit window; quotation
         # has no payment_terms_days column, so default to a sane 30-day net.
         # The quotation.delivery_days field reflects lead time and must NOT be
@@ -1596,20 +1984,31 @@ async def create_po_from_quotation(
     # PO created from a quotation isn't silently zero-tax. Quotation has a
     # single tax_rate column; we split 50/50 into CGST+SGST when vendor has a
     # GSTIN, else apply the whole rate as IGST.
+    total_cgst = Decimal("0")
+    total_sgst = Decimal("0")
+    total_igst = Decimal("0")
+
     for item in quotation.items:
         item_disc_pct = Decimal(str(item.discount_pct or 0))
-        item_tax_rate = Decimal(str(item.tax_rate or 0))
         base = Decimal(str(item.qty)) * Decimal(str(item.rate))
         disc_amt = base * item_disc_pct / Decimal("100")
         net = base - disc_amt
-        if has_gstin:
-            cgst_rate = item_tax_rate / Decimal("2")
-            sgst_rate = item_tax_rate / Decimal("2")
-            igst_rate = Decimal("0")
-        else:
-            cgst_rate = Decimal("0")
-            sgst_rate = Decimal("0")
-            igst_rate = item_tax_rate
+
+        cgst_rate = Decimal(str(getattr(item, "cgst_rate", 0) or 0))
+        sgst_rate = Decimal(str(getattr(item, "sgst_rate", 0) or 0))
+        igst_rate = Decimal(str(getattr(item, "igst_rate", 0) or 0))
+        item_tax_rate = Decimal(str(item.tax_rate or 0))
+
+        if cgst_rate == 0 and sgst_rate == 0 and igst_rate == 0 and item_tax_rate > 0:
+            if has_gstin:
+                cgst_rate = item_tax_rate / Decimal("2")
+                sgst_rate = item_tax_rate / Decimal("2")
+                igst_rate = Decimal("0")
+            else:
+                cgst_rate = Decimal("0")
+                sgst_rate = Decimal("0")
+                igst_rate = item_tax_rate
+
         cgst_amt = net * cgst_rate / Decimal("100")
         sgst_amt = net * sgst_rate / Decimal("100")
         igst_amt = net * igst_rate / Decimal("100")
@@ -1627,14 +2026,274 @@ async def create_po_from_quotation(
         )
         db.add(poi)
         subtotal += net
+        total_cgst += cgst_amt
+        total_sgst += sgst_amt
+        total_igst += igst_amt
         total_tax += tax
 
     po.subtotal = subtotal
+    po.cgst_amount = total_cgst
+    po.sgst_amount = total_sgst
+    po.igst_amount = total_igst
     po.tax_amount = total_tax
-    po.grand_total = subtotal + total_tax
+    if quotation.with_vehicle and quotation.vehicle_cost:
+        po.remarks = (po.remarks or "") + f" | Includes vehicle cost: {quotation.vehicle_cost}"
+        po.grand_total = subtotal + total_tax + Decimal(str(quotation.vehicle_cost or 0))
+    else:
+        po.grand_total = subtotal + total_tax
 
     # Mark quotation as accepted
     quotation.status = "accepted"
     await db.flush()
 
     return {"id": po.id, "po_number": po_number, "message": f"Purchase order {po_number} created from quotation"}
+
+
+@router.post("/purchase-orders/consolidate-split", status_code=201)
+async def create_split_po(
+    payload: SplitPORequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_any_role("super_admin", "admin")),
+):
+    """Create split Purchase Orders from selected quotation items."""
+    if not payload.awards:
+        raise HTTPException(status_code=400, detail="No award items specified")
+
+    # Group awards by vendor_id
+    from collections import defaultdict
+    grouped_awards = defaultdict(list)
+    for award in payload.awards:
+        grouped_awards[award.vendor_id].append(award)
+
+    # Validate that total award quantity for each item does not exceed required quantity in the RFQ
+    if payload.rfq_number:
+        from app.models.procurement import RFQItem, RFQ
+        rfq_items_res = await db.execute(
+            select(RFQItem)
+            .join(RFQ)
+            .where(RFQ.rfq_number == payload.rfq_number)
+        )
+        rfq_items = rfq_items_res.scalars().all()
+        req_qty_map = {ri.item_id: float(ri.qty or 0) for ri in rfq_items}
+
+        # Sum up award quantities per item
+        awarded_qty_map = defaultdict(float)
+        for award in payload.awards:
+            awarded_qty_map[award.item_id] += float(award.qty or 0)
+
+        # Check for excess awards
+        for item_id, total_awarded in awarded_qty_map.items():
+            req_qty = req_qty_map.get(item_id, 0.0)
+            if total_awarded > req_qty + 0.0001:
+                from app.models.master import Item as _Item
+                item_name_row = (await db.execute(
+                    select(_Item.name, _Item.item_code).where(_Item.id == item_id)
+                )).first()
+                item_label = f"'{item_name_row[0]}' ({item_name_row[1]})" if item_name_row else f"ID {item_id}"
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Total awarded quantity ({total_awarded}) for item {item_label} "
+                        f"exceeds the required quantity ({req_qty})"
+                    ),
+                )
+
+    created_pos = []
+
+    for vendor_id, awards in grouped_awards.items():
+        # Validate active vendor
+        from app.models.master import Vendor as _Vendor
+        _v_row = (await db.execute(
+            select(_Vendor).where(_Vendor.id == vendor_id)
+        )).scalar_one_or_none()
+        if _v_row is not None and not getattr(_v_row, "is_active", True):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Vendor '{_v_row.name}' is inactive — cannot raise a PO",
+            )
+
+        # Get the quotation referenced by the first award item for this vendor
+        first_award = awards[0]
+        from sqlalchemy.orm import selectinload as sl
+        q_res = await db.execute(
+            select(Quotation).options(
+                sl(Quotation.items).selectinload(QuotationItem.item),
+                sl(Quotation.items).selectinload(QuotationItem.uom),
+            ).where(Quotation.id == first_award.quotation_id)
+        )
+        quotation = q_res.scalar_one_or_none()
+        if not quotation:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Quotation with ID {first_award.quotation_id} not found",
+            )
+
+        # Pull warehouse / project / expected delivery from the linked MR
+        source_warehouse_id = None
+        source_project_id = None
+        source_expected_delivery = None
+        mr_id_to_use = payload.mr_id or quotation.mr_id
+        if mr_id_to_use:
+            mr_r = await db.execute(
+                select(MaterialRequest).where(MaterialRequest.id == mr_id_to_use)
+            )
+            mr_row = mr_r.scalar_one_or_none()
+            if mr_row:
+                source_warehouse_id = mr_row.warehouse_id
+                source_project_id = mr_row.project_id
+                source_expected_delivery = mr_row.required_date
+
+        try:
+            from datetime import date as _date
+            today = _date.today()
+            if source_expected_delivery is not None:
+                sed = (
+                    source_expected_delivery.date()
+                    if hasattr(source_expected_delivery, "date")
+                    else source_expected_delivery
+                )
+                if sed < today:
+                    source_expected_delivery = today
+        except Exception:
+            pass
+
+        # Fetch warehouse to dynamically generate billing and shipping addresses
+        billing_address = None
+        shipping_address = None
+        if source_warehouse_id:
+            from app.models.warehouse import Warehouse
+            w_res = await db.execute(
+                select(Warehouse).options(sl(Warehouse.organization)).where(Warehouse.id == source_warehouse_id)
+            )
+            warehouse_row = w_res.scalar_one_or_none()
+            if warehouse_row:
+                if warehouse_row.organization:
+                    org = warehouse_row.organization
+                    org_parts = [
+                        org.name,
+                        org.address,
+                        f"GSTIN: {org.gst_number}" if org.gst_number else None,
+                        f"PAN: {org.pan_number}" if org.pan_number else None,
+                        f"Phone: {org.phone}" if org.phone else None,
+                        f"Email: {org.email}" if org.email else None
+                    ]
+                    billing_address = "\n".join([p for p in org_parts if p])
+                
+                ship_parts = [
+                    warehouse_row.name,
+                    warehouse_row.address_line1,
+                    warehouse_row.address_line2,
+                    warehouse_row.city,
+                    warehouse_row.state,
+                    warehouse_row.pincode,
+                    f"Contact: {warehouse_row.contact_person}" if warehouse_row.contact_person else None,
+                    f"Phone: {warehouse_row.phone}" if warehouse_row.phone else None
+                ]
+                shipping_address = "\n".join([str(p) for p in ship_parts if p])
+
+        po_number = await generate_number(db, "procurement", "purchase_order")
+        subtotal = Decimal("0")
+        total_tax = Decimal("0")
+
+        po = PurchaseOrder(
+            po_number=po_number,
+            vendor_id=vendor_id,
+            mr_id=mr_id_to_use,
+            quotation_id=quotation.id,
+            warehouse_id=source_warehouse_id,
+            project_id=source_project_id,
+            po_date=datetime.now(timezone.utc).date(),
+            expected_delivery_date=source_expected_delivery,
+            billing_address=billing_address,
+            shipping_address=shipping_address,
+            payment_terms_days=30,
+            remarks=f"Consolidated Split-PO raised from RFQ {payload.rfq_number}",
+            created_by=current_user.id,
+        )
+        db.add(po)
+        await db.flush()
+
+        has_gstin = bool((getattr(_v_row, "gst_number", None) or "").strip()) if _v_row else False
+        total_cgst = Decimal("0")
+        total_sgst = Decimal("0")
+        total_igst = Decimal("0")
+        q_items_map = {qi.item_id: qi for qi in quotation.items}
+
+        for award in awards:
+            if award.item_id not in q_items_map:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Item {award.item_id} not found in quotation {quotation.quotation_number}",
+                )
+            qi = q_items_map[award.item_id]
+
+            item_disc_pct = Decimal(str(qi.discount_pct or 0))
+            item_tax_rate = Decimal(str(qi.tax_rate or 0))
+            
+            rate = award.rate if award.rate is not None else qi.rate
+            base = award.qty * rate
+            disc_amt = base * item_disc_pct / Decimal("100")
+            net = base - disc_amt
+
+            cgst_rate = Decimal(str(getattr(qi, "cgst_rate", 0) or 0))
+            sgst_rate = Decimal(str(getattr(qi, "sgst_rate", 0) or 0))
+            igst_rate = Decimal(str(getattr(qi, "igst_rate", 0) or 0))
+
+            if cgst_rate == 0 and sgst_rate == 0 and igst_rate == 0 and item_tax_rate > 0:
+                if has_gstin:
+                    cgst_rate = item_tax_rate / Decimal("2")
+                    sgst_rate = item_tax_rate / Decimal("2")
+                    igst_rate = Decimal("0")
+                else:
+                    cgst_rate = Decimal("0")
+                    sgst_rate = Decimal("0")
+                    igst_rate = item_tax_rate
+
+            cgst_amt = net * cgst_rate / Decimal("100")
+            sgst_amt = net * sgst_rate / Decimal("100")
+            igst_amt = net * igst_rate / Decimal("100")
+            tax = cgst_amt + sgst_amt + igst_amt
+            amount = net + tax
+
+            poi = PurchaseOrderItem(
+                po_id=po.id,
+                item_id=award.item_id,
+                qty=award.qty,
+                uom_id=qi.uom_id,
+                rate=rate,
+                discount_pct=item_disc_pct,
+                cgst_rate=cgst_rate,
+                sgst_rate=sgst_rate,
+                igst_rate=igst_rate,
+                tax_amount=tax,
+                amount=amount,
+            )
+            db.add(poi)
+            subtotal += net
+            total_cgst += cgst_amt
+            total_sgst += sgst_amt
+            total_igst += igst_amt
+            total_tax += tax
+
+        po.subtotal = subtotal
+        po.cgst_amount = total_cgst
+        po.sgst_amount = total_sgst
+        po.igst_amount = total_igst
+        po.tax_amount = total_tax
+        if quotation.with_vehicle and quotation.vehicle_cost:
+            po.remarks = (po.remarks or "") + f" | Includes vehicle cost: {quotation.vehicle_cost}"
+            po.grand_total = subtotal + total_tax + Decimal(str(quotation.vehicle_cost or 0))
+        else:
+            po.grand_total = subtotal + total_tax
+
+        # Update quotation status
+        quotation.status = "accepted"
+        await db.flush()
+        created_pos.append({"id": po.id, "po_number": po.po_number, "vendor_name": _v_row.name if _v_row else f"Vendor ID {vendor_id}"})
+
+    await db.commit()
+    return {
+        "success": True,
+        "message": f"Successfully created {len(created_pos)} split Purchase Orders",
+        "purchase_orders": created_pos
+    }

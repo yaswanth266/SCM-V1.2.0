@@ -139,36 +139,29 @@ async def list_indents(
         count_query = count_query.where(Indent.id.in_(with_remaining))
 
     # ACCESS SCOPING — strict role-based.
-    # • Managerial roles (super_admin/admin/warehouse_manager/etc.) see
-    #   everything.
-    # • Field-only roles (field_staff/field_supervisor/nurse/etc.) see
-    #   ONLY indents they raised. They never see other people's indents
-    #   even within the same warehouse.
-    # • Other operator roles (warehouse_operator, store_keeper, etc.)
-    #   see indents they raised PLUS indents on warehouses they're
-    #   assigned to via user_warehouses.
-    #
-    # The previous logic OR'd in `Indent.project_id IS NULL` as a
-    # universal allow, which leaked every project-less indent to every
-    # field user. That's removed.
-    # field_supervisor is the L1 approver — they need to see indents in their
-    # warehouse/project scope (raised by field_staff under them), not just
-    # ones they raised themselves. Removed from the hard-scope set 2026-05-05.
+    # • Super admin / admin: see everything (org-wide).
+    # • warehouse_manager / store_keeper: see ALL approved/partially_fulfilled
+    #   indents org-wide. These roles physically issue material from main
+    #   warehouses to FULFILL indents raised by field staff. The indent's
+    #   warehouse_id is the DESTINATION (field vehicle / virtual warehouse),
+    #   NOT the issuing warehouse. Scoping to their assigned warehouses would
+    #   hide every field-staff indent they are responsible for fulfilling.
+    # • purchase_manager: org-wide view for procurement coordination.
+    # • Field-only roles (field_staff/field_user/etc.): ONLY their own indents.
+    # • Other operator roles (warehouse_operator, etc.): own + assigned warehouse.
     _FIELD_ONLY_CODES = frozenset({
         "field_staff", "field_user", "field_operator",
         "nurse", "pharmacy_assistant", "site_user",
     })
+    # Roles that need org-wide visibility to do their job properly.
+    _ORG_WIDE_CODES = frozenset({
+        "super_admin", "admin",
+        "warehouse_manager", "store_keeper", "purchase_manager",
+    })
     from app.utils.dependencies import get_user_role_codes
     role_codes = set(await get_user_role_codes(db, current_user.id))
-    is_admin = bool({"super_admin", "admin"} & role_codes)
+    is_admin = bool(_ORG_WIDE_CODES & role_codes)
     if not is_admin:
-        # 2026-05-06: warehouse-bound managers (warehouse_manager,
-        # purchase_manager, etc.) were leaking through user_is_managerial
-        # which gave them an org-wide view including pending_approval
-        # indents in warehouses they don't belong to. They are still
-        # managerial in *capability* but visibility must stay within their
-        # assigned warehouses + projects. Only super_admin / admin see
-        # cross-warehouse.
         is_field_only = (
             bool(role_codes)
             and role_codes.issubset(_FIELD_ONLY_CODES)
@@ -198,6 +191,7 @@ async def list_indents(
                 pass
             query = query.where(scope)
             count_query = count_query.where(scope)
+
 
     query = apply_search_filter(query, Indent, search, ["indent_number", "department"])
     count_query = apply_search_filter(count_query, Indent, search, ["indent_number", "department"])
@@ -269,12 +263,30 @@ async def list_indents(
                     "can_approve_now": bool(can_now),
                 }
 
+    # Resolve user display names for raised_by / approved_by in bulk
+    all_user_ids = set()
+    for ind in indents:
+        if ind.raised_by:
+            all_user_ids.add(ind.raised_by)
+        if ind.approved_by:
+            all_user_ids.add(ind.approved_by)
+    
+    user_map: dict[int, str] = {}
+    if all_user_ids:
+        from app.models.user import User as UserModel
+        user_rows = await db.execute(select(UserModel).where(UserModel.id.in_(all_user_ids)))
+        for u in user_rows.scalars().all():
+            full = f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username
+            user_map[u.id] = full
+
     response_items = []
     for ind in indents:
         data = IndentResponse.model_validate(ind).model_dump()
         data["warehouse_name"] = ind.warehouse.name if ind.warehouse else None
         # Bug fix BUG_0042: surface project name for the list view column
         data["project_name"] = ind.project.name if ind.project else None
+        data["raised_by_name"] = user_map.get(ind.raised_by)
+        data["approved_by_name"] = user_map.get(ind.approved_by)
         # Workflow gating fields (None when no workflow / not pending).
         # `can_approve_now` defaults to False when workflow_meta is missing —
         # absence means we have no ApprovalRequest row to check the user
@@ -1674,6 +1686,13 @@ async def _create_acknowledgement(
         )
         db.add(ack_item)
 
+        # Update IndentItem fulfillment status
+        if item.indent_item_id:
+            for ind_item in indent.items:
+                if ind_item.id == item.indent_item_id:
+                    ind_item.fulfillment_status = "acknowledged"
+                    db.add(ind_item)
+
     # BUG-IND-052 — advance the parent indent's status when an ack
     # completes the order. We aggregate every prior ack on this indent
     # plus the lines we just added, and:
@@ -1711,6 +1730,45 @@ async def _create_acknowledgement(
     except Exception:
         # Status-advancement is best-effort; never let it block the ack itself.
         pass
+
+    # Route status to respective logistics dispatch (MDO) and MaterialIssue
+    try:
+        from app.models.logistics import LogisticsMainDispatchOrder
+        from app.models.issue import MaterialIssue
+
+        res_mdo = await db.execute(
+            select(LogisticsMainDispatchOrder)
+            .where(LogisticsMainDispatchOrder.indent_id == indent.id)
+            .where(LogisticsMainDispatchOrder.status.in_(["IN_TRANSIT", "COMPLETED", "DISPATCHED"]))
+        )
+        mdos = res_mdo.scalars().all()
+        for mdo in mdos:
+            mdo.status = "ACKNOWLEDGED"
+            db.add(mdo)
+
+            # Record activity log for logistics dispatch update
+            from app.models.system import ActivityLog
+            db.add(ActivityLog(
+                user_id=current_user.id,
+                module="logistics",
+                action="mdo_acknowledged",
+                entity_type="dispatch",
+                entity_id=mdo.id,
+                description=f"Dispatch plan {mdo.mdo_number} acknowledged via indent portal receipt."
+            ))
+
+            # Set the linked Material Issue to 'acknowledged'
+            if mdo.material_issue_id:
+                res_mi = await db.execute(
+                    select(MaterialIssue).where(MaterialIssue.id == mdo.material_issue_id)
+                )
+                mi = res_mi.scalar_one_or_none()
+                if mi and mi.status not in ("acknowledged", "completed"):
+                    mi.status = "acknowledged"
+                    db.add(mi)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Failed to update linked logistics dispatch to ACKNOWLEDGED.")
 
     # BUG-AUD-001 — record acknowledgement in activity_logs.
     try:

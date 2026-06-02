@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import delete, select, func, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import aliased, selectinload
 from app.config import settings
 from app.database import get_db
 from app.models.user import Role, User, UserRole
@@ -18,7 +18,7 @@ from app.models.master import (
     PriceList, PriceListItem,
     Brand, Feature, ItemFeature, ItemAttribute, ItemAttributeValue,
     UserGroup, UserGroupMember, UserGroupPermission,
-    UserItemPermission, EmployeeItemPermission,
+    UserItemPermission, RoleItemPermission,
     Office, Position, Employee,
 )
 from app.models.warehouse import Warehouse, WarehouseLocation, WarehouseLine, WarehouseRack, WarehouseBin
@@ -40,7 +40,7 @@ from app.schemas.master import (
 from app.models.user import Organization, Project
 from app.utils.dependencies import get_current_user, require_permission
 from app.utils.helpers import paginate_params, build_paginated_response, apply_search_filter
-from app.utils.schema_sync import ensure_feature_schema, ensure_uom_enterprise_schema, ensure_uom_category_schema, ensure_item_category_code_schema, ensure_vendor_type_schema, ensure_organization_structure_schema, ensure_user_item_permission_schema, ensure_item_uom_category_schema
+from app.utils.schema_sync import ensure_feature_schema, ensure_uom_enterprise_schema, ensure_uom_category_schema, ensure_item_category_code_schema, ensure_vendor_type_schema, ensure_organization_structure_schema, ensure_user_item_permission_schema, ensure_item_uom_category_schema, ensure_supplier_portal_schema
 
 router = APIRouter()
 
@@ -849,6 +849,29 @@ async def _get_parent_category_ids(db: AsyncSession, category_id: int) -> list[i
     return ids
 
 
+async def _get_descendant_category_ids(db: AsyncSession, category_id: int) -> list[int]:
+    """Return a list of category IDs including the given ID and all its active descendants."""
+    ids = [category_id]
+    # Level 1 to 2
+    res = await db.execute(
+        select(ItemCategory.id)
+        .where(ItemCategory.parent_id == category_id, ItemCategory.is_active == True)
+    )
+    level2_ids = [row[0] for row in res.all()]
+    if level2_ids:
+        ids.extend(level2_ids)
+        # Level 2 to 3
+        res3 = await db.execute(
+            select(ItemCategory.id)
+            .where(ItemCategory.parent_id.in_(level2_ids), ItemCategory.is_active == True)
+        )
+        level3_ids = [row[0] for row in res3.all()]
+        if level3_ids:
+            ids.extend(level3_ids)
+    return ids
+
+
+
 async def _category_level(db: AsyncSession, parent_id: int | None) -> int:
     if not parent_id:
         return 1
@@ -1072,16 +1095,22 @@ async def _check_items_view_permission(db: AsyncSession, current_user: User) -> 
     if "super_admin" in role_codes or "admin" in role_codes:
         return
     perms = set(await get_user_permissions(db, current_user.id))
-    if not (perms & {
-        "masters.view.items",
-        "procurement.view.purchase_orders",
-        "procurement.view.material_requests",
-        "procurement.view.quotations",
-        "procurement.view.indents",
-        "warehouse.view.grn", "warehouse.view.stock", "warehouse.view.bins",
-        "accounts.view.invoices", "accounts.view.payments",
-        "sales.view.orders", "sales.view.invoices",
-    }):
+    allowed_modules = {
+        "masters", "masters-items", "procurement", "procurement-purchase-orders",
+        "procurement-material-requests", "procurement-quotations", "procurement-indents",
+        "indent", "indent-indents", "consumption", "consumption-entry", "warehouse",
+        "warehouse-grn", "warehouse-stock", "warehouse-bins", "inventory",
+        "inventory-stock-balance", "inventory-stock-ledger", "accounts", "accounts-invoices",
+        "sales", "sales-orders", "sales-invoices"
+    }
+    has_item_access = False
+    for perm in perms:
+        parts = perm.split('.')
+        if len(parts) == 3:
+            if parts[0] in allowed_modules:
+                has_item_access = True
+                break
+    if not has_item_access:
         raise HTTPException(status_code=403, detail="Permission denied: masters.view.items")
 
 
@@ -1249,8 +1278,9 @@ async def list_items(
         )
 
     if category_id:
-        query = query.where(Item.category_id == category_id)
-        count_query = count_query.where(Item.category_id == category_id)
+        descendant_ids = await _get_descendant_category_ids(db, category_id)
+        query = query.where(Item.category_id.in_(descendant_ids))
+        count_query = count_query.where(Item.category_id.in_(descendant_ids))
     if feature_id:
         feature_match = select(ItemFeature.id).where(
             ItemFeature.item_id == Item.id,
@@ -1391,9 +1421,17 @@ async def create_item(
     if data.get("dosage_form"):
         data["dosage_form_code"] = normalize_form_code(data["dosage_form"])
 
+    # Automatically set has_serial = True for asset/equipment types
+    item_type_lower = (data.get("item_type") or "").lower()
+    asset_keywords = ['asset', 'equipment', 'laptop', 'computer', 'it', 'fixed']
+    if any(kw in item_type_lower for kw in asset_keywords):
+        data["has_serial"] = True
+
     item = Item(**data, created_by=current_user.id)
     if payload.item_type == "equipment" and not payload.dosage_form:
         item.dosage_form = "unit"
+    if any(kw in item_type_lower for kw in asset_keywords):
+        item.has_serial = True
     db.add(item)
     await db.flush()
     await _replace_item_features(db, int(item.id), validated_feature_ids)
@@ -1442,6 +1480,7 @@ async def update_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     update_data = payload.model_dump(exclude_unset=True)
+    update_data.pop("category_id", None)
     explicit_feature_update = "feature_ids" in payload.model_fields_set or "feature_id" in payload.model_fields_set
     incoming_feature_ids = update_data.pop("feature_ids", None) if "feature_ids" in update_data else None
     incoming_feature_id = update_data.get("feature_id") if "feature_id" in update_data else None
@@ -1475,11 +1514,29 @@ async def update_item(
         uom_validation_data = dict(update_data)
         uom_validation_data["primary_uom_id"] = item.primary_uom_id
         await _normalize_item_uom_category(db, uom_validation_data)
+
+    min_q = update_data.get("min_order_qty")
+    if min_q is None:
+        min_q = item.min_order_qty
+    max_q = update_data.get("max_order_qty")
+    if max_q is None:
+        max_q = item.max_order_qty
+
+    if min_q is not None and max_q is not None and min_q > 0 and max_q > 0 and min_q >= max_q:
+        raise HTTPException(status_code=422, detail="Min order qty must be less than max order qty")
+
     for k, v in update_data.items():
         setattr(item, k, v)
     # Auto-set dosage_form for equipment if not explicitly provided
     if item.item_type == "equipment" and not item.dosage_form:
         item.dosage_form = "unit"
+
+    # Automatically set has_serial = True for asset/equipment types
+    item_type_lower = (item.item_type or "").lower()
+    asset_keywords = ['asset', 'equipment', 'laptop', 'computer', 'it', 'fixed']
+    if any(kw in item_type_lower for kw in asset_keywords):
+        item.has_serial = True
+
     await db.flush()
     await _replace_item_features(db, int(item.id), validated_feature_ids)
     return {"success": True, "message": "Item updated"}
@@ -1659,13 +1716,13 @@ async def deactivate_item(
         sb_count = (await db.execute(
             select(func.count(StockBalance.id)).where(
                 StockBalance.item_id == item_id,
-                (StockBalance.quantity != 0) | (StockBalance.reserved_qty != 0),
+                (StockBalance.total_qty != 0) | (StockBalance.reserved_qty != 0),
             )
         )).scalar() or 0
         if sb_count:
             refs.append(f"{sb_count} active stock balance(s)")
-    except Exception:
-        # stock model may differ; fall through silently
+    except Exception as exc:
+        print(f"Error in deactivate_item stock check: {exc}")
         pass
     vi_count = (await db.execute(
         select(func.count(VendorItem.id)).where(VendorItem.item_id == item_id)
@@ -1674,12 +1731,14 @@ async def deactivate_item(
         refs.append(f"{vi_count} vendor-item link(s)")
 
     if refs and not force:
+        has_stock = any("stock balance" in r for r in refs)
+        if has_stock:
+            detail_msg = "Cannot deactivate this item because there is still active stock in the warehouse. Please ensure the stock quantity is 0 before deactivating."
+        else:
+            detail_msg = "Cannot deactivate this item because it is currently linked to active vendors."
         raise HTTPException(
             status_code=409,
-            detail=(
-                "Cannot deactivate item — referenced by " + ", ".join(refs) +
-                ". Clear references first or pass ?force=true."
-            ),
+            detail=detail_msg,
         )
 
     item.is_active = False
@@ -1747,6 +1806,7 @@ def _vendor_response_dict(
     type_map: dict[int, list[VendorType]],
     primary_map: dict[int, VendorType],
     category_map: dict[int, VendorCategory] | None = None,
+    login_vendor_ids: set[int] | None = None,
 ) -> dict:
     types = type_map.get(vendor.id, [])
     primary = primary_map.get(vendor.id) or (types[0] if types else None)
@@ -1790,6 +1850,7 @@ def _vendor_response_dict(
         "license_doc_url": vendor.license_doc_url,
         "vendor_compliance_status": vendor.vendor_compliance_status,
         "is_active": vendor.is_active,
+        "has_login": (login_vendor_ids is not None and vendor.id in login_vendor_ids),
         "status": "active" if vendor.is_active else "inactive",
         "created_at": vendor.created_at,
     }
@@ -2887,8 +2948,15 @@ async def list_vendors(
     type_map, primary_map = await _vendor_type_maps(db, [v.id for v in vendors])
     category_map = await _vendor_category_map(db, [v.id for v in vendors])
 
+    # Fetch logins for these vendors to populate has_login
+    from app.models.vendor_portal import VendorUser
+    login_res = await db.execute(
+        select(VendorUser.vendor_id).where(VendorUser.vendor_id.in_([v.id for v in vendors]))
+    ) if vendors else None
+    login_vendor_ids = set(login_res.scalars().all()) if login_res else set()
+
     return build_paginated_response(
-        [_vendor_response_dict(v, type_map, primary_map, category_map) for v in vendors], total, page, page_size
+        [_vendor_response_dict(v, type_map, primary_map, category_map, login_vendor_ids) for v in vendors], total, page, page_size
     )
 
 
@@ -2917,7 +2985,11 @@ async def get_vendor(
         raise HTTPException(status_code=404, detail="Vendor not found")
     type_map, primary_map = await _vendor_type_maps(db, [vendor.id])
     category_map = await _vendor_category_map(db, [vendor.id])
-    return _vendor_response_dict(vendor, type_map, primary_map, category_map)
+    from app.models.vendor_portal import VendorUser
+    login_exists = await db.scalar(
+        select(func.count(VendorUser.id)).where(VendorUser.vendor_id == vendor.id)
+    )
+    return _vendor_response_dict(vendor, type_map, primary_map, category_map, {vendor.id} if login_exists else set())
 
 
 @router.post("/vendors", status_code=201)
@@ -3395,11 +3467,7 @@ async def bulk_map_vendor_items(
             _add_vendor_item_history(db, vi, "create", current_user)
             created += 1
     return {
-        "success": True,
-        "message": f"Mapped {created} vendor-item combination(s)",
-        "created": created,
-        "skipped_existing": skipped,
-        "vendors": len(vendor_ids),
+            "vendors": len(vendor_ids),
         "items": len(item_ids),
     }
 
@@ -3411,14 +3479,10 @@ async def get_user_material_mapping_tree(
 ):
     await ensure_organization_structure_schema(db)
     await ensure_user_item_permission_schema(db)
-    project_rows = (await db.execute(select(Project.id, Project.code, Project.name).order_by(Project.name))).all()
-    position_rows = (await db.execute(
-        select(Position.id, Position.code, Position.name, Position.project_id, Position.role_name).order_by(Position.name)
-    )).all()
-    user_rows = (await db.execute(
-        select(Employee.id, Employee.employee_code, Employee.name, Employee.position_id, Employee.email)
-        .where(Employee.status.in_(["Active", "active"]))
-        .order_by(Employee.name, Employee.employee_code)
+    role_rows = (await db.execute(
+        select(Role.id, Role.code, Role.name)
+        .where(Role.is_active == True)
+        .order_by(Role.name)
     )).all()
     category_rows = (await db.execute(
         select(ItemCategory.id, ItemCategory.parent_id, ItemCategory.code, ItemCategory.full_code, ItemCategory.name)
@@ -3430,30 +3494,22 @@ async def get_user_material_mapping_tree(
         .order_by(Item.item_code, Item.name)
     )).all()
     existing_rows = (await db.execute(
-        select(EmployeeItemPermission.employee_id, EmployeeItemPermission.entity_type, EmployeeItemPermission.entity_id, EmployeeItemPermission.action)
-        .order_by(EmployeeItemPermission.employee_id)
+        select(RoleItemPermission.role_id, RoleItemPermission.entity_type, RoleItemPermission.entity_id, RoleItemPermission.action)
+        .order_by(RoleItemPermission.role_id)
     )).all()
     return {
-        "projects": [{"id": r.id, "code": r.code, "name": r.name} for r in project_rows],
-        "positions": [{"id": r.id, "code": r.code, "name": r.name, "project_id": r.project_id, "role_name": r.role_name} for r in position_rows],
-        "users": [
-            {
-                "id": r.id,
-                "username": r.employee_code,
-                "name": r.name,
-                "employee_code": r.employee_code,
-                "position_id": r.position_id,
-                "email": r.email,
-            }
-            for r in user_rows
-        ],
+        "projects": [],
+        "positions": [],
+        "roles": [{"id": r.id, "code": r.code, "name": r.name} for r in role_rows],
+        "direct_roles": [],
+        "users": [],
         "categories": [
             {"id": r.id, "parent_id": r.parent_id, "code": r.code, "full_code": r.full_code, "name": r.name}
             for r in category_rows
         ],
         "items": [{"id": r.id, "item_code": r.item_code, "name": r.name, "category_id": r.category_id} for r in item_rows],
         "existing": [
-            {"user_id": r.employee_id, "entity_type": r.entity_type, "entity_id": r.entity_id, "action": r.action}
+            {"role_id": r.role_id, "entity_type": r.entity_type, "entity_id": r.entity_id, "action": r.action}
             for r in existing_rows
         ],
     }
@@ -3474,52 +3530,48 @@ async def list_user_material_mappings(
     item_alias = aliased(Item)
     q = (
         select(
-            EmployeeItemPermission,
-            Employee.employee_code,
-            Employee.name,
-            Employee.email,
+            RoleItemPermission,
+            Role.code.label("role_code"),
+            Role.name.label("role_name"),
             category_alias.name.label("category_name"),
             category_alias.full_code.label("category_code"),
             item_alias.item_code,
             item_alias.name.label("item_name"),
         )
-        .join(Employee, EmployeeItemPermission.employee_id == Employee.id)
-        .join(category_alias, (EmployeeItemPermission.entity_type == "item_category") & (EmployeeItemPermission.entity_id == category_alias.id), isouter=True)
-        .join(item_alias, (EmployeeItemPermission.entity_type == "item") & (EmployeeItemPermission.entity_id == item_alias.id), isouter=True)
+        .join(Role, RoleItemPermission.role_id == Role.id)
+        .join(category_alias, (RoleItemPermission.entity_type == "item_category") & (RoleItemPermission.entity_id == category_alias.id), isouter=True)
+        .join(item_alias, (RoleItemPermission.entity_type == "item") & (RoleItemPermission.entity_id == item_alias.id), isouter=True)
     )
-    count_q = select(func.count(EmployeeItemPermission.id)).join(Employee, EmployeeItemPermission.employee_id == Employee.id)
+    count_q = select(func.count(RoleItemPermission.id)).join(Role, RoleItemPermission.role_id == Role.id)
     if search:
         like = f"%{search}%"
         condition = or_(
-            Employee.name.ilike(like),
-            Employee.employee_code.ilike(like),
-            Employee.email.ilike(like),
+            Role.name.ilike(like),
+            Role.code.ilike(like),
             category_alias.name.ilike(like),
             category_alias.full_code.ilike(like),
             item_alias.item_code.ilike(like),
             item_alias.name.ilike(like),
-            EmployeeItemPermission.action.ilike(like),
+            RoleItemPermission.action.ilike(like),
         )
         q = q.where(condition)
         count_q = (
             count_q
-            .join(category_alias, (EmployeeItemPermission.entity_type == "item_category") & (EmployeeItemPermission.entity_id == category_alias.id), isouter=True)
-            .join(item_alias, (EmployeeItemPermission.entity_type == "item") & (EmployeeItemPermission.entity_id == item_alias.id), isouter=True)
+            .join(category_alias, (RoleItemPermission.entity_type == "item_category") & (RoleItemPermission.entity_id == category_alias.id), isouter=True)
+            .join(item_alias, (RoleItemPermission.entity_type == "item") & (RoleItemPermission.entity_id == item_alias.id), isouter=True)
             .where(condition)
         )
     total = (await db.execute(count_q)).scalar() or 0
-    rows = (await db.execute(q.order_by(EmployeeItemPermission.created_at.desc(), EmployeeItemPermission.id.desc()).offset(offset).limit(limit))).all()
+    rows = (await db.execute(q.order_by(RoleItemPermission.created_at.desc(), RoleItemPermission.id.desc()).offset(offset).limit(limit))).all()
     items = []
-    for permission, employee_code, employee_name, email, category_name, category_code, item_code, item_name in rows:
+    for permission, role_code, role_name, category_name, category_code, item_code, item_name in rows:
         target_name = category_name if permission.entity_type == "item_category" else item_name
         target_code = category_code if permission.entity_type == "item_category" else item_code
         items.append({
             "id": permission.id,
-            "user_id": permission.employee_id,
-            "username": employee_code,
-            "user_name": employee_name,
-            "employee_code": employee_code,
-            "email": email,
+            "role_id": permission.role_id,
+            "role_code": role_code,
+            "role_name": role_name,
             "entity_type": permission.entity_type,
             "entity_id": permission.entity_id,
             "target_code": target_code,
@@ -3538,12 +3590,12 @@ async def bulk_map_user_materials(
 ):
     await ensure_organization_structure_schema(db)
     await ensure_user_item_permission_schema(db)
-    user_ids = payload.user_ids
+    role_ids = payload.role_ids
     category_ids = payload.category_ids
     item_ids = payload.item_ids
-    valid_user_ids = {
+    valid_role_ids = {
         int(row[0])
-            for row in (await db.execute(select(Employee.id).where(Employee.id.in_(user_ids), Employee.status.in_(["Active", "active"])))).all()
+        for row in (await db.execute(select(Role.id).where(Role.id.in_(role_ids), Role.is_active == True))).all()  # noqa: E712
     }
     valid_category_ids = set()
     if category_ids:
@@ -3557,51 +3609,51 @@ async def bulk_map_user_materials(
             int(row[0])
             for row in (await db.execute(select(Item.id).where(Item.id.in_(item_ids), Item.is_active == True))).all()  # noqa: E712
         }
-    missing_users = [uid for uid in user_ids if uid not in valid_user_ids]
+    missing_roles = [rid for rid in role_ids if rid not in valid_role_ids]
     missing_categories = [cid for cid in category_ids if cid not in valid_category_ids]
     missing_items = [iid for iid in item_ids if iid not in valid_item_ids]
-    if missing_users or missing_categories or missing_items:
+    if missing_roles or missing_categories or missing_items:
         raise HTTPException(
             status_code=422,
             detail={
-                "message": "Only active employees, valid categories, and active items can be mapped",
-                "missing_user_ids": missing_users,
+                "message": "Only active roles, valid categories, and active items can be mapped",
+                "missing_role_ids": missing_roles,
                 "missing_category_ids": missing_categories,
                 "missing_item_ids": missing_items,
             },
         )
     if payload.replace_existing:
         await db.execute(
-            delete(EmployeeItemPermission).where(
-                EmployeeItemPermission.employee_id.in_(user_ids),
-                EmployeeItemPermission.action == payload.action,
+            delete(RoleItemPermission).where(
+                RoleItemPermission.role_id.in_(role_ids),
+                RoleItemPermission.action == payload.action,
             )
         )
     existing_rows = (await db.execute(
-        select(EmployeeItemPermission.employee_id, EmployeeItemPermission.entity_type, EmployeeItemPermission.entity_id).where(
-            EmployeeItemPermission.employee_id.in_(user_ids),
-            EmployeeItemPermission.action == payload.action,
+        select(RoleItemPermission.role_id, RoleItemPermission.entity_type, RoleItemPermission.entity_id).where(
+            RoleItemPermission.role_id.in_(role_ids),
+            RoleItemPermission.action == payload.action,
         )
     )).all()
-    existing = {(int(uid), etype, int(eid) if eid is not None else None) for uid, etype, eid in existing_rows}
+    existing = {(int(rid), etype, int(eid) if eid is not None else None) for rid, etype, eid in existing_rows}
     targets = [("item_category", cid) for cid in category_ids] + [("item", iid) for iid in item_ids]
     created = 0
     skipped = 0
-    for user_id in user_ids:
+    for role_id in role_ids:
         for entity_type, entity_id in targets:
-            key = (user_id, entity_type, entity_id)
+            key = (role_id, entity_type, entity_id)
             if key in existing:
                 skipped += 1
                 continue
-            db.add(EmployeeItemPermission(employee_id=user_id, entity_type=entity_type, entity_id=entity_id, action=payload.action))
+            db.add(RoleItemPermission(role_id=role_id, entity_type=entity_type, entity_id=entity_id, action=payload.action))
             created += 1
     await db.flush()
     return {
         "success": True,
-        "message": f"Mapped {created} user-material permission(s)",
+        "message": f"Mapped {created} role-material permission(s)",
         "created": created,
         "skipped_existing": skipped,
-        "users": len(user_ids),
+        "roles": len(role_ids),
         "categories": len(category_ids),
         "items": len(item_ids),
     }
@@ -3717,6 +3769,24 @@ async def add_vendor_rating(
 
 # ==================== WAREHOUSES ====================
 
+async def _check_circular_warehouse(db: AsyncSession, warehouse_id: int, parent_id: int) -> bool:
+    """Return True if assigning parent_id to warehouse_id would create a circular loop."""
+    if warehouse_id == parent_id:
+        return True
+    current_parent = parent_id
+    while current_parent is not None:
+        result = await db.execute(
+            select(Warehouse.parent_id).where(Warehouse.id == current_parent)
+        )
+        next_parent = result.scalar_one_or_none()
+        if next_parent == warehouse_id:
+            return True
+        if next_parent == current_parent:
+            break
+        current_parent = next_parent
+    return False
+
+
 @router.get("/warehouses")
 async def list_warehouses(
     search: str = Query(None),
@@ -3726,26 +3796,28 @@ async def list_warehouses(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = select(Warehouse).order_by(Warehouse.name)
+    from app.utils.dependencies import user_is_managerial, user_warehouse_ids
+    is_managerial = await user_is_managerial(db, current_user.id)
+
+    query = select(Warehouse).options(selectinload(Warehouse.parent)).order_by(Warehouse.name)
     if is_active is not None:
         query = query.where(Warehouse.is_active == is_active)
-    if exclude_virtual:
-        query = query.where(Warehouse.type != "virtual")
-    if type:
-        query = query.where(Warehouse.type == type)
-    query = apply_search_filter(query, Warehouse, search, ["code", "name", "city"])
 
-    # Warehouse-scope isolation matching /inventory/balance R-005.
-    # Without this gate, field/operator users see all 11 warehouses in
-    # dropdowns and on the warehouse picker, even though stock queries
-    # against unauthorized warehouses are rejected — confusing UX and a
-    # listing-side privilege leak.
-    from app.utils.dependencies import user_is_managerial, user_warehouse_ids
-    if not await user_is_managerial(db, current_user.id):
+    if is_managerial:
+        # Managers see all non-virtual warehouses by default
+        if exclude_virtual:
+            query = query.where(Warehouse.type != "virtual")
+        if type:
+            query = query.where(Warehouse.type == type)
+    else:
+        # Non-managerial users only see warehouses assigned to them,
+        # whether virtual or real. We do not exclude their assigned virtual ones.
         scoped_wh = await user_warehouse_ids(db, current_user.id)
         if not scoped_wh:
             return []
         query = query.where(Warehouse.id.in_(scoped_wh))
+
+    query = apply_search_filter(query, Warehouse, search, ["code", "name", "city"])
 
     result = await db.execute(query)
     whs = result.scalars().all()
@@ -3758,7 +3830,7 @@ async def get_warehouse(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    result = await db.execute(select(Warehouse).where(Warehouse.id == warehouse_id))
+    result = await db.execute(select(Warehouse).options(selectinload(Warehouse.parent)).where(Warehouse.id == warehouse_id))
     wh = result.scalar_one_or_none()
     if not wh:
         raise HTTPException(status_code=404, detail="Warehouse not found")
@@ -3782,6 +3854,15 @@ async def create_warehouse(
     # Default organization_id
     if not data.get("organization_id"):
         data["organization_id"] = 1
+        
+    parent_id = data.get("parent_id")
+    if parent_id is not None:
+        parent_exists = (await db.execute(
+            select(Warehouse.id).where(Warehouse.id == parent_id)
+        )).scalar_one_or_none()
+        if not parent_exists:
+            raise HTTPException(status_code=400, detail="Parent warehouse not found")
+
     # Remove extra fields not in the model
     for key in ["warehouse_type", "contact_phone", "address", "description", "status"]:
         data.pop(key, None)
@@ -3811,11 +3892,26 @@ async def update_warehouse(
     current_user: User = Depends(require_permission("masters", "update", "warehouses")),
 ):
     # BUG-FE-063: gate edit behind masters.update.warehouses
-    result = await db.execute(select(Warehouse).where(Warehouse.id == warehouse_id))
+    result = await db.execute(select(Warehouse).options(selectinload(Warehouse.parent)).where(Warehouse.id == warehouse_id))
     wh = result.scalar_one_or_none()
     if not wh:
         raise HTTPException(status_code=404, detail="Warehouse not found")
     update_data = payload.model_dump(exclude_unset=True)
+    
+    # If parent_id is being updated, validate it
+    if "parent_id" in update_data:
+        parent_id = update_data.get("parent_id")
+        if parent_id is not None:
+            if parent_id == warehouse_id:
+                raise HTTPException(status_code=400, detail="A warehouse cannot be its own parent")
+            parent_exists = (await db.execute(
+                select(Warehouse.id).where(Warehouse.id == parent_id)
+            )).scalar_one_or_none()
+            if not parent_exists:
+                raise HTTPException(status_code=400, detail="Parent warehouse not found")
+            if await _check_circular_warehouse(db, warehouse_id, parent_id):
+                raise HTTPException(status_code=400, detail="Circular hierarchy detected: parent warehouse cannot be itself or a child/descendant warehouse")
+
     # If the caller is changing the code, re-check uniqueness (case-insensitive)
     new_code = update_data.get("code")
     if new_code and new_code.strip():
@@ -4596,4 +4692,178 @@ async def list_departments(
     return [
         {"id": idx + 1, "name": d, "code": d, "value": d}
         for idx, d in enumerate(all_depts)
+    ]
+
+
+# =====================================================================
+# SUPPLIER (material vendor) PORTAL LOGIN MANAGEMENT
+# coordinator-side CRUD — mirrors carrier login endpoints in logistics.py
+# =====================================================================
+
+from app.services.auth_service import hash_password as _hash_password  # noqa: E402
+from app.schemas.vendor_auth import VendorLoginCreate, VendorLoginUpdate  # noqa: E402
+
+
+@router.get("/vendors/{vendor_id}/supplier-login")
+async def get_supplier_login(
+    vendor_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Return login status for this material supplier vendor."""
+    await ensure_supplier_portal_schema(db)
+    from app.models.vendor_portal import VendorUser
+    res = await db.execute(select(VendorUser).where(VendorUser.vendor_id == vendor_id))
+    vu = res.scalar_one_or_none()
+    if not vu:
+        return {"has_login": False}
+    return {
+        "has_login": True,
+        "id": vu.id,
+        "username": vu.username,
+        "email": vu.email,
+        "full_name": vu.full_name,
+        "phone": vu.phone,
+        "is_active": vu.is_active,
+        "must_change_password": vu.must_change_password,
+        "last_login": vu.last_login,
+        "created_at": vu.created_at,
+    }
+
+
+@router.post("/vendors/{vendor_id}/supplier-login", status_code=201)
+async def create_supplier_login(
+    vendor_id: int,
+    payload: VendorLoginCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Provision a new portal login for a material supplier vendor."""
+    await ensure_supplier_portal_schema(db)
+    from app.models.vendor_portal import VendorUser
+    # Validate vendor exists
+    res = await db.execute(select(Vendor).where(Vendor.id == vendor_id))
+    v = res.scalar_one_or_none()
+    if not v:
+        raise HTTPException(404, "Vendor not found")
+    if not v.is_active:
+        raise HTTPException(400, "Cannot create login for an inactive vendor")
+
+    # One login per vendor
+    res_existing = await db.execute(select(VendorUser).where(VendorUser.vendor_id == vendor_id))
+    if res_existing.scalar_one_or_none():
+        raise HTTPException(409, "This vendor already has a portal login. Use the update endpoint to reset password.")
+
+    # Username uniqueness across all vendor users
+    res_u = await db.execute(select(VendorUser).where(VendorUser.username == payload.username))
+    if res_u.scalar_one_or_none():
+        raise HTTPException(409, f"Username '{payload.username}' is already taken")
+
+    vu = VendorUser(
+        vendor_id=vendor_id,
+        username=payload.username,
+        email=str(payload.email),
+        password_hash=_hash_password(payload.password),
+        full_name=payload.full_name or v.contact_person,
+        phone=payload.phone or v.phone,
+        is_active=True,
+        must_change_password=True,
+        created_by=current_user.id,
+    )
+    db.add(vu)
+    await db.commit()
+    await db.refresh(vu)
+    return {"id": vu.id, "username": vu.username, "message": "Supplier portal login created"}
+
+
+@router.put("/vendors/{vendor_id}/supplier-login")
+async def update_supplier_login(
+    vendor_id: int,
+    payload: VendorLoginUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Reset password or toggle active state of a supplier portal login."""
+    await ensure_supplier_portal_schema(db)
+    from app.models.vendor_portal import VendorUser
+    res = await db.execute(select(VendorUser).where(VendorUser.vendor_id == vendor_id))
+    vu = res.scalar_one_or_none()
+    if not vu:
+        raise HTTPException(404, "This vendor has no portal login")
+    data = payload.model_dump(exclude_none=True)
+    if "new_password" in data:
+        vu.password_hash = _hash_password(data.pop("new_password"))
+        vu.password_changed_at = datetime.now(timezone.utc)
+        vu.must_change_password = True
+        vu.failed_login_attempts = 0
+        vu.locked_until = None
+    for k, val in data.items():
+        setattr(vu, k, val)
+    await db.commit()
+    return {"success": True, "message": "Supplier login updated"}
+
+
+@router.delete("/vendors/{vendor_id}/supplier-login")
+async def deactivate_supplier_login(
+    vendor_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Deactivate (disable) a supplier portal login."""
+    await ensure_supplier_portal_schema(db)
+    from app.models.vendor_portal import VendorUser
+    res = await db.execute(select(VendorUser).where(VendorUser.vendor_id == vendor_id))
+    vu = res.scalar_one_or_none()
+    if not vu:
+        raise HTTPException(404, "This vendor has no portal login")
+    vu.is_active = False
+    await db.commit()
+    return {"success": True, "message": "Supplier login deactivated"}
+
+
+@router.get("/vendors/supplier-logins")
+async def list_supplier_logins(
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List all material vendor logins for the admin management table."""
+    await ensure_supplier_portal_schema(db)
+    from app.models.vendor_portal import VendorUser
+    # All material (non-transport) vendors
+    res_v = await db.execute(
+        select(Vendor).where(
+            (Vendor.is_transport_vendor == False) | (Vendor.is_transport_vendor.is_(None))  # noqa: E712
+        ).order_by(Vendor.name.asc())
+    )
+    vendors = res_v.scalars().all()
+    vendor_ids = [v.id for v in vendors]
+
+    # Fetch all logins for these vendors
+    login_map = {}
+    if vendor_ids:
+        res_lu = await db.execute(
+            select(VendorUser).where(VendorUser.vendor_id.in_(vendor_ids))
+        )
+        for vu in res_lu.scalars().all():
+            login_map[vu.vendor_id] = {
+                "id": vu.id,
+                "username": vu.username,
+                "email": vu.email,
+                "is_active": vu.is_active,
+                "last_login": vu.last_login,
+                "must_change_password": vu.must_change_password,
+            }
+
+    return [
+        {
+            "vendor_id": v.id,
+            "vendor_code": v.vendor_code,
+            "name": v.name,
+            "contact_person": v.contact_person,
+            "email": v.email,
+            "phone": v.phone,
+            "is_active": v.is_active,
+            "login": login_map.get(v.id),
+        }
+        for v in vendors
     ]

@@ -30,7 +30,7 @@ async def get_schema(
     current_user: User = Depends(require_any_role(
         "super_admin", "admin", "accounts_manager", "accounts_officer",
         "purchase_manager", "purchase_officer",
-        "warehouse_manager", "project_manager", "logistics_manager",
+        "warehouse_manager", "project_manager",
     )),
 ):
     """Discover what dimensions / measures / filterable fields exist per fact table."""
@@ -46,7 +46,7 @@ async def preview_report(
     current_user: User = Depends(require_any_role(
         "super_admin", "admin", "accounts_manager", "accounts_officer",
         "purchase_manager", "purchase_officer",
-        "warehouse_manager", "project_manager", "logistics_manager",
+        "warehouse_manager", "project_manager",
     )),
 ):
     """Run a report definition without saving. Body: {source_table, dimensions, measures, filters}."""

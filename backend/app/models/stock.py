@@ -50,7 +50,7 @@ class StockBalance(Base):
     batch_id = Column(BigInteger, ForeignKey("batches.id"))
     available_qty = Column(Numeric(15, 3), default=0)
     reserved_qty = Column(Numeric(15, 3), default=0)
-    committed_qty = Column(Numeric(15, 3), default=0)
+    transit_qty = Column(Numeric(15, 3), default=0)
     total_qty = Column(Numeric(15, 3), default=0)
     valuation_rate = Column(Numeric(15, 2), default=0)
     stock_value = Column(Numeric(15, 2), default=0)

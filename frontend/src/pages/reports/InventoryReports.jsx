@@ -31,7 +31,7 @@ const REPORT_TYPES = [
   { label: 'Expiry / FEFO Report', value: 'expiry_fefo' },
   { label: 'Dead Stock', value: 'dead_stock' },
   { label: 'Inventory Adjustment Summary', value: 'adjustment_summary' },
-  { label: 'Committed Stock Details', value: 'committed_stock' },
+  { label: 'Transit Stock Details', value: 'committed_stock' },
 ];
 
 const InventoryReports = () => {
@@ -340,7 +340,7 @@ const InventoryReports = () => {
           { title: 'Item Name', dataIndex: 'item_name', key: 'item_name', width: 200, ellipsis: true },
           { title: 'Warehouse', dataIndex: 'warehouse_name', key: 'warehouse', width: 150 },
           { title: 'Available Qty', dataIndex: 'available_qty', key: 'available', width: 120, align: 'right', render: (v) => formatNumber(v) },
-          { title: 'Committed Qty', dataIndex: 'committed_qty', key: 'committed', width: 120, align: 'right', render: (v) => formatNumber(v) },
+          { title: 'Transit Qty', dataIndex: 'transit_qty', key: 'committed', width: 120, align: 'right', render: (v) => formatNumber(v) },
           { title: 'Ordered Qty', dataIndex: 'ordered_qty', key: 'ordered', width: 120, align: 'right', render: (v) => formatNumber(v) },
           { title: 'Net Available', dataIndex: 'net_available', key: 'net', width: 120, align: 'right', render: (v) => formatNumber(v) },
         ];

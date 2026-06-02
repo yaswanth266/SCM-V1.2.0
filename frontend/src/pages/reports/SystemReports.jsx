@@ -47,7 +47,6 @@ const SystemReports = () => {
     { label: 'Warehouse', value: 'warehouse' },
     { label: 'Inventory', value: 'inventory' },
     { label: 'Outbound', value: 'outbound' },
-    { label: 'Logistics', value: 'logistics' },
     { label: 'Indent', value: 'indent' },
     { label: 'Consumption', value: 'consumption' },
     { label: 'Approvals', value: 'approvals' },

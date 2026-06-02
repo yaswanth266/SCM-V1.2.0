@@ -102,9 +102,9 @@ const QuotationForm = () => {
     uom_id: null,
     rate: 0,
     discount_pct: 0,
-    // BUG-PRO-145 fix: default to 0 — the item-master's GST rate is hydrated
-    // when an item is selected. Defaulting to 18 silently overrides items that
-    // are 0% / 5% / 12% / 28% and forces the user to remember to undo it.
+    cgst_rate: 0,
+    sgst_rate: 0,
+    igst_rate: 0,
     tax_rate: 0,
     amount: 0,
   });
@@ -130,7 +130,10 @@ const QuotationForm = () => {
           uom_id: item.uom_id || null,
           rate: item.rate || item.unit_price || 0,
           discount_pct: item.discount_pct || item.discount || item.discount_percent || 0,
-          tax_rate: item.tax_rate || item.tax_percent || 18,
+          cgst_rate: item.cgst_rate || 0,
+          sgst_rate: item.sgst_rate || 0,
+          igst_rate: item.igst_rate || 0,
+          tax_rate: item.tax_rate || item.tax_percent || 0,
           amount: item.amount || item.total || 0,
         };
         return row;
@@ -158,7 +161,10 @@ const QuotationForm = () => {
         uom_id: item.uom_id || (item.item ? item.item.primary_uom_id : null),
         rate: 0,
         discount_pct: 0,
-        tax_rate: 18,
+        cgst_rate: 0,
+        sgst_rate: 0,
+        igst_rate: 0,
+        tax_rate: 0,
         amount: 0,
       }));
       setQuotationItems(items.length > 0 ? items : [createEmptyItem()]);
@@ -171,7 +177,10 @@ const QuotationForm = () => {
   const calcItemAmount = (item) => {
     const base = (item.qty || 0) * (item.rate || 0);
     const discounted = base - (base * (item.discount_pct || 0)) / 100;
-    const tax = (discounted * (item.tax_rate || 0)) / 100;
+    const cgst = (discounted * (item.cgst_rate || 0)) / 100;
+    const sgst = (discounted * (item.sgst_rate || 0)) / 100;
+    const igst = (discounted * (item.igst_rate || 0)) / 100;
+    const tax = cgst + sgst + igst;
     return Number((discounted + tax).toFixed(2));
   };
 
@@ -181,12 +190,26 @@ const QuotationForm = () => {
       return sum + base - (base * (item.discount_pct || 0)) / 100;
     }, 0);
 
-  const calcTaxTotal = () =>
-    quotationItems.reduce((sum, item) => {
+  const calcTaxComponents = () => {
+    let cgst = 0, sgst = 0, igst = 0;
+    quotationItems.forEach((item) => {
       const base = (item.qty || 0) * (item.rate || 0);
       const discounted = base - (base * (item.discount_pct || 0)) / 100;
-      return sum + (discounted * (item.tax_rate || 0)) / 100;
-    }, 0);
+      cgst += (discounted * (item.cgst_rate || 0)) / 100;
+      sgst += (discounted * (item.sgst_rate || 0)) / 100;
+      igst += (discounted * (item.igst_rate || 0)) / 100;
+    });
+    return { cgst, sgst, igst };
+  };
+
+  const calcCGSTTotal = () => calcTaxComponents().cgst;
+  const calcSGSTTotal = () => calcTaxComponents().sgst;
+  const calcIGSTTotal = () => calcTaxComponents().igst;
+
+  const calcTaxTotal = () => {
+    const { cgst, sgst, igst } = calcTaxComponents();
+    return cgst + sgst + igst;
+  };
 
   const calcGrandTotal = () => calcSubtotal() + calcTaxTotal();
 
@@ -194,7 +217,13 @@ const QuotationForm = () => {
     setQuotationItems((prev) =>
       prev.map((item) => {
         if (item.key !== key) return item;
-        const updated = { ...item, [field]: value };
+        let updated = { ...item, [field]: value };
+        if ((field === 'cgst_rate' || field === 'sgst_rate') && value > 0) {
+          updated.igst_rate = 0;
+        } else if (field === 'igst_rate' && value > 0) {
+          updated.cgst_rate = 0;
+          updated.sgst_rate = 0;
+        }
         updated.amount = calcItemAmount(updated);
         return updated;
       })
@@ -222,6 +251,9 @@ const QuotationForm = () => {
         quotation_date: formatDateForAPI(values.quotation_date),
         valid_until: formatDateForAPI(values.valid_until),
         total_amount: Number(calcSubtotal().toFixed(2)),
+        cgst_amount: Number(calcCGSTTotal().toFixed(2)),
+        sgst_amount: Number(calcSGSTTotal().toFixed(2)),
+        igst_amount: Number(calcIGSTTotal().toFixed(2)),
         tax_amount: Number(calcTaxTotal().toFixed(2)),
         grand_total: Number(calcGrandTotal().toFixed(2)),
         items: validItems.map((item) => ({
@@ -230,7 +262,10 @@ const QuotationForm = () => {
           uom_id: item.uom_id,
           rate: item.rate,
           discount_pct: item.discount_pct || 0,
-          tax_rate: item.tax_rate || 0,
+          cgst_rate: item.cgst_rate || 0,
+          sgst_rate: item.sgst_rate || 0,
+          igst_rate: item.igst_rate || 0,
+          tax_rate: (item.cgst_rate || 0) + (item.sgst_rate || 0) + (item.igst_rate || 0),
           amount: item.amount,
         })),
       };
@@ -344,13 +379,41 @@ const QuotationForm = () => {
               { title: 'UOM', dataIndex: 'uom_name', width: 70, render: (v, r) => v || r.uom || '-' },
               { title: 'Rate', dataIndex: 'rate', width: 110, align: 'right', render: (v, r) => formatCurrency(v || r.unit_price) },
               { title: 'Disc %', dataIndex: 'discount_pct', width: 80, align: 'right', render: (v, r) => `${v || r.discount || 0}%` },
-              { title: 'Tax %', dataIndex: 'tax_rate', width: 80, align: 'right', render: (v, r) => `${v || r.tax_percent || 0}%` },
+              { title: 'CGST %', dataIndex: 'cgst_rate', width: 80, align: 'right', render: (v, r) => `${v || r.cgst_rate || 0}%` },
+              { title: 'SGST %', dataIndex: 'sgst_rate', width: 80, align: 'right', render: (v, r) => `${v || r.sgst_rate || 0}%` },
+              { title: 'IGST %', dataIndex: 'igst_rate', width: 80, align: 'right', render: (v, r) => `${v || r.igst_rate || 0}%` },
               { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right', render: (v, r) => formatCurrency(v || r.total) },
             ]}
             summary={() => (
               <Table.Summary>
                 <Table.Summary.Row>
-                  <Table.Summary.Cell colSpan={8} align="right"><Text strong>Grand Total:</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell colSpan={10} align="right"><Text strong>Subtotal:</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell align="right"><Text>{formatCurrency(quotation.subtotal || quotation.total_amount)}</Text></Table.Summary.Cell>
+                </Table.Summary.Row>
+                {(quotation.cgst_amount || 0) > 0 && (
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell colSpan={10} align="right"><Text strong>CGST:</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell align="right"><Text>{formatCurrency(quotation.cgst_amount)}</Text></Table.Summary.Cell>
+                  </Table.Summary.Row>
+                )}
+                {(quotation.sgst_amount || 0) > 0 && (
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell colSpan={10} align="right"><Text strong>SGST:</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell align="right"><Text>{formatCurrency(quotation.sgst_amount)}</Text></Table.Summary.Cell>
+                  </Table.Summary.Row>
+                )}
+                {(quotation.igst_amount || 0) > 0 && (
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell colSpan={10} align="right"><Text strong>IGST:</Text></Table.Summary.Cell>
+                    <Table.Summary.Cell align="right"><Text>{formatCurrency(quotation.igst_amount)}</Text></Table.Summary.Cell>
+                  </Table.Summary.Row>
+                )}
+                <Table.Summary.Row>
+                  <Table.Summary.Cell colSpan={10} align="right"><Text strong>Tax Total:</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell align="right"><Text>{formatCurrency(quotation.tax_amount)}</Text></Table.Summary.Cell>
+                </Table.Summary.Row>
+                <Table.Summary.Row>
+                  <Table.Summary.Cell colSpan={10} align="right"><Text strong>Grand Total:</Text></Table.Summary.Cell>
                   <Table.Summary.Cell align="right"><Text strong>{formatCurrency(quotation.grand_total)}</Text></Table.Summary.Cell>
                 </Table.Summary.Row>
               </Table.Summary>
@@ -414,8 +477,16 @@ const QuotationForm = () => {
       render: (val, record) => <InputNumber min={0} max={100} value={val} onChange={(v) => updateItem(record.key, 'discount_pct', v)} style={{ width: '100%' }} />,
     },
     {
-      title: 'Tax %', dataIndex: 'tax_rate', width: 80,
-      render: (val, record) => <InputNumber min={0} max={100} value={val} onChange={(v) => updateItem(record.key, 'tax_rate', v)} style={{ width: '100%' }} />,
+      title: 'CGST %', dataIndex: 'cgst_rate', width: 80,
+      render: (val, record) => <InputNumber min={0} max={100} value={val} onChange={(v) => updateItem(record.key, 'cgst_rate', v)} style={{ width: '100%' }} />,
+    },
+    {
+      title: 'SGST %', dataIndex: 'sgst_rate', width: 80,
+      render: (val, record) => <InputNumber min={0} max={100} value={val} onChange={(v) => updateItem(record.key, 'sgst_rate', v)} style={{ width: '100%' }} />,
+    },
+    {
+      title: 'IGST %', dataIndex: 'igst_rate', width: 80,
+      render: (val, record) => <InputNumber min={0} max={100} value={val} onChange={(v) => updateItem(record.key, 'igst_rate', v)} style={{ width: '100%' }} />,
     },
     {
       title: 'Amount', dataIndex: 'amount', width: 110, align: 'right',
@@ -498,17 +569,38 @@ const QuotationForm = () => {
           summary={() => (
             <Table.Summary>
               <Table.Summary.Row>
-                <Table.Summary.Cell colSpan={7} align="right"><Text strong>Subtotal:</Text></Table.Summary.Cell>
+                <Table.Summary.Cell colSpan={9} align="right"><Text strong>Subtotal:</Text></Table.Summary.Cell>
                 <Table.Summary.Cell align="right"><Text>{formatCurrency(calcSubtotal())}</Text></Table.Summary.Cell>
                 <Table.Summary.Cell />
               </Table.Summary.Row>
+              {calcCGSTTotal() > 0 && (
+                <Table.Summary.Row>
+                  <Table.Summary.Cell colSpan={9} align="right"><Text strong>CGST:</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell align="right"><Text>{formatCurrency(calcCGSTTotal())}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell />
+                </Table.Summary.Row>
+              )}
+              {calcSGSTTotal() > 0 && (
+                <Table.Summary.Row>
+                  <Table.Summary.Cell colSpan={9} align="right"><Text strong>SGST:</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell align="right"><Text>{formatCurrency(calcSGSTTotal())}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell />
+                </Table.Summary.Row>
+              )}
+              {calcIGSTTotal() > 0 && (
+                <Table.Summary.Row>
+                  <Table.Summary.Cell colSpan={9} align="right"><Text strong>IGST:</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell align="right"><Text>{formatCurrency(calcIGSTTotal())}</Text></Table.Summary.Cell>
+                  <Table.Summary.Cell />
+                </Table.Summary.Row>
+              )}
               <Table.Summary.Row>
-                <Table.Summary.Cell colSpan={7} align="right"><Text strong>Tax:</Text></Table.Summary.Cell>
+                <Table.Summary.Cell colSpan={9} align="right"><Text strong>Tax Total:</Text></Table.Summary.Cell>
                 <Table.Summary.Cell align="right"><Text>{formatCurrency(calcTaxTotal())}</Text></Table.Summary.Cell>
                 <Table.Summary.Cell />
               </Table.Summary.Row>
               <Table.Summary.Row>
-                <Table.Summary.Cell colSpan={7} align="right"><Text strong style={{ fontSize: 15 }}>Grand Total:</Text></Table.Summary.Cell>
+                <Table.Summary.Cell colSpan={9} align="right"><Text strong style={{ fontSize: 15 }}>Grand Total:</Text></Table.Summary.Cell>
                 <Table.Summary.Cell align="right"><Text strong style={{ fontSize: 15 }}>{formatCurrency(calcGrandTotal())}</Text></Table.Summary.Cell>
                 <Table.Summary.Cell />
               </Table.Summary.Row>
