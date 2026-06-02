@@ -349,8 +349,12 @@ const MaterialIssues = () => {
         item_code: it.item_code || '',
         uom_id: it.uom_id || null,
         qty: Math.max(
-          (Number(it.approved_qty) || Number(it.requested_qty) || 0)
-            - (Number(it.issued_qty) || 0),
+          Number(
+            it.issue_remaining_qty ?? (
+              (Number(it.approved_qty ?? it.requested_qty) || 0)
+                - (Number(it.issued_qty) || 0)
+            ),
+          ) || 0,
           0,
         ),
         batch_id: null,

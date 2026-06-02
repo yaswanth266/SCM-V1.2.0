@@ -174,6 +174,14 @@ const DemandPool = () => {
     }
   };
 
+  const canIssueSource = (source) => {
+    const targetQty = Number(source?.qty || 0);
+    const issuedQty = Number(source?.issued_qty || 0);
+    const acknowledgedQty = Number(source?.acknowledged_qty || 0);
+    const remainingQty = Number(source?.remaining_qty || 0);
+    return targetQty > issuedQty || (acknowledgedQty > 0 && remainingQty > 0);
+  };
+
   const columns = [
     {
       title: 'Warehouse',
@@ -273,7 +281,7 @@ const DemandPool = () => {
       title: 'Action',
       width: 130,
       render: (_, r) => {
-        const eligibleSource = r.sources?.find((s) => s.qty > (s.issued_qty ?? 0));
+        const eligibleSource = r.sources?.find(canIssueSource);
         if (eligibleSource && (r.stock_status === 'in_stock' || r.stock_status === 'partial')) {
           return (
             <Tooltip title="Stock available — go to Material Issue prefilled from this indent">

@@ -124,15 +124,33 @@ async def list_indents(
         count_query = count_query.where(
             Indent.status.in_(["approved", "partially_fulfilled"])
         )
-        # Subquery: indent_ids where AT LEAST ONE line still has remaining qty.
+        # Subquery: indent_ids where AT LEAST ONE line still has quantity that
+        # can be issued now.
+        #
+        # Normal issue path:
+        #   approved/requested - issued > 0
+        #
+        # Partial acknowledgement path:
+        #   if the raiser acknowledged only part of what was issued, the
+        #   shortage should become issuable again. We only unlock this when
+        #   acked > 0 so a fully-issued indent that is merely awaiting its
+        #   first acknowledgement cannot be accidentally issued twice.
         from sqlalchemy import case as _sa_case
-        remaining = _sa_case(
-            (IndentItem.approved_qty > 0, IndentItem.approved_qty),
+        approved_target = _sa_case(
+            (IndentItem.approved_qty.is_not(None), IndentItem.approved_qty),
             else_=IndentItem.requested_qty,
-        ) - func.coalesce(IndentItem.issued_qty, 0)
+        )
+        issued_remaining = approved_target - func.coalesce(IndentItem.issued_qty, 0)
+        acked_qty = func.coalesce(
+            select(func.sum(IndentAcknowledgementItem.received_qty))
+            .where(IndentAcknowledgementItem.indent_item_id == IndentItem.id)
+            .scalar_subquery(),
+            0,
+        )
+        ack_remaining = approved_target - acked_qty
         with_remaining = (
             select(IndentItem.indent_id)
-            .where(remaining > 0)
+            .where((issued_remaining > 0) | ((acked_qty > 0) & (ack_remaining > 0)))
             .group_by(IndentItem.indent_id)
         )
         query = query.where(Indent.id.in_(with_remaining))
@@ -368,6 +386,20 @@ async def get_indent(
     data["raised_by_name"] = user_map.get(indent.raised_by)
     data["approved_by_name"] = user_map.get(indent.approved_by)
 
+    item_ack_rows = await db.execute(
+        select(
+            IndentAcknowledgementItem.indent_item_id,
+            func.coalesce(func.sum(IndentAcknowledgementItem.received_qty), 0),
+        )
+        .where(
+            IndentAcknowledgementItem.indent_item_id.in_(
+                [item.id for item in indent.items if item.id is not None]
+            )
+        )
+        .group_by(IndentAcknowledgementItem.indent_item_id)
+    )
+    item_ack_map = {row[0]: float(row[1] or 0) for row in item_ack_rows.all()}
+
     # Workflow gating fields — kept in sync with list_indents above so the
     # detail page can hide the Approve button from the raiser and from
     # users who aren't the current-level approver. Defaults to False when
@@ -421,6 +453,19 @@ async def get_indent(
 
     for i, item in enumerate(indent.items):
         if i < len(data.get("items", [])):
+            approved_target = item.approved_qty if item.approved_qty is not None else item.requested_qty
+            target_qty = float(approved_target or 0)
+            issued_qty = float(item.issued_qty or 0)
+            acknowledged_qty = item_ack_map.get(item.id, 0.0)
+            issued_remaining_qty = max(target_qty - issued_qty, 0.0)
+            ack_remaining_qty = max(target_qty - acknowledged_qty, 0.0)
+            effective_issue_qty = (
+                ack_remaining_qty
+                if acknowledged_qty > 0 and ack_remaining_qty > issued_remaining_qty
+                else issued_remaining_qty
+            )
+            data["items"][i]["acknowledged_qty"] = acknowledged_qty
+            data["items"][i]["issue_remaining_qty"] = effective_issue_qty
             if item.item:
                 data["items"][i]["item_name"] = item.item.name
                 data["items"][i]["item_code"] = item.item.item_code
