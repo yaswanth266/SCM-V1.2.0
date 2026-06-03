@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Card, Table, Tag, Badge, Button, Modal, Form, Select, DatePicker,
-  Input, InputNumber, Switch, Divider, Space, Collapse, Spin, message, Row, Col, Typography, Alert, Upload
+  Input, InputNumber, Switch, Divider, Space, Collapse, Spin, message, Row, Col, Typography, Alert, Upload, Image
 } from 'antd';
 import {
   FolderAddOutlined, CheckCircleOutlined, PlusOutlined, DeleteOutlined,
@@ -58,6 +58,7 @@ export default function LogisticsDispatch() {
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [form] = Form.useForm();
   const [uploadedUrls, setUploadedUrls] = useState({});
+  const [selectedMdo, setSelectedMdo] = useState(null);
 
   const handleUploadFile = async (file, fieldKey) => {
     const formData = new FormData();
@@ -242,6 +243,7 @@ export default function LogisticsDispatch() {
     setIsReadOnly(true);
     setShowDesigner(true);
     setDispatchType(mdo.dispatch_type);
+    setSelectedMdo(mdo);
 
     let issueData = null;
     try {
@@ -701,6 +703,23 @@ export default function LogisticsDispatch() {
                   <span style={{ color: '#15803d', fontSize: '12px', fontWeight: 600 }}>🟢 Package is currently in transit. Awaiting receipt acknowledgement from the indent raiser.</span>
                 </div>
               )}
+
+              {mdo.status === 'ACKNOWLEDGED' && (
+                <div style={{
+                  background: '#f0fdf4',
+                  border: '1px dashed #22c55e',
+                  padding: '14px',
+                  borderRadius: '8px',
+                  marginBottom: '16px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '12px'
+                }}>
+                  <span style={{ color: '#15803d', fontSize: '12px', fontWeight: 600 }}>✅ Delivery has been acknowledged successfully by the receiver. Click "View details" to inspect Proof of Delivery (POD) signatures and photos.</span>
+                </div>
+              )}
             </>
           ) : mdo.status === 'APPROVED' && mdo.dispatch_type !== 'THIRD_PARTY' && (
             <div style={{
@@ -869,6 +888,7 @@ export default function LogisticsDispatch() {
           setSelectedIssue(null);
           setUploadedUrls({});
           setIsReadOnly(false);
+          setSelectedMdo(null);
         }}
         width="100%"
         footer={null}
@@ -1275,6 +1295,89 @@ export default function LogisticsDispatch() {
             )}
           </div>
 
+          {isReadOnly && selectedMdo && selectedMdo.delivery_acknowledged && (
+            <Card 
+              title={<span style={{ color: '#0f172a', fontWeight: 800 }}>Proof of Delivery (POD) / Receipt Acknowledgement Details</span>}
+              style={{ marginBottom: '20px', borderRadius: '12px', border: '1px solid #cbd5e1', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', background: '#f8fafc' }}
+            >
+              <Row gutter={[24, 16]}>
+                <Col xs={24} md={8}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Receiver Name</Text>
+                  <strong style={{ color: '#0f172a', fontSize: '14px' }}>{selectedMdo.delivery_acknowledged_by_name || '—'}</strong>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Contact / Phone</Text>
+                  <strong style={{ color: '#0f172a', fontSize: '14px' }}>{selectedMdo.delivery_acknowledged_by_phone || '—'}</strong>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Acknowledgement Date</Text>
+                  <strong style={{ color: '#0f172a', fontSize: '14px' }}>{formatDate(selectedMdo.delivery_acknowledged_at)}</strong>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Goods Condition</Text>
+                  <div>
+                    <Tag color={selectedMdo.goods_condition_on_delivery === 'GOOD' ? 'green' : 'orange'} style={{ fontWeight: 'bold' }}>
+                      {selectedMdo.goods_condition_on_delivery || 'GOOD'}
+                    </Tag>
+                  </div>
+                </Col>
+                <Col xs={24} md={16}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Remarks / Discrepancy</Text>
+                  <strong style={{ color: '#0f172a', fontSize: '13px' }}>{selectedMdo.delivery_remarks || '—'}</strong>
+                </Col>
+                
+                <Col xs={24} md={12}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', marginBottom: '10px', fontWeight: 700, letterSpacing: '0.5px' }}>📝 Receiver Signature / Stamp</Text>
+                  {selectedMdo.receiver_signature_url ? (
+                    <div style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', padding: '16px', borderRadius: '12px', border: '2px solid #86efac' }}>
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#166534', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>✓ Uploaded — Click image to zoom full screen</span>
+                      <Image.PreviewGroup>
+                        <Image
+                          src={selectedMdo.receiver_signature_url}
+                          alt="Receiver Signature"
+                          style={{ width: '100%', maxHeight: '280px', objectFit: 'contain', borderRadius: '8px', border: '2px solid #86efac', background: '#fff', display: 'block' }}
+                          preview={{ mask: <span style={{ fontSize: '13px', fontWeight: 600 }}>🔍 Click to Zoom</span> }}
+                        />
+                      </Image.PreviewGroup>
+                    </div>
+                  ) : (
+                    <div style={{ background: '#fafafa', padding: '20px', borderRadius: '10px', border: '1.5px dashed #cbd5e1', textAlign: 'center' }}>
+                      <Text type="secondary" style={{ fontSize: '13px' }}>No signature image uploaded yet</Text>
+                    </div>
+                  )}
+                </Col>
+
+                <Col xs={24} md={12}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', marginBottom: '10px', fontWeight: 700, letterSpacing: '0.5px' }}>📦 Delivery Photos (Evidence)</Text>
+                  {selectedMdo.delivery_photo_urls && selectedMdo.delivery_photo_urls.photo ? (
+                    <div style={{ background: 'linear-gradient(135deg,#f0f9ff,#e0f2fe)', padding: '16px', borderRadius: '12px', border: '2px solid #7dd3fc' }}>
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#075985', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>✓ Evidence Photo — Click to zoom</span>
+                      <Image.PreviewGroup>
+                        <Image
+                          src={selectedMdo.delivery_photo_urls.photo}
+                          alt="Delivery Evidence"
+                          style={{ width: '100%', maxHeight: '280px', objectFit: 'contain', borderRadius: '8px', border: '2px solid #7dd3fc', background: '#fff', display: 'block' }}
+                          preview={{ mask: <span style={{ fontSize: '13px', fontWeight: 600 }}>🔍 Click to Zoom</span> }}
+                        />
+                      </Image.PreviewGroup>
+                      {selectedMdo.delivery_photo_urls.review && (
+                        <div style={{ marginTop: '10px', padding: '10px 14px', background: 'rgba(7,89,133,0.07)', borderRadius: '8px', borderLeft: '3px solid #0891b2' }}>
+                          <Text style={{ fontSize: '12px', color: '#075985', fontStyle: 'italic', display: 'block' }}>
+                            💬 Condition Assessment: {selectedMdo.delivery_photo_urls.review}
+                          </Text>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ background: '#fafafa', padding: '20px', borderRadius: '10px', border: '1.5px dashed #cbd5e1', textAlign: 'center' }}>
+                      <Text type="secondary" style={{ fontSize: '13px' }}>No delivery photos uploaded</Text>
+                    </div>
+                  )}
+                </Col>
+              </Row>
+            </Card>
+          )}
+
           <Card
             title={<span style={{ color: '#475569', fontWeight: 700 }}>SCM Compliance Attachments</span>}
             style={{ marginBottom: '20px', borderRadius: '12px' }}
@@ -1323,7 +1426,7 @@ export default function LogisticsDispatch() {
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '28px' }}>
             {isReadOnly ? (
-              <Button type="primary" onClick={() => { setShowDesigner(false); form.resetFields(); setSelectedIssue(null); setIsReadOnly(false); }}>Close</Button>
+              <Button type="primary" onClick={() => { setShowDesigner(false); form.resetFields(); setSelectedIssue(null); setIsReadOnly(false); setSelectedMdo(null); }}>Close</Button>
             ) : (
               <>
                 <Button onClick={() => { setShowDesigner(false); form.resetFields(); setSelectedIssue(null); }}>Cancel Plan</Button>

@@ -234,6 +234,15 @@ class MdoResponse(BaseModel):
     waybill: Optional[str] = None
     dispatch_type: Optional[str] = None
     handover: Optional[DispatchHandoverResponse] = None
+    # Proof of Delivery / Acknowledgement fields
+    delivery_acknowledged: Optional[bool] = False
+    delivery_acknowledged_at: Optional[datetime] = None
+    delivery_acknowledged_by_name: Optional[str] = None
+    delivery_acknowledged_by_phone: Optional[str] = None
+    receiver_signature_url: Optional[str] = None
+    delivery_photo_urls: Optional[Dict[str, Any]] = None
+    goods_condition_on_delivery: Optional[str] = None
+    delivery_remarks: Optional[str] = None
 
     class Config:
         from_attributes = True

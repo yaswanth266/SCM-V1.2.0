@@ -272,17 +272,12 @@ const Quotations = () => {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      const validItems = editingQuotation
-        ? quotationItems.filter(
-            (i) => i.item_id && Number(i.rate) > 0 && Number(i.discount || 0) < 100
-          )
-        : quotationItems.filter((i) => i.item_id && Number(i.qty) > 0);
+      const validItems = quotationItems.filter(
+        (i) => i.item_id && Number(i.qty) > 0
+      );
 
       if (validItems.length === 0) {
-        message.error(editingQuotation
-          ? 'Please add at least one item with a rate (and discount < 100%)'
-          : 'Please add at least one item with a quantity'
-        );
+        message.error('Please add at least one item with a quantity');
         return;
       }
       setSubmitting(true);
@@ -292,50 +287,53 @@ const Quotations = () => {
           ...values,
           quotation_date: formatDateForAPI(values.quotation_date),
           valid_until: formatDateForAPI(values.valid_until),
-          total_amount: Number(calcSubtotal().toFixed(2)),
-          cgst_amount: Number(calcCGSTTotal().toFixed(2)),
-          sgst_amount: Number(calcSGSTTotal().toFixed(2)),
-          igst_amount: Number(calcIGSTTotal().toFixed(2)),
-          tax_amount: Number(calcTaxTotal().toFixed(2)),
-          grand_total: Number(calcGrandTotal().toFixed(2)),
+          total_amount: 0,
+          cgst_amount: 0,
+          sgst_amount: 0,
+          igst_amount: 0,
+          tax_amount: 0,
+          grand_total: 0,
           items: validItems.map((item) => ({
             item_id: item.item_id,
             qty: item.qty,
             uom_id: item.uom_id || item.primary_uom_id || 1,
-            rate: item.rate,
-            discount_pct: item.discount || item.discount_pct || 0,
-            cgst_rate: item.cgst_rate || 0,
-            sgst_rate: item.sgst_rate || 0,
-            igst_rate: item.igst_rate || 0,
-            tax_rate: (item.cgst_rate || 0) + (item.sgst_rate || 0) + (item.igst_rate || 0),
-            amount: item.amount,
+            rate: 0,
+            discount_pct: 0,
+            cgst_rate: 0,
+            sgst_rate: 0,
+            igst_rate: 0,
+            tax_rate: 0,
+            amount: 0,
           })),
         };
         await api.put(`/procurement/quotations/${editingQuotation.id}`, payload);
         message.success('Quotation updated');
       } else {
-        const rfqPayload = {
-          mr_id: values.mr_id || null,
-          title: `RFQ Sourcing - ${new Date().toLocaleDateString()}`,
-          vendor_ids: values.vendor_ids || [],
-          rfq_date: formatDateForAPI(values.quotation_date),
+        const payload = {
+          ...values,
+          quotation_date: formatDateForAPI(values.quotation_date),
           valid_until: formatDateForAPI(values.valid_until),
-          currency: "INR",
-          delivery_days: values.delivery_days || 0,
-          payment_terms: values.payment_terms || "",
-          remarks: values.remarks || "",
+          total_amount: 0,
+          cgst_amount: 0,
+          sgst_amount: 0,
+          igst_amount: 0,
+          tax_amount: 0,
+          grand_total: 0,
           items: validItems.map((item) => ({
             item_id: item.item_id,
             qty: item.qty,
             uom_id: item.uom_id || item.primary_uom_id || 1,
-            rate: item.rate || 0,
-            discount_pct: item.discount || item.discount_pct || 0,
-            tax_rate: item.tax_percent || item.tax_rate || 0,
-            remarks: item.remarks || "",
+            rate: 0,
+            discount_pct: 0,
+            cgst_rate: 0,
+            sgst_rate: 0,
+            igst_rate: 0,
+            tax_rate: 0,
+            amount: 0,
           })),
         };
-        await api.post('/procurement/rfqs', rfqPayload);
-        message.success('RFQ and supplier invitations created successfully!');
+        await api.post('/procurement/quotations', payload);
+        message.success('Quotation created successfully');
       }
       setDrawerOpen(false);
       form.resetFields();
@@ -430,55 +428,6 @@ const Quotations = () => {
       width: 70,
       render: (val) => val || '-',
     },
-    ...(editingQuotation ? [
-      {
-        title: 'Rate',
-        dataIndex: 'rate',
-        width: 110,
-        render: (val, record) => (
-          <InputNumber min={0} value={val} onChange={(v) => updateQuotationItem(record.key, 'rate', v)} style={{ width: '100%' }} prefix="₹" />
-        ),
-      },
-      {
-        title: 'Disc %',
-        dataIndex: 'discount',
-        width: 80,
-        render: (val, record) => (
-          <InputNumber min={0} max={100} value={val} onChange={(v) => updateQuotationItem(record.key, 'discount', v)} style={{ width: '100%' }} />
-        ),
-      },
-      {
-        title: 'CGST %',
-        dataIndex: 'cgst_rate',
-        width: 80,
-        render: (val, record) => (
-          <InputNumber min={0} max={100} value={val} onChange={(v) => updateQuotationItem(record.key, 'cgst_rate', v)} style={{ width: '100%' }} />
-        ),
-      },
-      {
-        title: 'SGST %',
-        dataIndex: 'sgst_rate',
-        width: 80,
-        render: (val, record) => (
-          <InputNumber min={0} max={100} value={val} onChange={(v) => updateQuotationItem(record.key, 'sgst_rate', v)} style={{ width: '100%' }} />
-        ),
-      },
-      {
-        title: 'IGST %',
-        dataIndex: 'igst_rate',
-        width: 80,
-        render: (val, record) => (
-          <InputNumber min={0} max={100} value={val} onChange={(v) => updateQuotationItem(record.key, 'igst_rate', v)} style={{ width: '100%' }} />
-        ),
-      },
-      {
-        title: 'Amount',
-        dataIndex: 'amount',
-        width: 110,
-        align: 'right',
-        render: (val) => formatCurrency(val),
-      }
-    ] : []),
     {
       title: '',
       width: 40,
@@ -731,28 +680,15 @@ const Quotations = () => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              {editingQuotation ? (
-                <Form.Item name="vendor_id" label="Vendor" rules={[{ required: true, message: 'Required' }]}>
-                  <Select
-                    options={vendors}
-                    placeholder="Select vendor"
-                    showSearch
-                    optionFilterProp="label"
-                    onSearch={(v) => loadVendors(v)}
-                  />
-                </Form.Item>
-              ) : (
-                <Form.Item name="vendor_ids" label="Vendors" rules={[{ required: true, message: 'Required' }]}>
-                  <Select
-                    mode="multiple"
-                    options={vendors}
-                    placeholder="Select multiple vendors"
-                    showSearch
-                    optionFilterProp="label"
-                    onSearch={(v) => loadVendors(v)}
-                  />
-                </Form.Item>
-              )}
+              <Form.Item name="vendor_id" label="Vendor" rules={[{ required: true, message: 'Required' }]}>
+                <Select
+                  options={vendors}
+                  placeholder="Select vendor"
+                  showSearch
+                  optionFilterProp="label"
+                  onSearch={(v) => loadVendors(v)}
+                />
+              </Form.Item>
             </Col>
           </Row>
           <Row gutter={16}>
@@ -773,23 +709,16 @@ const Quotations = () => {
             </Col>
           </Row>
           <Row gutter={16}>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="payment_terms" label="Payment Terms">
                 <Input placeholder="e.g. Net 30 days" />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="remarks" label="Remarks">
                 <Input placeholder="Any remarks..." />
               </Form.Item>
             </Col>
-            {!editingQuotation && (
-              <Col span={8}>
-                <Form.Item name="with_vehicle" label="Vehicle Needed?" valuePropName="checked" initialValue={false}>
-                  <Switch checkedChildren="Yes" unCheckedChildren="No" />
-                </Form.Item>
-              </Col>
-            )}
           </Row>
         </Form>
 
@@ -800,52 +729,11 @@ const Quotations = () => {
           rowKey="key"
           pagination={false}
           size="small"
-          scroll={{ x: 900 }}
           footer={() => (
             <Button type="dashed" onClick={addQuotationItemRow} icon={<PlusOutlined />} block>
               Add Item
             </Button>
           )}
-          summary={editingQuotation ? () => (
-            <Table.Summary>
-              <Table.Summary.Row>
-                <Table.Summary.Cell colSpan={9} align="right"><Text strong>Subtotal:</Text></Table.Summary.Cell>
-                <Table.Summary.Cell align="right"><Text>{formatCurrency(calcSubtotal())}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell />
-              </Table.Summary.Row>
-              {calcCGSTTotal() > 0 && (
-                <Table.Summary.Row>
-                  <Table.Summary.Cell colSpan={9} align="right"><Text strong>CGST:</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell align="right"><Text>{formatCurrency(calcCGSTTotal())}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell />
-                </Table.Summary.Row>
-              )}
-              {calcSGSTTotal() > 0 && (
-                <Table.Summary.Row>
-                  <Table.Summary.Cell colSpan={9} align="right"><Text strong>SGST:</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell align="right"><Text>{formatCurrency(calcSGSTTotal())}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell />
-                </Table.Summary.Row>
-              )}
-              {calcIGSTTotal() > 0 && (
-                <Table.Summary.Row>
-                  <Table.Summary.Cell colSpan={9} align="right"><Text strong>IGST:</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell align="right"><Text>{formatCurrency(calcIGSTTotal())}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell />
-                </Table.Summary.Row>
-              )}
-              <Table.Summary.Row>
-                <Table.Summary.Cell colSpan={9} align="right"><Text strong>Tax Total:</Text></Table.Summary.Cell>
-                <Table.Summary.Cell align="right"><Text>{formatCurrency(calcTaxTotal())}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell />
-              </Table.Summary.Row>
-              <Table.Summary.Row>
-                <Table.Summary.Cell colSpan={9} align="right"><Text strong style={{ fontSize: 15 }}>Grand Total:</Text></Table.Summary.Cell>
-                <Table.Summary.Cell align="right"><Text strong style={{ fontSize: 15 }}>{formatCurrency(calcGrandTotal())}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell />
-              </Table.Summary.Row>
-            </Table.Summary>
-          ) : undefined}
         />
       </Drawer>
     </div>

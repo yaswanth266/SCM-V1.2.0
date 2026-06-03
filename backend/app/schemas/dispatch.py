@@ -52,6 +52,15 @@ class DispatchResponse(DispatchHeaderBase):
     items: List[DispatchItemResponse]
     destination_warehouse_name: Optional[str] = None
     destination_user_name: Optional[str] = None
+    
+    # Acknowledgement details
+    delivery_acknowledged: bool = False
+    delivery_acknowledged_at: Optional[Any] = None
+    delivery_acknowledged_by_name: Optional[str] = None
+    receiver_signature_url: Optional[str] = None
+    delivery_photo_urls: Optional[Any] = None
+    goods_condition_on_delivery: Optional[str] = None
+    delivery_remarks: Optional[str] = None
 
     class Config:
         from_attributes = True

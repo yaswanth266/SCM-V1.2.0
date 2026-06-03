@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Button, Form, Input, InputNumber, Select, Space, Card, Row, Col,
-  Table, Divider, Typography, Tag, Spin, message, Upload
+  Table, Divider, Typography, Tag, Spin, message, Upload, Image
 } from 'antd';
 import {
   ArrowLeftOutlined, CheckCircleOutlined,
@@ -366,6 +366,7 @@ const AcknowledgeDelivery = () => {
             size="small"
             mode="select"
             availableSerials={dispatchedSerials}
+            width={640}
           />
         );
       }
@@ -575,9 +576,10 @@ const AcknowledgeDelivery = () => {
               >
                 <Form form={form} layout="vertical">
                   {/* Upload Signature Proof / Stamp Photo */}
-                  <Form.Item name="signature_image" label={<span style={{ fontWeight: 600 }}>Upload Signature / Stamp Photo</span>}>
+                  <Form.Item name="signature_image" label={<span style={{ fontWeight: 600, fontSize: '13px' }}>📝 Receiver Signature / Stamp Photo</span>}>
                     <Upload
                       maxCount={1}
+                      accept="image/*"
                       customRequest={async ({ file, onSuccess, onError }) => {
                         try {
                           await handleUploadFile(file, 'signature_image');
@@ -586,16 +588,44 @@ const AcknowledgeDelivery = () => {
                           onError(err);
                         }
                       }}
-                      showUploadList={true}
+                      showUploadList={false}
                     >
-                      <Button icon={<UploadOutlined />}>Upload Signature Proof File</Button>
+                      <Button
+                        icon={<UploadOutlined />}
+                        style={{
+                          background: uploadedUrls.signature_image ? 'linear-gradient(135deg,#16a34a,#15803d)' : 'linear-gradient(135deg,#4f46e5,#3730a3)',
+                          color: '#fff',
+                          borderColor: 'transparent',
+                          fontWeight: 600,
+                          borderRadius: '8px',
+                          height: '40px',
+                          paddingInline: '20px'
+                        }}
+                      >
+                        {uploadedUrls.signature_image ? '✓ Signature Uploaded — Click to Replace' : 'Upload Signature / Stamp Photo'}
+                      </Button>
                     </Upload>
                   </Form.Item>
 
+                  {uploadedUrls.signature_image && (
+                    <div style={{ marginBottom: '20px', background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', padding: '16px', borderRadius: '12px', border: '2px solid #86efac' }}>
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#166534', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>✓ Signature Preview — Click image to zoom</span>
+                      <Image.PreviewGroup>
+                        <Image
+                          src={uploadedUrls.signature_image}
+                          alt="Receiver Signature Proof"
+                          style={{ width: '100%', maxHeight: '260px', objectFit: 'contain', borderRadius: '8px', border: '2px solid #86efac', background: '#fff', display: 'block' }}
+                          preview={{ mask: <span style={{ fontSize: '13px', fontWeight: 600 }}>🔍 Click to Zoom</span> }}
+                        />
+                      </Image.PreviewGroup>
+                    </div>
+                  )}
+
                   {/* Upload Material Photos */}
-                  <Form.Item name="materials_photos" label={<span style={{ fontWeight: 600 }}>Upload Materials Condition Photos</span>}>
+                  <Form.Item name="materials_photos" label={<span style={{ fontWeight: 600, fontSize: '13px' }}>📦 Materials Condition Photo Evidence</span>}>
                     <Upload
                       maxCount={1}
+                      accept="image/*"
                       customRequest={async ({ file, onSuccess, onError }) => {
                         try {
                           await handleUploadFile(file, 'materials_photos');
@@ -604,22 +634,42 @@ const AcknowledgeDelivery = () => {
                           onError(err);
                         }
                       }}
-                      showUploadList={true}
+                      showUploadList={false}
                     >
-                      <Button icon={<UploadOutlined />}>Upload Received Materials Photo</Button>
+                      <Button
+                        icon={<UploadOutlined />}
+                        style={{
+                          background: uploadedUrls.materials_photos ? 'linear-gradient(135deg,#16a34a,#15803d)' : 'linear-gradient(135deg,#0891b2,#0e7490)',
+                          color: '#fff',
+                          borderColor: 'transparent',
+                          fontWeight: 600,
+                          borderRadius: '8px',
+                          height: '40px',
+                          paddingInline: '20px'
+                        }}
+                      >
+                        {uploadedUrls.materials_photos ? '✓ Photo Uploaded — Click to Replace' : 'Upload Materials Condition Photo'}
+                      </Button>
                     </Upload>
                   </Form.Item>
 
                   {uploadedUrls.materials_photos && (
-                    <div style={{ marginTop: '12px', marginBottom: '16px', background: '#fafafa', padding: '12px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#475569', marginBottom: '6px' }}>Uploaded Photo Review Preview</span>
-                      <img src={uploadedUrls.materials_photos} alt="Materials Condition Proof" style={{ maxWidth: '100%', maxHeight: '180px', borderRadius: '6px', border: '1px solid #cbd5e1', display: 'block', margin: '0 auto' }} />
+                    <div style={{ marginBottom: '20px', background: 'linear-gradient(135deg,#f0f9ff,#e0f2fe)', padding: '16px', borderRadius: '12px', border: '2px solid #7dd3fc' }}>
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#075985', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>✓ Materials Photo Preview — Click image to zoom</span>
+                      <Image.PreviewGroup>
+                        <Image
+                          src={uploadedUrls.materials_photos}
+                          alt="Materials Condition Evidence"
+                          style={{ width: '100%', maxHeight: '280px', objectFit: 'contain', borderRadius: '8px', border: '2px solid #7dd3fc', background: '#fff', display: 'block' }}
+                          preview={{ mask: <span style={{ fontSize: '13px', fontWeight: 600 }}>🔍 Click to Zoom</span> }}
+                        />
+                      </Image.PreviewGroup>
                     </div>
                   )}
 
                   {uploadedUrls.materials_photos && (
-                    <Form.Item name="photo_review" label={<span style={{ fontWeight: 600 }}>Photo Review Remarks / Condition Assessment</span>} rules={[{ required: true, message: 'Please provide a review for the uploaded photos' }]}>
-                      <TextArea rows={2} placeholder="E.g., Checked items inside box; packaging intact, no leakage found." />
+                    <Form.Item name="photo_review" label={<span style={{ fontWeight: 600 }}>Photo Condition Assessment Remarks</span>} rules={[{ required: true, message: 'Please describe the condition visible in the photo' }]}>
+                      <TextArea rows={3} placeholder="E.g., Checked items inside box; packaging intact, no leakage found, all serial tags visible." />
                     </Form.Item>
                   )}
                 </Form>

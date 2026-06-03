@@ -319,6 +319,13 @@ async def list_dispatches(
             "destination_user_id": h.destination_user_id,
             "destination_warehouse_name": h.destination_warehouse.name if h.destination_warehouse else None,
             "destination_user_name": f"{h.destination_user.first_name} {h.destination_user.last_name or ''}".strip() if h.destination_user else None,
+            "delivery_acknowledged": h.delivery_acknowledged,
+            "delivery_acknowledged_at": h.delivery_acknowledged_at,
+            "delivery_acknowledged_by_name": h.delivery_acknowledged_by_name,
+            "receiver_signature_url": h.receiver_signature_url,
+            "delivery_photo_urls": h.delivery_photo_urls,
+            "goods_condition_on_delivery": h.goods_condition_on_delivery,
+            "delivery_remarks": h.delivery_remarks,
             "items": []
         }
         for item in h.items:
@@ -396,6 +403,13 @@ async def get_dispatch(
         "destination_user_id": h.destination_user_id,
         "destination_warehouse_name": h.destination_warehouse.name if h.destination_warehouse else None,
         "destination_user_name": f"{h.destination_user.first_name} {h.destination_user.last_name or ''}".strip() if h.destination_user else None,
+        "delivery_acknowledged": h.delivery_acknowledged,
+        "delivery_acknowledged_at": h.delivery_acknowledged_at,
+        "delivery_acknowledged_by_name": h.delivery_acknowledged_by_name,
+        "receiver_signature_url": h.receiver_signature_url,
+        "delivery_photo_urls": h.delivery_photo_urls,
+        "goods_condition_on_delivery": h.goods_condition_on_delivery,
+        "delivery_remarks": h.delivery_remarks,
         "items": items_list
     }
 
