@@ -1251,6 +1251,27 @@ class EmployeeResponse(EmployeeCreate):
     position_code: Optional[str] = None
     model_config = {"from_attributes": True}
 
+    @field_validator("pan_number")
+    @classmethod
+    def val_pan(cls, v):
+        v = _strip_or_none(v, 10)
+        return v.upper() if v else None
+
+    @field_validator("aadhaar_number")
+    @classmethod
+    def val_aadhaar(cls, v):
+        return _strip_or_none(v, 12)
+
+    @field_validator("email")
+    @classmethod
+    def val_email(cls, v):
+        return _strip_or_none(v, 100)
+
+    @field_validator("phone")
+    @classmethod
+    def val_phone(cls, v):
+        return _strip_or_none(v, 15)
+
 
 # ===================== WAREHOUSE HIERARCHY =====================
 

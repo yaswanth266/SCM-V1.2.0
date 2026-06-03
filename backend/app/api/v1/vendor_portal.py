@@ -48,7 +48,7 @@ async def supplier_list_rfqs(
     # Fetch all quotations for this vendor with their parent MR (if any)
     res = await db.execute(
         select(Quotation)
-        .where(Quotation.vendor_id == vendor_id)
+        .where(Quotation.vendor_id == vendor_id, Quotation.status != "draft")
         .options(
             selectinload(Quotation.material_request).selectinload(MaterialRequest.items)
                 .selectinload(MaterialRequestItem.item),

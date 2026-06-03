@@ -2536,11 +2536,13 @@ async def _employee_unique_value(db: AsyncSession, column, value, employee_id: i
     return None if exists else value
 
 
-async def _project_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None) -> int | None:
+async def _project_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None, cache: dict = None) -> int | None:
     project_name = _external_text(row, "project.name", "project_name", "projectName", "project", max_len=255)
     project_code = _external_text(row, "project.code", "project_code", "projectCode", max_len=50) or _external_code(project_name, 50)
     if not project_code:
         return None
+    if cache is not None and project_code.lower() in cache["projects"]:
+        return cache["projects"][project_code.lower()]
     project = (await db.execute(select(Project).where(func.lower(Project.code) == project_code.lower()))).scalar_one_or_none()
     if not project:
         if not organization_id:
@@ -2553,13 +2555,17 @@ async def _project_id_from_external(db: AsyncSession, row: dict, stats: dict[str
         stats["projects_created"] += 1
     elif project_name and project.name != project_name:
         project.name = project_name
+    if cache is not None:
+        cache["projects"][project_code.lower()] = project.id
     return project.id
 
 
-async def _office_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int]) -> int | None:
+async def _office_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int], cache: dict = None) -> int | None:
     office_name = _external_text(row, "office.name", "office_name", "officeName", "office", "branch", "location", max_len=255)
     if not office_name:
         return None
+    if cache is not None and office_name.lower() in cache["offices"]:
+        return cache["offices"][office_name.lower()]
     office = (await db.execute(select(Office).where(func.lower(Office.name) == office_name.lower()))).scalar_one_or_none()
     
     level = _external_text(row, "office.level", "office_level", "officeLevel", "level", max_len=50)
@@ -2609,24 +2615,35 @@ async def _office_id_from_external(db: AsyncSession, row: dict, stats: dict[str,
         if address:
             office.address = address
             
+    if cache is not None:
+        cache["offices"][office_name.lower()] = office.id
     return office.id
 
 
-async def _role_id_from_external(db: AsyncSession, row: dict) -> int | None:
+async def _role_id_from_external(db: AsyncSession, row: dict, cache: dict = None) -> int | None:
     role_code = _external_text(row, "position.role_code", "role_code", "roleCode", max_len=50)
     role_name = _external_text(row, "position.role_name", "role_name", "roleName", "role", max_len=100)
+    if cache is not None:
+        if role_code and role_code.lower() in cache["roles"]:
+            return cache["roles"][role_code.lower()]
+        if role_name and role_name.lower() in cache["roles"]:
+            return cache["roles"][role_name.lower()]
     if role_code:
         role = (await db.execute(select(Role).where(func.lower(Role.code) == role_code.lower(), Role.is_active == True))).scalar_one_or_none()  # noqa: E712
         if role:
+            if cache is not None:
+                cache["roles"][role_code.lower()] = role.id
             return role.id
     if role_name:
         role = (await db.execute(select(Role).where(func.lower(Role.name) == role_name.lower(), Role.is_active == True))).scalar_one_or_none()  # noqa: E712
         if role:
+            if cache is not None:
+                cache["roles"][role_name.lower()] = role.id
             return role.id
     return None
 
 
-async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None):
+async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None, cache: dict = None):
     position_id = row.get("position_id")
     if position_id:
         exists = (await db.execute(select(Position.id).where(Position.id == position_id))).scalar_one_or_none()
@@ -2641,10 +2658,12 @@ async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[st
     position_code = position_code or _external_code(position_name, 100)
     if not position_code or not position_name:
         return None
+    if cache is not None and position_code.lower() in cache["positions"]:
+        return cache["positions"][position_code.lower()]
     position = (await db.execute(select(Position).where(func.lower(Position.code) == position_code.lower()))).scalar_one_or_none()
-    project_id = await _project_id_from_external(db, row, stats, organization_id)
-    office_id = await _office_id_from_external(db, row, stats)
-    role_id = await _role_id_from_external(db, row)
+    project_id = await _project_id_from_external(db, row, stats, organization_id, cache)
+    office_id = await _office_id_from_external(db, row, stats, cache)
+    role_id = await _role_id_from_external(db, row, cache)
     if not position:
         position = Position(
             code=position_code,
@@ -2669,10 +2688,12 @@ async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[st
         position.section = _external_text(row, "position.section", "section", "section_name", "sectionName") or position.section
         position.project_id = project_id or position.project_id
         position.office_id = office_id or position.office_id
+    if cache is not None:
+        cache["positions"][position_code.lower()] = position.id
     return position.id
 
 
-async def _upsert_external_employee(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None = None) -> tuple[bool, bool]:
+async def _upsert_external_employee(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None = None, cache: dict = None) -> tuple[bool, bool]:
     employee_code = _external_text(row, "employee.employee_code", "employee_code", "employeeCode", "code", "emp_code", "empCode", max_len=50)
     if not employee_code:
         return False, False
@@ -2706,10 +2727,35 @@ async def _upsert_external_employee(db: AsyncSession, row: dict, stats: dict[str
         12,
     )
     employee.phone = phone or employee.phone
-    employee.email = await _employee_unique_value(db, Employee.email, email, employee.id) if email else employee.email
-    employee.pan_number = await _employee_unique_value(db, Employee.pan_number, pan_number, employee.id) if pan_number else employee.pan_number
-    employee.aadhaar_number = await _employee_unique_value(db, Employee.aadhaar_number, aadhaar_number, employee.id) if aadhaar_number else employee.aadhaar_number
-    employee.position_id = await _position_id_from_external(db, row, stats, organization_id) or employee.position_id
+    
+    if cache is not None:
+        if email:
+            existing_id = cache["emails"].get(email.lower())
+            if existing_id is None or existing_id == employee.id:
+                employee.email = email
+                cache["emails"][email.lower()] = employee.id
+            else:
+                employee.email = None
+        if pan_number:
+            existing_id = cache["pans"].get(pan_number.upper())
+            if existing_id is None or existing_id == employee.id:
+                employee.pan_number = pan_number
+                cache["pans"][pan_number.upper()] = employee.id
+            else:
+                employee.pan_number = None
+        if aadhaar_number:
+            existing_id = cache["aadhaars"].get(aadhaar_number)
+            if existing_id is None or existing_id == employee.id:
+                employee.aadhaar_number = aadhaar_number
+                cache["aadhaars"][aadhaar_number] = employee.id
+            else:
+                employee.aadhaar_number = None
+    else:
+        employee.email = await _employee_unique_value(db, Employee.email, email, employee.id) if email else employee.email
+        employee.pan_number = await _employee_unique_value(db, Employee.pan_number, pan_number, employee.id) if pan_number else employee.pan_number
+        employee.aadhaar_number = await _employee_unique_value(db, Employee.aadhaar_number, aadhaar_number, employee.id) if aadhaar_number else employee.aadhaar_number
+        
+    employee.position_id = await _position_id_from_external(db, row, stats, organization_id, cache) or employee.position_id
     return True, created
 
 
@@ -2765,12 +2811,53 @@ async def sync_employees_from_external_api(
     if not rows:
         raise HTTPException(status_code=422, detail="Employee API response did not contain employee rows")
 
+    # In-memory Cache dictionary to prevent N+1 query disaster
+    cache = {
+        "projects": {},
+        "offices": {},
+        "roles": {},
+        "positions": {},
+        "emails": {},
+        "pans": {},
+        "aadhaars": {},
+    }
+    
+    # Pre-populate project codes
+    projects = (await db.execute(select(Project.code, Project.id))).all()
+    cache["projects"] = {code.lower(): pid for code, pid in projects if code}
+
+    # Pre-populate office names
+    offices = (await db.execute(select(Office.name, Office.id))).all()
+    cache["offices"] = {name.lower(): oid for name, oid in offices if name}
+
+    # Pre-populate role codes and names
+    roles = (await db.execute(select(Role.code, Role.name, Role.id))).all()
+    for code, name, rid in roles:
+        if code:
+            cache["roles"][code.lower()] = rid
+        if name:
+            cache["roles"][name.lower()] = rid
+
+    # Pre-populate position codes
+    positions = (await db.execute(select(Position.code, Position.id))).all()
+    cache["positions"] = {code.lower(): pos_id for code, pos_id in positions if code}
+
+    # Pre-populate uniqueness check caches
+    employees_data = (await db.execute(select(Employee.id, Employee.email, Employee.pan_number, Employee.aadhaar_number))).all()
+    for emp_id, email, pan, aadhaar in employees_data:
+        if email:
+            cache["emails"][email.lower()] = emp_id
+        if pan:
+            cache["pans"][pan.upper()] = emp_id
+        if aadhaar:
+            cache["aadhaars"][aadhaar] = emp_id
+
     created = 0
     updated = 0
     skipped = 0
     org_stats = {"projects_created": 0, "offices_created": 0, "positions_created": 0}
     for row in rows:
-        processed, was_created = await _upsert_external_employee(db, row, org_stats, current_user.organization_id)
+        processed, was_created = await _upsert_external_employee(db, row, org_stats, current_user.organization_id, cache=cache)
         if not processed:
             skipped += 1
         elif was_created:
