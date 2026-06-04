@@ -1231,6 +1231,23 @@ async def reject_quotation(
     return {"success": True, "message": "Quotation rejected"}
 
 
+@router.post("/procurement/quotations/{quotation_id}/submit")
+@router.put("/procurement/quotations/{quotation_id}/submit")
+async def submit_quotation_to_vendor(
+    quotation_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_any_role(
+        "super_admin", "admin", "purchase_manager",
+    )),
+):
+    q = await _require(db, Quotation, quotation_id, "Quotation")
+    if q.status != "draft":
+        raise HTTPException(status_code=400, detail=f"Only draft quotations can be submitted to vendor")
+    q.status = "submitted"
+    await db.flush()
+    return {"success": True, "message": "Quotation sent to vendor"}
+
+
 # ==================== warehouse: purchase returns DELETE ====================
 
 @router.delete("/warehouse/purchase-returns/{return_id}")

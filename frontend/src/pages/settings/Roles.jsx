@@ -5,7 +5,8 @@ import {
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, SaveOutlined, CheckOutlined,
-  RightOutlined, DownOutlined,
+  RightOutlined, DownOutlined, SearchOutlined, EyeOutlined, PlusSquareOutlined,
+  CheckCircleOutlined, ExportOutlined, CheckSquareOutlined,
 } from '@ant-design/icons';
 import PageHeader from '../../components/PageHeader';
 import api from '../../config/api';
@@ -86,6 +87,7 @@ const Roles = () => {
   const [form] = Form.useForm();
   const [permissionsLoading, setPermissionsLoading] = useState(false);
   const [expandedModules, setExpandedModules] = useState({});
+  const [roleSearch, setRoleSearch] = useState('');
 
   const toggleModule = (moduleKey) => {
     setExpandedModules((prev) => ({
@@ -328,54 +330,81 @@ const Roles = () => {
               </Button>
             }
           >
-            <Spin spinning={loading}>
-              <List
-                size="small"
-                dataSource={roles}
-                renderItem={(role) => (
-                  <List.Item
-                    key={role.id}
-                    onClick={() => handleSelectRole(role)}
-                    style={{
-                      cursor: 'pointer',
-                      backgroundColor: selectedRole?.id === role.id ? '#e6f7ff' : undefined,
-                      padding: '8px 12px',
-                      borderLeft: selectedRole?.id === role.id ? '3px solid #eb2f96' : '3px solid transparent',
-                    }}
-                    actions={[
-                      <Button
-                        key="edit"
-                        type="text"
-                        size="small"
-                        icon={<EditOutlined />}
-                        onClick={(e) => { e.stopPropagation(); handleEditRole(role); }}
-                      />,
-                      <Popconfirm
-                        key="delete"
-                        title="Delete this role?"
-                        onConfirm={(e) => { e?.stopPropagation(); handleDeleteRole(role.id); }}
-                        okText="Delete"
-                        okButtonProps={{ danger: true }}
-                      >
-                        <Button
-                          type="text"
-                          size="small"
-                          danger
-                          icon={<DeleteOutlined />}
-                          onClick={(e) => e.stopPropagation()}
-                        />
-                      </Popconfirm>,
-                    ]}
-                  >
-                    <List.Item.Meta
-                      title={<Text strong={selectedRole?.id === role.id}>{role.name}</Text>}
-                      description={<Text type="secondary" style={{ fontSize: 12 }}>{role.description || 'No description'}</Text>}
-                    />
-                  </List.Item>
-                )}
-                locale={{ emptyText: 'No roles found' }}
+            <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 230px)' }}>
+              <Input
+                placeholder="Search roles..."
+                prefix={<SearchOutlined style={{ color: 'rgba(0,0,0,0.25)' }} />}
+                value={roleSearch}
+                onChange={(e) => setRoleSearch(e.target.value)}
+                style={{ marginBottom: 12, borderRadius: '8px' }}
+                allowClear
               />
-            </Spin>
+              <div 
+                className="roles-list-container" 
+                style={{ 
+                  flex: 1, 
+                  overflowY: 'auto', 
+                  paddingRight: '4px' 
+                }}
+              >
+                <Spin spinning={loading}>
+                  <List
+                    size="small"
+                    dataSource={roles.filter((role) =>
+                      role.name.toLowerCase().includes(roleSearch.toLowerCase()) ||
+                      (role.description || '').toLowerCase().includes(roleSearch.toLowerCase())
+                    )}
+                    renderItem={(role) => (
+                      <List.Item
+                        key={role.id}
+                        onClick={() => handleSelectRole(role)}
+                        className={`role-list-item ${selectedRole?.id === role.id ? 'active' : ''}`}
+                        style={{
+                          cursor: 'pointer',
+                          padding: '12px 16px',
+                          borderRadius: '8px',
+                          marginBottom: '6px',
+                          transition: 'all 0.2s ease',
+                          borderLeft: selectedRole?.id === role.id ? '4px solid #b70051' : '4px solid transparent',
+                          background: selectedRole?.id === role.id ? 'linear-gradient(90deg, #fff5f8 0%, #ffffff 100%)' : '#ffffff',
+                          boxShadow: selectedRole?.id === role.id ? '0 2px 8px rgba(183, 0, 81, 0.08)' : 'none',
+                        }}
+                        actions={[
+                          <Button
+                            key="edit"
+                            type="text"
+                            size="small"
+                            icon={<EditOutlined />}
+                            onClick={(e) => { e.stopPropagation(); handleEditRole(role); }}
+                          />,
+                          <Popconfirm
+                            key="delete"
+                            title="Delete this role?"
+                            onConfirm={(e) => { e?.stopPropagation(); handleDeleteRole(role.id); }}
+                            okText="Delete"
+                            okButtonProps={{ danger: true }}
+                          >
+                            <Button
+                              type="text"
+                              size="small"
+                              danger
+                              icon={<DeleteOutlined />}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          </Popconfirm>,
+                        ]}
+                      >
+                        <List.Item.Meta
+                          title={<Text strong={selectedRole?.id === role.id}>{role.name}</Text>}
+                          description={<Text type="secondary" style={{ fontSize: 12 }}>{role.description || 'No description'}</Text>}
+                        />
+                      </List.Item>
+                    )}
+                    locale={{ emptyText: 'No roles found' }}
+                  />
+                </Spin>
+              </div>
+            </div>
           </Card>
         </Col>
 
@@ -399,26 +428,53 @@ const Roles = () => {
           >
             <Spin spinning={permissionsLoading}>
               {selectedRole ? (
-                <div style={{ overflowX: 'auto' }}>
+                <div 
+                  className="permissions-table-container"
+                  style={{ 
+                    maxHeight: 'calc(100vh - 230px)', 
+                    overflowY: 'auto', 
+                    overflowX: 'auto', 
+                    position: 'relative',
+                    borderRadius: '8px',
+                    border: '1px solid #e2e8f0',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
+                  }}
+                >
                   <table className="permissions-table" style={{ width: '100%', borderCollapse: 'separate', borderSpacing: 0 }}>
                     <thead>
                       <tr>
-                        <th style={{ textAlign: 'left', padding: '12px 12px', borderBottom: '2px solid #f0f0f0', width: 260, fontWeight: 600 }}>
+                        <th style={{ textAlign: 'left', padding: '16px 16px', borderBottom: '2px solid #e2e8f0', width: 280, fontWeight: 700, fontSize: 14, color: '#1e293b' }}>
                           Module / Tab
                         </th>
-                        {PERMISSION_ACTIONS.map((act) => (
-                          <th key={act.key} style={{ textAlign: 'center', padding: '12px 12px', borderBottom: '2px solid #f0f0f0', fontWeight: 600, minWidth: 80 }}>
-                            <div style={{ marginBottom: 6 }}>{act.label}</div>
-                            <Checkbox
-                              checked={isColAllChecked(act.key)}
-                              indeterminate={isColSomeChecked(act.key)}
-                              onChange={(e) => handleSelectAllColumn(act.key, e.target.checked)}
-                              style={{ fontSize: 11 }}
-                            />
-                          </th>
-                        ))}
-                        <th style={{ textAlign: 'center', padding: '12px 12px', borderBottom: '2px solid #f0f0f0', fontWeight: 600, minWidth: 80 }}>
-                          Select All
+                        {PERMISSION_ACTIONS.map((act) => {
+                          const iconMap = {
+                            view: <EyeOutlined style={{ fontSize: 13, marginRight: 5, color: '#3b82f6' }} />,
+                            create: <PlusSquareOutlined style={{ fontSize: 13, marginRight: 5, color: '#10b981' }} />,
+                            edit: <EditOutlined style={{ fontSize: 13, marginRight: 5, color: '#f59e0b' }} />,
+                            delete: <DeleteOutlined style={{ fontSize: 13, marginRight: 5, color: '#ef4444' }} />,
+                            approve: <CheckCircleOutlined style={{ fontSize: 13, marginRight: 5, color: '#8b5cf6' }} />,
+                            export: <ExportOutlined style={{ fontSize: 13, marginRight: 5, color: '#06b6d4' }} />,
+                          };
+                          return (
+                            <th key={act.key} style={{ textAlign: 'center', padding: '16px 12px', borderBottom: '2px solid #e2e8f0', fontWeight: 600, minWidth: 95 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8, color: '#334155' }}>
+                                {iconMap[act.key]}
+                                <span style={{ fontSize: 13 }}>{act.label}</span>
+                              </div>
+                              <Checkbox
+                                checked={isColAllChecked(act.key)}
+                                indeterminate={isColSomeChecked(act.key)}
+                                onChange={(e) => handleSelectAllColumn(act.key, e.target.checked)}
+                                style={{ fontSize: 11 }}
+                              />
+                            </th>
+                          );
+                        })}
+                        <th style={{ textAlign: 'center', padding: '16px 12px', borderBottom: '2px solid #e2e8f0', fontWeight: 600, minWidth: 95 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8, color: '#334155' }}>
+                            <CheckSquareOutlined style={{ fontSize: 13, marginRight: 5, color: '#b70051' }} />
+                            <span style={{ fontSize: 13 }}>Select All</span>
+                          </div>
                         </th>
                       </tr>
                     </thead>
@@ -450,11 +506,20 @@ const Roles = () => {
                           transition: all 0.2s cubic-bezier(0.12, 0.4, 0.29, 1.46) !important;
                         }
                         
-                        /* Micro-scale and color feedback on hover */
-                        .permissions-table .ant-checkbox-wrapper:hover .ant-checkbox-inner,
-                        .permissions-table .ant-checkbox:hover .ant-checkbox-inner {
+                        /* Micro-scale and color feedback on hover, but only for unchecked */
+                        .permissions-table .ant-checkbox-wrapper:hover .ant-checkbox:not(.ant-checkbox-checked) .ant-checkbox-inner,
+                        .permissions-table .ant-checkbox:not(.ant-checkbox-checked):hover .ant-checkbox-inner {
                           border-color: #b70051 !important;
                           background-color: #fff5f8 !important;
+                          box-shadow: 0 0 0 3px rgba(183, 0, 81, 0.15) !important;
+                          transform: scale(1.08);
+                        }
+                        
+                        /* Hover style for checked checkbox */
+                        .permissions-table .ant-checkbox-wrapper:hover .ant-checkbox-checked .ant-checkbox-inner,
+                        .permissions-table .ant-checkbox-checked:hover .ant-checkbox-inner {
+                          border-color: #b70051 !important;
+                          background-color: #9d0042 !important; /* Slightly darker crimson for hover feedback */
                           box-shadow: 0 0 0 3px rgba(183, 0, 81, 0.15) !important;
                           transform: scale(1.08);
                         }
@@ -465,15 +530,16 @@ const Roles = () => {
                           border-color: #b70051 !important;
                         }
                         
-                        /* Crisp checkmark scaling inside the checkbox */
+                        /* Crisp checkmark scaling inside the checkbox, centered correctly */
                         .permissions-table .ant-checkbox-checked .ant-checkbox-inner::after {
-                          width: 5.5px !important;
-                          height: 9.5px !important;
+                          width: 5.71px !important;
+                          height: 9.14px !important;
                           border: 2px solid #ffffff !important;
                           border-top: 0 !important;
                           border-left: 0 !important;
-                          left: 4.25px !important;
-                          top: 0.75px !important;
+                          left: 21.5% !important;
+                          top: 50% !important;
+                          transform: rotate(45deg) scale(1) translate(-50%, -50%) !important;
                         }
                         
                         /* Premium Indeterminate styling */
@@ -502,42 +568,98 @@ const Roles = () => {
                         .permissions-table tbody td:not(.permissions-module-title-cell):hover {
                           background-color: rgba(183, 0, 81, 0.05) !important;
                         }
+                        
+                        /* Premium Scrollbar Styling */
+                        .roles-list-container::-webkit-scrollbar,
+                        .permissions-table-container::-webkit-scrollbar {
+                          width: 6px;
+                          height: 6px;
+                        }
+                        .roles-list-container::-webkit-scrollbar-track,
+                        .permissions-table-container::-webkit-scrollbar-track {
+                          background: transparent;
+                        }
+                        .roles-list-container::-webkit-scrollbar-thumb,
+                        .permissions-table-container::-webkit-scrollbar-thumb {
+                          background: #cbd5e1;
+                          border-radius: 3px;
+                        }
+                        .roles-list-container::-webkit-scrollbar-thumb:hover,
+                        .permissions-table-container::-webkit-scrollbar-thumb:hover {
+                          background: #94a3b8;
+                        }
+
+                        /* Sticky headers styling for permissions table */
+                        .permissions-table th {
+                          position: sticky !important;
+                          top: 0 !important;
+                          background: #ffffff !important;
+                          z-index: 10 !important;
+                          box-shadow: inset 0 -2px 0 #e2e8f0 !important;
+                        }
+                        
+                        /* Premium Role List Item Styling */
+                        .role-list-item {
+                          border: 1px solid #f1f5f9 !important;
+                        }
+                        .role-list-item:hover {
+                          background-color: #f8fafc !important;
+                          border-color: #e2e8f0 !important;
+                          transform: translateX(2px);
+                        }
+                        .role-list-item.active {
+                          border-color: #fce7f3 !important;
+                        }
+                        .role-list-item.active:hover {
+                          background: linear-gradient(90deg, #fff5f8 0%, #ffffff 100%) !important;
+                          border-color: #fce7f3 !important;
+                          transform: none;
+                        }
                       `}</style>
                       {visibleRows.map((mod, idx) => {
                         const hasChildren = mod.children && mod.children.length > 0;
                         const isExpanded = !!expandedModules[mod.key];
                         return (
-                          <tr key={mod.key} style={{ backgroundColor: idx % 2 === 0 ? '#fafafa' : '#fff' }}>
+                          <tr key={mod.key} style={{ backgroundColor: mod.level === 0 ? '#f8fafc' : '#fff' }}>
                             <td
-                                className={`permissions-module-title-cell ${mod.level === 0 && hasChildren ? 'clickable' : ''}`}
-                                onClick={mod.level === 0 && hasChildren ? () => toggleModule(mod.key) : undefined}
-                                style={{
-                                  padding: mod.level === 0 ? '12px 12px' : '9px 12px 9px 32px',
-                                  borderBottom: '1px solid #f0f0f0',
-                                  fontWeight: mod.level === 0 ? 600 : 400,
-                                  color: mod.level === 0 ? undefined : 'rgba(0,0,0,0.72)',
-                                  cursor: mod.level === 0 && hasChildren ? 'pointer' : 'default',
-                                  userSelect: 'none',
-                                }}
+                              className={`permissions-module-title-cell ${mod.level === 0 && hasChildren ? 'clickable' : ''}`}
+                              onClick={mod.level === 0 && hasChildren ? () => toggleModule(mod.key) : undefined}
+                              style={{
+                                padding: mod.level === 0 ? '14px 16px' : '10px 16px 10px 32px',
+                                borderBottom: '1px solid #e2e8f0',
+                                borderLeft: mod.level === 0 ? '4px solid #b70051' : '4px solid transparent',
+                                fontWeight: mod.level === 0 ? 600 : 400,
+                                color: mod.level === 0 ? '#1e293b' : '#475569',
+                                cursor: mod.level === 0 && hasChildren ? 'pointer' : 'default',
+                                userSelect: 'none',
+                                backgroundColor: mod.level === 0 ? '#f8fafc' : '#ffffff',
+                              }}
                             >
                               {mod.level === 0 && hasChildren ? (
                                 isExpanded ? (
-                                  <DownOutlined style={{ marginRight: 8, fontSize: 10, color: 'rgba(0,0,0,0.45)', verticalAlign: 'middle' }} />
+                                  <DownOutlined style={{ marginRight: 8, fontSize: 10, color: '#b70051', fontWeight: 'bold', verticalAlign: 'middle' }} />
                                 ) : (
-                                  <RightOutlined style={{ marginRight: 8, fontSize: 10, color: 'rgba(0,0,0,0.45)', verticalAlign: 'middle' }} />
+                                  <RightOutlined style={{ marginRight: 8, fontSize: 10, color: '#94a3b8', verticalAlign: 'middle' }} />
                                 )
                               ) : null}
                               {mod.level === 1 ? (
-                                <span>
-                                  <span style={{ color: 'rgba(0,0,0,0.35)', marginRight: 8 }}>-</span>
-                                  {mod.label}
+                                <span style={{ display: 'inline-flex', alignItems: 'center' }}>
+                                  <span style={{ 
+                                    display: 'inline-block', 
+                                    width: 6, 
+                                    height: 6, 
+                                    borderRadius: '50%', 
+                                    backgroundColor: '#cbd5e1', 
+                                    marginRight: 8 
+                                  }} />
+                                  <span style={{ fontSize: '13px' }}>{mod.label}</span>
                                 </span>
                               ) : (
-                                <span style={{ verticalAlign: 'middle' }}>{mod.label}</span>
+                                <span style={{ verticalAlign: 'middle', fontSize: '14px', letterSpacing: '0.2px' }}>{mod.label}</span>
                               )}
                             </td>
                             {PERMISSION_ACTIONS.map((act) => (
-                              <td key={act.key} style={{ textAlign: 'center', padding: 0, borderBottom: '1px solid #f0f0f0' }}>
+                              <td key={act.key} style={{ textAlign: 'center', padding: 0, borderBottom: '1px solid #e2e8f0', backgroundColor: mod.level === 0 ? '#f8fafc' : '#ffffff' }}>
                                 <Checkbox
                                   checked={permissions[mod.key]?.[act.key] || false}
                                   onChange={(e) => handlePermissionChange(mod.key, act.key, e.target.checked)}
@@ -553,7 +675,7 @@ const Roles = () => {
                                 />
                               </td>
                             ))}
-                            <td style={{ textAlign: 'center', padding: 0, borderBottom: '1px solid #f0f0f0' }}>
+                            <td style={{ textAlign: 'center', padding: 0, borderBottom: '1px solid #e2e8f0', backgroundColor: mod.level === 0 ? '#f8fafc' : '#ffffff' }}>
                               <Checkbox
                                 checked={isRowAllChecked(mod.key)}
                                 indeterminate={isRowSomeChecked(mod.key)}

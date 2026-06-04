@@ -41,6 +41,7 @@ const SerialNumbersModal = ({
   size = 'small',
   mode = 'manual',
   availableSerials = [],
+  width,
 }) => {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState([]);
@@ -87,18 +88,6 @@ const SerialNumbersModal = ({
     setDraft([]);
   };
 
-  const fillAllPlaceholders = () => {
-    const filled = draft.filter((s) => s && s.trim());
-    const missing = needed - filled.length;
-    if (missing > 0) {
-      const newSerials = [];
-      for (let i = 0; i < missing; i++) {
-        const nextNum = filled.length + i + 1;
-        newSerials.push(`SN-${String(nextNum).padStart(3, '0')}`);
-      }
-      setDraft([...filled, ...newSerials]);
-    }
-  };
 
   // --- Compact display (shown in table cell) ---
   if (readOnly) {
@@ -196,18 +185,13 @@ const SerialNumbersModal = ({
         }
         open={open}
         onCancel={handleClose}
-        width={mode === 'select' ? 480 : 520}
+        width={width || (mode === 'select' ? 600 : 520)}
         footer={
           <Space>
             {mode === 'manual' && (
-              <>
-                <Button onClick={clearAll} danger type="text" size="small">
-                  Clear All
-                </Button>
-                <Button onClick={fillAllPlaceholders} size="small">
-                  Fill Placeholders
-                </Button>
-              </>
+              <Button onClick={clearAll} danger type="text" size="small">
+                Clear All
+              </Button>
             )}
             <Button onClick={handleClose}>Cancel</Button>
             <Button type="primary" onClick={handleSave} icon={<CheckOutlined />}>

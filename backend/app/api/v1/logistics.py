@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, delete, func, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload, joinedload
 from datetime import datetime, timezone, date, timedelta
 from typing import List, Dict, Any, Optional
@@ -10,7 +11,7 @@ from app.utils.dependencies import get_current_user
 from app.models.user import User
 from app.models.master import Item, Vendor
 from app.models.warehouse import Warehouse
-from app.models.system import Notification, ActivityLog
+from app.models.system import Notification, ActivityLog, NumberSeries
 from app.models.logistics import (
     LogisticsLocation, LogisticsRoute, LogisticsRouteLocation, LogisticsLoadingBay,
     LogisticsMainDispatchOrder, LogisticsSubDispatchOrder, LogisticsSdoDestination,
@@ -36,6 +37,70 @@ from app.schemas.logistics import (
 )
 
 router = APIRouter()
+
+
+async def generate_logistics_sequence_number(
+    db: AsyncSession,
+    *,
+    prefix: str,
+    document_type: str,
+) -> str:
+    year = str(date.today().year)
+    result = await db.execute(
+        select(NumberSeries)
+        .where(
+            NumberSeries.module == "logistics",
+            NumberSeries.document_type == document_type,
+            NumberSeries.fiscal_year == year,
+        )
+        .with_for_update()
+    )
+    series = result.scalar_one_or_none()
+
+    if not series:
+        series = NumberSeries(
+            prefix=prefix,
+            module="logistics",
+            document_type=document_type,
+            fiscal_year=year,
+            current_number=0,
+            pad_length=7,
+            org_prefix="",
+            format_template=f"{prefix}-{{fy}}-{{seq}}",
+        )
+        db.add(series)
+        try:
+            async with db.begin_nested():
+                await db.flush()
+        except IntegrityError:
+            db.expunge(series)
+            result = await db.execute(
+                select(NumberSeries)
+                .where(
+                    NumberSeries.module == "logistics",
+                    NumberSeries.document_type == document_type,
+                    NumberSeries.fiscal_year == year,
+                )
+                .with_for_update()
+            )
+            series = result.scalar_one()
+
+    new_num = (series.current_number or 0) + 1
+    series.current_number = new_num
+    series.prefix = prefix
+    if not series.pad_length or series.pad_length < 7:
+        series.pad_length = 7
+    series.format_template = f"{prefix}-{{fy}}-{{seq}}"
+    await db.flush()
+
+    seq = str(new_num).zfill(series.pad_length or 7)
+    return (
+        series.format_template
+        .replace("{fy}", year)
+        .replace("{seq}", seq)
+        .replace("{type}", prefix)
+        .replace("{org}", "")
+    )
 
 # --- AUTOMATIC BOOTSTRAP PROCESS ---
 
@@ -366,8 +431,18 @@ async def get_mdos(db: AsyncSession = Depends(get_db), current_user: User = Depe
     )
     mdos = res.scalars().all()
 
+    from app.models.dispatch import DispatchOrder
+    mdo_numbers = [m.mdo_number for m in mdos if m.mdo_number]
+    dispatch_map = {}
+    if mdo_numbers:
+        dispatch_res = await db.execute(
+            select(DispatchOrder).where(DispatchOrder.dispatch_number.in_(mdo_numbers))
+        )
+        dispatch_map = {d.dispatch_number: d for d in dispatch_res.scalars().all()}
+
     output = []
     for m in mdos:
+        d_order = dispatch_map.get(m.mdo_number)
         m_dict = MdoResponse(
             id=m.id,
             mdo_number=m.mdo_number,
@@ -398,6 +473,14 @@ async def get_mdos(db: AsyncSession = Depends(get_db), current_user: User = Depe
             waybill=m.waybill,
             dispatch_type=m.dispatch_type,
             handover=m.handover,  # Pydantic maps relationship dynamically
+            delivery_acknowledged=d_order.delivery_acknowledged if d_order else False,
+            delivery_acknowledged_at=d_order.delivery_acknowledged_at if d_order else None,
+            delivery_acknowledged_by_name=d_order.delivery_acknowledged_by_name if d_order else None,
+            delivery_acknowledged_by_phone=d_order.delivery_acknowledged_by_phone if d_order else None,
+            receiver_signature_url=d_order.receiver_signature_url if d_order else None,
+            delivery_photo_urls=d_order.delivery_photo_urls if d_order else None,
+            goods_condition_on_delivery=d_order.goods_condition_on_delivery.name if (d_order and hasattr(d_order.goods_condition_on_delivery, "name")) else (str(d_order.goods_condition_on_delivery) if (d_order and d_order.goods_condition_on_delivery) else None),
+            delivery_remarks=d_order.delivery_remarks if d_order else None,
             sdos=[]
         )
 
@@ -475,8 +558,11 @@ async def get_mdos(db: AsyncSession = Depends(get_db), current_user: User = Depe
 
 @router.post("/mdo")
 async def create_mdo(payload: MdoCreate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    mdo_id_val = int(datetime.now().timestamp() * 1000) % 900000 + 100000
-    mdo_num = f"MDO-2026-{mdo_id_val}"
+    mdo_num = await generate_logistics_sequence_number(
+        db,
+        prefix="DO",
+        document_type="main_dispatch_order",
+    )
 
     # Calculate MDO summaries
     tot_items = 0
@@ -531,9 +617,13 @@ async def create_mdo(payload: MdoCreate, db: AsyncSession = Depends(get_db), cur
         sdo_weight = 0.0
         sdo_volume = 0.0
 
-        sdo_id_val = int(datetime.now().timestamp() * 1000 + 1) % 900000 + 100000
+        sdo_num = await generate_logistics_sequence_number(
+            db,
+            prefix="SDO",
+            document_type="sub_dispatch_order",
+        )
         new_sdo = LogisticsSubDispatchOrder(
-            sdo_number=f"SDO-2026-{sdo_id_val}",
+            sdo_number=sdo_num,
             mdo_id=new_mdo.id,
             route_id=sdo_in.routeId,
             route_name=route_name,
@@ -2047,4 +2137,3 @@ async def acknowledge_mdo(id: int, db: AsyncSession = Depends(get_db), current_u
 
     await db.commit()
     return {"success": True, "message": "Dispatch plan delivery successfully acknowledged and SCM records synced."}
-

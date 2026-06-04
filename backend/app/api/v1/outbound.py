@@ -1213,6 +1213,7 @@ async def acknowledge_delivery(
     d.receiver_id_proof_number = payload.receiver_id_proof_number
     d.goods_condition_on_delivery = payload.goods_condition
     d.delivery_remarks = payload.discrepancy_description or "Delivered and acknowledged successfully."
+    d.delivery_photo_urls = payload.delivery_photos
     d.delivery_location_latitude = payload.delivery_latitude
     d.delivery_location_longitude = payload.delivery_longitude
     d.delivery_location_verified = payload.geo_fence_verified
@@ -1233,7 +1234,7 @@ async def acknowledge_delivery(
             pass
 
     # 7. Update status of LogisticsMainDispatchOrder if this is synced from MDO
-    if d.dispatch_number.startswith("MDO-"):
+    if d.dispatch_number.startswith("MDO-") or d.dispatch_number.startswith("DO-"):
         try:
             from app.models.logistics import LogisticsMainDispatchOrder
             res_mdo = await db.execute(

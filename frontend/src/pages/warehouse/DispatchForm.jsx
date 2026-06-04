@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Button, Form, Input, InputNumber, Select, Space, DatePicker,
-  message, Row, Col, Table, Card, Divider, Typography, Tag, Spin, Popconfirm, Tooltip, Radio
+  message, Row, Col, Table, Card, Divider, Typography, Tag, Spin, Popconfirm, Tooltip, Radio, Image
 } from 'antd';
 import {
   PlusOutlined, ArrowLeftOutlined, SaveOutlined, MinusCircleOutlined,
@@ -30,6 +30,7 @@ const DispatchForm = () => {
   const [loading, setLoading] = useState(!isNew);
   const [submitting, setSubmitting] = useState(false);
   const [editMode, setEditMode] = useState(isNew);
+  const [dispatchData, setDispatchData] = useState(null);
 
   // Lookups
   const [indents, setIndents] = useState([]);
@@ -194,6 +195,7 @@ const DispatchForm = () => {
     try {
       const res = await api.get(`/warehouse/dispatch/${id}`);
       const data = res.data;
+      setDispatchData(data);
       form.setFieldsValue({
         ...data,
         dispatch_date: data.dispatch_date ? dayjs(data.dispatch_date) : null,
@@ -373,6 +375,98 @@ const DispatchForm = () => {
       </PageHeader>
 
       <Row gutter={[16, 16]}>
+        {dispatchData && dispatchData.delivery_acknowledged && (
+          <Col span={24}>
+            <Card 
+              title={<span style={{ color: '#0f172a', fontWeight: 800 }}>Proof of Delivery (POD) / Receipt Acknowledgement Details</span>}
+              size="small"
+              style={{ borderRadius: '12px', border: '1px solid #cbd5e1', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', background: '#f8fafc' }}
+            >
+              <Row gutter={[24, 16]}>
+                <Col xs={24} md={8}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Receiver Name</Text>
+                  <strong style={{ color: '#0f172a', fontSize: '14px' }}>{dispatchData.delivery_acknowledged_by_name || '—'}</strong>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Designation / Department</Text>
+                  <strong style={{ color: '#0f172a', fontSize: '14px' }}>
+                    {dispatchData.delivery_acknowledged_by_designation || '—'} 
+                    {dispatchData.delivery_acknowledged_by_department ? ` (${dispatchData.delivery_acknowledged_by_department})` : ''}
+                  </strong>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Contact / Phone</Text>
+                  <strong style={{ color: '#0f172a', fontSize: '14px' }}>{dispatchData.delivery_acknowledged_by_phone || '—'}</strong>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Acknowledgement Date</Text>
+                  <strong style={{ color: '#0f172a', fontSize: '14px' }}>{formatDate(dispatchData.delivery_acknowledged_at)}</strong>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Goods Condition</Text>
+                  <div>
+                    <Tag color={dispatchData.goods_condition_on_delivery === 'GOOD' ? 'green' : 'orange'} style={{ fontWeight: 'bold' }}>
+                      {dispatchData.goods_condition_on_delivery || 'GOOD'}
+                    </Tag>
+                  </div>
+                </Col>
+                <Col xs={24} md={8}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Remarks / Discrepancy</Text>
+                  <strong style={{ color: '#0f172a', fontSize: '13px' }}>{dispatchData.delivery_remarks || '—'}</strong>
+                </Col>
+                
+                <Col xs={24} md={12}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', marginBottom: '10px', fontWeight: 700, letterSpacing: '0.5px' }}>📝 Receiver Signature / Stamp</Text>
+                  {dispatchData.receiver_signature_url ? (
+                    <div style={{ background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', padding: '16px', borderRadius: '12px', border: '2px solid #86efac' }}>
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#166534', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>✓ Uploaded — Click image to zoom full screen</span>
+                      <Image.PreviewGroup>
+                        <Image
+                          src={dispatchData.receiver_signature_url}
+                          alt="Receiver Signature"
+                          style={{ width: '100%', maxHeight: '280px', objectFit: 'contain', borderRadius: '8px', border: '2px solid #86efac', background: '#fff', display: 'block' }}
+                          preview={{ mask: <span style={{ fontSize: '13px', fontWeight: 600 }}>🔍 Click to Zoom</span> }}
+                        />
+                      </Image.PreviewGroup>
+                    </div>
+                  ) : (
+                    <div style={{ background: '#fafafa', padding: '20px', borderRadius: '10px', border: '1.5px dashed #cbd5e1', textAlign: 'center' }}>
+                      <Text type="secondary" style={{ fontSize: '13px' }}>No signature image uploaded yet</Text>
+                    </div>
+                  )}
+                </Col>
+
+                <Col xs={24} md={12}>
+                  <Text type="secondary" style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', marginBottom: '10px', fontWeight: 700, letterSpacing: '0.5px' }}>📦 Delivery Photos (Evidence)</Text>
+                  {dispatchData.delivery_photo_urls && dispatchData.delivery_photo_urls.photo ? (
+                    <div style={{ background: 'linear-gradient(135deg,#f0f9ff,#e0f2fe)', padding: '16px', borderRadius: '12px', border: '2px solid #7dd3fc' }}>
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#075985', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>✓ Evidence Photo — Click to zoom</span>
+                      <Image.PreviewGroup>
+                        <Image
+                          src={dispatchData.delivery_photo_urls.photo}
+                          alt="Delivery Evidence"
+                          style={{ width: '100%', maxHeight: '280px', objectFit: 'contain', borderRadius: '8px', border: '2px solid #7dd3fc', background: '#fff', display: 'block' }}
+                          preview={{ mask: <span style={{ fontSize: '13px', fontWeight: 600 }}>🔍 Click to Zoom</span> }}
+                        />
+                      </Image.PreviewGroup>
+                      {dispatchData.delivery_photo_urls.review && (
+                        <div style={{ marginTop: '10px', padding: '10px 14px', background: 'rgba(7,89,133,0.07)', borderRadius: '8px', borderLeft: '3px solid #0891b2' }}>
+                          <Text style={{ fontSize: '12px', color: '#075985', fontStyle: 'italic', display: 'block' }}>
+                            💬 Condition Assessment: {dispatchData.delivery_photo_urls.review}
+                          </Text>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={{ background: '#fafafa', padding: '20px', borderRadius: '10px', border: '1.5px dashed #cbd5e1', textAlign: 'center' }}>
+                      <Text type="secondary" style={{ fontSize: '13px' }}>No delivery photos uploaded</Text>
+                    </div>
+                  )}
+                </Col>
+              </Row>
+            </Card>
+          </Col>
+        )}
         {/* Left Side: Indent Reference */}
         <Col xs={24} lg={12}>
           <Card title="Indent Reference" size="small">

@@ -7,7 +7,7 @@ import {
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined,
   ArrowLeftOutlined, CheckOutlined, CloseOutlined,
-  MinusCircleOutlined, StarOutlined,
+  MinusCircleOutlined, StarOutlined, SendOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import PageHeader from '../../components/PageHeader';
@@ -201,6 +201,16 @@ const Quotations = () => {
     }
   };
 
+  const handleSendToVendor = async (id) => {
+    try {
+      await api.post(`/procurement/quotations/${id}/submit`);
+      message.success('Quotation sent to vendor');
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      message.error(getErrorMessage(err));
+    }
+  };
+
   const calcItemAmount = (item) => {
     const base = (item.qty || 0) * (item.rate || 0);
     const discounted = base - (base * (item.discount || 0)) / 100;
@@ -272,17 +282,12 @@ const Quotations = () => {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      const validItems = editingQuotation
-        ? quotationItems.filter(
-            (i) => i.item_id && Number(i.rate) > 0 && Number(i.discount || 0) < 100
-          )
-        : quotationItems.filter((i) => i.item_id && Number(i.qty) > 0);
+      const validItems = quotationItems.filter(
+        (i) => i.item_id && Number(i.qty) > 0
+      );
 
       if (validItems.length === 0) {
-        message.error(editingQuotation
-          ? 'Please add at least one item with a rate (and discount < 100%)'
-          : 'Please add at least one item with a quantity'
-        );
+        message.error('Please add at least one item with a quantity');
         return;
       }
       setSubmitting(true);
@@ -292,49 +297,53 @@ const Quotations = () => {
           ...values,
           quotation_date: formatDateForAPI(values.quotation_date),
           valid_until: formatDateForAPI(values.valid_until),
-          total_amount: Number(calcSubtotal().toFixed(2)),
-          cgst_amount: Number(calcCGSTTotal().toFixed(2)),
-          sgst_amount: Number(calcSGSTTotal().toFixed(2)),
-          igst_amount: Number(calcIGSTTotal().toFixed(2)),
-          tax_amount: Number(calcTaxTotal().toFixed(2)),
-          grand_total: Number(calcGrandTotal().toFixed(2)),
+          total_amount: 0,
+          cgst_amount: 0,
+          sgst_amount: 0,
+          igst_amount: 0,
+          tax_amount: 0,
+          grand_total: 0,
           items: validItems.map((item) => ({
             item_id: item.item_id,
             qty: item.qty,
             uom_id: item.uom_id || item.primary_uom_id || 1,
-            rate: item.rate,
-            discount_pct: item.discount || item.discount_pct || 0,
-            cgst_rate: item.cgst_rate || 0,
-            sgst_rate: item.sgst_rate || 0,
-            igst_rate: item.igst_rate || 0,
-            tax_rate: (item.cgst_rate || 0) + (item.sgst_rate || 0) + (item.igst_rate || 0),
-            amount: item.amount,
+            rate: 0,
+            discount_pct: 0,
+            cgst_rate: 0,
+            sgst_rate: 0,
+            igst_rate: 0,
+            tax_rate: 0,
+            amount: 0,
           })),
         };
         await api.put(`/procurement/quotations/${editingQuotation.id}`, payload);
         message.success('Quotation updated');
       } else {
-        const rfqPayload = {
+        const payload = {
           mr_id: values.mr_id || null,
-          title: `RFQ Sourcing - ${new Date().toLocaleDateString()}`,
-          vendor_ids: values.vendor_ids || [],
+          title: `RFQ for ${validItems.length} item(s)`,
+          vendor_ids: values.vendor_ids,
           rfq_date: formatDateForAPI(values.quotation_date),
           valid_until: formatDateForAPI(values.valid_until),
-          currency: "INR",
-          delivery_days: values.delivery_days || 0,
+          delivery_days: values.delivery_days || null,
           payment_terms: values.payment_terms || "",
           remarks: values.remarks || "",
+          currency: "INR",
+          with_vehicle: false,
           items: validItems.map((item) => ({
             item_id: item.item_id,
             qty: item.qty,
             uom_id: item.uom_id || item.primary_uom_id || 1,
-            rate: item.rate || 0,
-            discount_pct: item.discount || item.discount_pct || 0,
-            tax_rate: item.tax_percent || item.tax_rate || 0,
-            remarks: item.remarks || "",
+            rate: 0,
+            discount_pct: 0,
+            cgst_rate: 0,
+            sgst_rate: 0,
+            igst_rate: 0,
+            tax_rate: 0,
+            amount: 0,
           })),
         };
-        await api.post('/procurement/rfqs', rfqPayload);
+        await api.post('/procurement/rfqs', payload);
         message.success('RFQ and supplier invitations created successfully!');
       }
       setDrawerOpen(false);
@@ -430,55 +439,6 @@ const Quotations = () => {
       width: 70,
       render: (val) => val || '-',
     },
-    ...(editingQuotation ? [
-      {
-        title: 'Rate',
-        dataIndex: 'rate',
-        width: 110,
-        render: (val, record) => (
-          <InputNumber min={0} value={val} onChange={(v) => updateQuotationItem(record.key, 'rate', v)} style={{ width: '100%' }} prefix="₹" />
-        ),
-      },
-      {
-        title: 'Disc %',
-        dataIndex: 'discount',
-        width: 80,
-        render: (val, record) => (
-          <InputNumber min={0} max={100} value={val} onChange={(v) => updateQuotationItem(record.key, 'discount', v)} style={{ width: '100%' }} />
-        ),
-      },
-      {
-        title: 'CGST %',
-        dataIndex: 'cgst_rate',
-        width: 80,
-        render: (val, record) => (
-          <InputNumber min={0} max={100} value={val} onChange={(v) => updateQuotationItem(record.key, 'cgst_rate', v)} style={{ width: '100%' }} />
-        ),
-      },
-      {
-        title: 'SGST %',
-        dataIndex: 'sgst_rate',
-        width: 80,
-        render: (val, record) => (
-          <InputNumber min={0} max={100} value={val} onChange={(v) => updateQuotationItem(record.key, 'sgst_rate', v)} style={{ width: '100%' }} />
-        ),
-      },
-      {
-        title: 'IGST %',
-        dataIndex: 'igst_rate',
-        width: 80,
-        render: (val, record) => (
-          <InputNumber min={0} max={100} value={val} onChange={(v) => updateQuotationItem(record.key, 'igst_rate', v)} style={{ width: '100%' }} />
-        ),
-      },
-      {
-        title: 'Amount',
-        dataIndex: 'amount',
-        width: 110,
-        align: 'right',
-        render: (val) => formatCurrency(val),
-      }
-    ] : []),
     {
       title: '',
       width: 40,
@@ -561,7 +521,12 @@ const Quotations = () => {
       dataIndex: 'status',
       key: 'status',
       width: 120,
-      render: (s) => <StatusTag status={s} />,
+      render: (s, record) => {
+        if (s === 'submitted' && (!record.grand_total || record.grand_total === 0)) {
+          return <Tag style={{ color: '#fff', backgroundColor: '#fa8c16', borderColor: '#fa8c16' }}>Awaiting Vendor</Tag>;
+        }
+        return <StatusTag status={s} />;
+      },
     },
     {
       title: 'Actions',
@@ -573,6 +538,18 @@ const Quotations = () => {
           <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => handleViewQuotation(record)} />
           {(record.status === 'draft' || record.status === 'pending') && (
             <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
+          )}
+          {record.status === 'draft' && (
+            <Tooltip title="Send to Vendor">
+              <Popconfirm
+                title="Send this quotation to the vendor?"
+                onConfirm={() => handleSendToVendor(record.id)}
+                okText="Send"
+                cancelText="Cancel"
+              >
+                <Button type="link" size="small" icon={<SendOutlined />} />
+              </Popconfirm>
+            </Tooltip>
           )}
           {record.status === 'draft' && (
             <Popconfirm title="Delete this quotation?" onConfirm={() => handleDelete(record.id)} okButtonProps={{ danger: true }}>
@@ -619,7 +596,26 @@ const Quotations = () => {
       <div>
         <PageHeader title={detailQuotation.quotation_number} subtitle="Quotation Detail">
           <Space>
-
+            {detailQuotation.status === 'draft' && (
+              <Popconfirm
+                title="Send this quotation to the vendor?"
+                onConfirm={async () => {
+                  try {
+                    await api.post(`/procurement/quotations/${detailQuotation.id}/submit`);
+                    message.success('Quotation sent to vendor');
+                    setRefreshKey((k) => k + 1);
+                    const res = await api.get(`/procurement/quotations/${detailQuotation.id}`);
+                    setDetailQuotation(res.data);
+                  } catch (err) {
+                    message.error(getErrorMessage(err));
+                  }
+                }}
+                okText="Send"
+                cancelText="Cancel"
+              >
+                <Button type="primary" icon={<SendOutlined />}>Send to Vendor</Button>
+              </Popconfirm>
+            )}
             <Button icon={<ArrowLeftOutlined />} onClick={() => setDetailQuotation(null)}>Back to List</Button>
           </Space>
         </PageHeader>
@@ -633,7 +629,13 @@ const Quotations = () => {
             <Descriptions.Item label="Valid Until">{formatDate(detailQuotation.valid_until)}</Descriptions.Item>
             <Descriptions.Item label="Delivery Days">{detailQuotation.delivery_days || '-'}</Descriptions.Item>
             <Descriptions.Item label="Payment Terms">{detailQuotation.payment_terms || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Status"><StatusTag status={detailQuotation.status} /></Descriptions.Item>
+            <Descriptions.Item label="Status">
+              {detailQuotation.status === 'submitted' && (!detailQuotation.grand_total || detailQuotation.grand_total === 0) ? (
+                <Tag style={{ color: '#fff', backgroundColor: '#fa8c16', borderColor: '#fa8c16' }}>Awaiting Vendor</Tag>
+              ) : (
+                <StatusTag status={detailQuotation.status} />
+              )}
+            </Descriptions.Item>
             <Descriptions.Item label="Grand Total"><Text strong>{formatCurrency(detailQuotation.grand_total)}</Text></Descriptions.Item>
             <Descriptions.Item label="Remarks" span={3}>{detailQuotation.remarks || '-'}</Descriptions.Item>
           </Descriptions>
@@ -773,23 +775,16 @@ const Quotations = () => {
             </Col>
           </Row>
           <Row gutter={16}>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="payment_terms" label="Payment Terms">
                 <Input placeholder="e.g. Net 30 days" />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="remarks" label="Remarks">
                 <Input placeholder="Any remarks..." />
               </Form.Item>
             </Col>
-            {!editingQuotation && (
-              <Col span={8}>
-                <Form.Item name="with_vehicle" label="Vehicle Needed?" valuePropName="checked" initialValue={false}>
-                  <Switch checkedChildren="Yes" unCheckedChildren="No" />
-                </Form.Item>
-              </Col>
-            )}
           </Row>
         </Form>
 
@@ -800,52 +795,11 @@ const Quotations = () => {
           rowKey="key"
           pagination={false}
           size="small"
-          scroll={{ x: 900 }}
           footer={() => (
             <Button type="dashed" onClick={addQuotationItemRow} icon={<PlusOutlined />} block>
               Add Item
             </Button>
           )}
-          summary={editingQuotation ? () => (
-            <Table.Summary>
-              <Table.Summary.Row>
-                <Table.Summary.Cell colSpan={9} align="right"><Text strong>Subtotal:</Text></Table.Summary.Cell>
-                <Table.Summary.Cell align="right"><Text>{formatCurrency(calcSubtotal())}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell />
-              </Table.Summary.Row>
-              {calcCGSTTotal() > 0 && (
-                <Table.Summary.Row>
-                  <Table.Summary.Cell colSpan={9} align="right"><Text strong>CGST:</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell align="right"><Text>{formatCurrency(calcCGSTTotal())}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell />
-                </Table.Summary.Row>
-              )}
-              {calcSGSTTotal() > 0 && (
-                <Table.Summary.Row>
-                  <Table.Summary.Cell colSpan={9} align="right"><Text strong>SGST:</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell align="right"><Text>{formatCurrency(calcSGSTTotal())}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell />
-                </Table.Summary.Row>
-              )}
-              {calcIGSTTotal() > 0 && (
-                <Table.Summary.Row>
-                  <Table.Summary.Cell colSpan={9} align="right"><Text strong>IGST:</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell align="right"><Text>{formatCurrency(calcIGSTTotal())}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell />
-                </Table.Summary.Row>
-              )}
-              <Table.Summary.Row>
-                <Table.Summary.Cell colSpan={9} align="right"><Text strong>Tax Total:</Text></Table.Summary.Cell>
-                <Table.Summary.Cell align="right"><Text>{formatCurrency(calcTaxTotal())}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell />
-              </Table.Summary.Row>
-              <Table.Summary.Row>
-                <Table.Summary.Cell colSpan={9} align="right"><Text strong style={{ fontSize: 15 }}>Grand Total:</Text></Table.Summary.Cell>
-                <Table.Summary.Cell align="right"><Text strong style={{ fontSize: 15 }}>{formatCurrency(calcGrandTotal())}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell />
-              </Table.Summary.Row>
-            </Table.Summary>
-          ) : undefined}
         />
       </Drawer>
     </div>

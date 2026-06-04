@@ -33,6 +33,14 @@ const MR_STATUS_CONFIG = {
 };
 
 /* ─── Helpers ─── */
+const getQuoteStatus = (record) => {
+  if (record.quotation_status === 'submitted') {
+    const hasPrice = record.my_quote && record.my_quote.grand_total > 0;
+    return hasPrice ? 'submitted' : 'draft';
+  }
+  return record.quotation_status;
+};
+
 const fmt = (n) => {
   const num = parseFloat(n || 0);
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(num);
@@ -403,8 +411,8 @@ export default function SupplierPortal() {
   };
 
   /* ── Stats ── */
-  const open = rfqs.filter((r) => r.quotation_status === 'draft').length;
-  const submitted = rfqs.filter((r) => r.quotation_status === 'submitted').length;
+  const open = rfqs.filter((r) => getQuoteStatus(r) === 'draft').length;
+  const submitted = rfqs.filter((r) => getQuoteStatus(r) === 'submitted').length;
   const accepted = rfqs.filter((r) => r.quotation_status === 'accepted').length;
   const pendingPos = purchaseOrders.filter((p) => p.supplier_acknowledgement === 'pending').length;
   const acceptedPos = purchaseOrders.filter((p) => p.supplier_acknowledgement === 'accepted').length;
@@ -491,7 +499,7 @@ export default function SupplierPortal() {
                 <Statistic title="Grand Total" value={fmt(record.my_quote.grand_total)} valueStyle={{ cursor: 'help' }} />
               </Tooltip>
             </Col>
-            <Col xs={12} sm={6} md={5}><Statistic title="Status" value={QUOTE_STATUS_CONFIG[record.quotation_status]?.label || record.quotation_status} /></Col>
+            <Col xs={12} sm={6} md={5}><Statistic title="Status" value={QUOTE_STATUS_CONFIG[getQuoteStatus(record)]?.label || record.quotation_status} /></Col>
           </Row>
           {record.my_quote.remarks && (
             <div style={{ marginTop: 8, fontSize: '12px', color: '#475569' }}>
@@ -547,8 +555,9 @@ export default function SupplierPortal() {
       key: 'status',
       width: 160,
       render: (_, record) => {
-        const cfg = QUOTE_STATUS_CONFIG[record.quotation_status] || {};
-        return <Tag color={cfg.color || 'default'}>{cfg.label || record.quotation_status}</Tag>;
+        const status = getQuoteStatus(record);
+        const cfg = QUOTE_STATUS_CONFIG[status] || {};
+        return <Tag color={cfg.color || 'default'}>{cfg.label || status}</Tag>;
       },
     },
     {
@@ -567,7 +576,7 @@ export default function SupplierPortal() {
                 icon={<SendOutlined />}
                 onClick={() => handleOpenQuote(record)}
               >
-                {record.my_quote ? 'Edit Quote' : 'Submit Quote'}
+                {record.my_quote && record.my_quote.grand_total > 0 ? 'Edit Quote' : 'Submit Quote'}
               </Button>
             )}
             {!isDeclined && canEdit && (
@@ -946,7 +955,7 @@ export default function SupplierPortal() {
                         expandable={{ expandedRowRender: expandedRender }}
                         pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `${t} RFQs` }}
                         scroll={{ x: 900 }}
-                        rowClassName={(r) => r.quotation_status === 'draft' ? 'rfq-row-open' : ''}
+                        rowClassName={(r) => getQuoteStatus(r) === 'draft' ? 'rfq-row-open' : ''}
                       />
                     )}
                   </Spin>
