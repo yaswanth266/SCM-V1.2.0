@@ -577,6 +577,23 @@ async def ensure_vendor_type_schema(session: AsyncSession) -> None:
 
 async def ensure_item_category_code_schema(session: AsyncSession) -> None:
     conn = await session.connection()
+    readable_col_exists = (
+        await conn.execute(
+            text(
+                """
+                SELECT 1
+                FROM information_schema.columns
+                WHERE table_schema = DATABASE()
+                  AND table_name = 'items'
+                  AND column_name = 'readable_code'
+                LIMIT 1
+                """
+            )
+        )
+    ).scalar_one_or_none()
+    if readable_col_exists is None:
+        await conn.execute(text("ALTER TABLE items ADD COLUMN readable_code VARCHAR(255) NULL"))
+
     for column_name, ddl in (
         ("short_code", "ALTER TABLE item_categories ADD COLUMN short_code VARCHAR(2) NULL"),
         ("full_code", "ALTER TABLE item_categories ADD COLUMN full_code VARCHAR(6) NULL"),

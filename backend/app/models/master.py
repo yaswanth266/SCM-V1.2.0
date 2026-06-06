@@ -124,9 +124,11 @@ class Item(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     category_id = Column(BigInteger, ForeignKey("item_categories.id"))
     item_code = Column(String(50), unique=True, nullable=False)
+    readable_code = Column(String(255), unique=True, nullable=True)
     name = Column(String(255), nullable=False, unique=True)
     description = Column(Text)
     item_type = Column(String(100), ForeignKey("item_types.name"), nullable=False)
+    is_kit = Column(Boolean, default=False, nullable=False)
     uom_category_id = Column(BigInteger, ForeignKey("uom_categories.id"), nullable=True)
     primary_uom_id = Column(BigInteger, ForeignKey("uom.id"), nullable=False)
     secondary_uom_id = Column(BigInteger, ForeignKey("uom.id"))
@@ -187,6 +189,25 @@ class Item(Base):
     item_type_obj = relationship("ItemType", foreign_keys=[item_type])
     feature = relationship("Feature", foreign_keys=[feature_id])
     packagings = relationship("ItemPackaging", back_populates="item", cascade="all, delete-orphan")
+    kit_components = relationship("MasterItemKitComponent", back_populates="item", cascade="all, delete-orphan")
+
+
+class MasterItemKitComponent(Base):
+    __tablename__ = "item_master_kit_components"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    item_id = Column(BigInteger, ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
+    component_code = Column(String(100), nullable=True)
+    component_name = Column(String(255), nullable=False)
+    quantity = Column(Numeric(15, 3), nullable=False)
+    uom_id = Column(BigInteger, ForeignKey("uom.id"), nullable=True)
+    sort_order = Column(Integer, nullable=False, default=1)
+    remarks = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    item = relationship("Item", back_populates="kit_components")
+    uom = relationship("UOM", foreign_keys=[uom_id])
 
 class PackagingLevel(Base):
     __tablename__ = 'packaging_level'

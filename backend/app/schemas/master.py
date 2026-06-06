@@ -300,6 +300,57 @@ class FeatureResponse(BaseModel):
 
 # ===================== ITEM =====================
 
+class ItemKitComponentBase(BaseModel):
+    component_code: Optional[str] = None
+    component_name: str
+    quantity: Decimal
+    uom_id: Optional[int] = None
+    sort_order: int = 1
+    remarks: Optional[str] = None
+
+    @field_validator("component_code")
+    @classmethod
+    def val_component_code(cls, v):
+        if v is None:
+            return None
+        v = str(v).strip()
+        return v[:100] if v else None
+
+    @field_validator("component_name")
+    @classmethod
+    def val_component_name(cls, v):
+        return _require_non_empty(v, "Component name")[:255]
+
+    @field_validator("quantity")
+    @classmethod
+    def val_quantity(cls, v):
+        if v is None or v <= 0:
+            raise ValueError("Component quantity must be greater than zero")
+        return v
+
+    @field_validator("sort_order")
+    @classmethod
+    def val_sort_order(cls, v):
+        return max(int(v or 1), 1)
+
+    @field_validator("remarks")
+    @classmethod
+    def val_component_remarks(cls, v):
+        return _strip_or_none(v, 255)
+
+
+class ItemKitComponentCreate(ItemKitComponentBase):
+    pass
+
+
+class ItemKitComponentResponse(ItemKitComponentBase):
+    id: int
+    item_id: int
+    uom_name: Optional[str] = None
+    uom_abbreviation: Optional[str] = None
+    model_config = {"from_attributes": True}
+
+
 class ItemCreate(BaseModel):
     category_id: Optional[int] = None
     feature_id: Optional[int] = None
@@ -318,6 +369,7 @@ class ItemCreate(BaseModel):
     regulatory_notes: Optional[str] = None
     description: Optional[str] = None
     item_type: str
+    is_kit: bool = False
     uom_category_id: Optional[int] = None
     primary_uom_id: int
     secondary_uom_id: Optional[int] = None
@@ -350,6 +402,7 @@ class ItemCreate(BaseModel):
     dosage_form: Optional[str] = None
     valuation_method: str = "fifo"
     is_active: bool = True
+    kit_components: Optional[List[ItemKitComponentCreate]] = None
 
     @field_validator("item_code")
     @classmethod
@@ -409,13 +462,6 @@ class ItemCreate(BaseModel):
                 and self.min_order_qty > 0 and self.max_order_qty > 0
                 and self.min_order_qty >= self.max_order_qty):
             raise ValueError("Min order qty must be less than max order qty")
-        
-        # Automatically set has_serial = True for asset/equipment types
-        item_type_lower = (self.item_type or "").lower()
-        asset_keywords = ['asset', 'equipment', 'laptop', 'computer', 'it', 'fixed']
-        if any(kw in item_type_lower for kw in asset_keywords):
-            self.has_serial = True
-            
         return self
 
 
@@ -423,6 +469,7 @@ class ItemUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     item_type: Optional[str] = None
+    is_kit: Optional[bool] = None
     category_id: Optional[int] = None
     feature_id: Optional[int] = None
     feature_ids: Optional[List[int]] = None
@@ -467,6 +514,7 @@ class ItemUpdate(BaseModel):
     min_storage_temp_c: Optional[Decimal] = None
     max_storage_temp_c: Optional[Decimal] = None
     regulatory_notes: Optional[str] = None
+    kit_components: Optional[List[ItemKitComponentCreate]] = None
 
     @field_validator("name")
     @classmethod
@@ -492,15 +540,6 @@ class ItemUpdate(BaseModel):
                 raise ValueError(f"Invalid barcode type. Must be one of: {', '.join(VALID_BARCODE_TYPES)}")
         return v
 
-    @model_validator(mode="after")
-    def check_asset_serial(self):
-        if self.item_type is not None:
-            item_type_lower = self.item_type.lower()
-            asset_keywords = ['asset', 'equipment', 'laptop', 'computer', 'it', 'fixed']
-            if any(kw in item_type_lower for kw in asset_keywords):
-                self.has_serial = True
-        return self
-
 
 class ItemResponse(BaseModel):
     id: int
@@ -509,9 +548,11 @@ class ItemResponse(BaseModel):
     feature_ids: Optional[List[int]] = None
     feature_names: Optional[List[str]] = None
     item_code: str
+    readable_code: Optional[str] = None
     name: str
     description: Optional[str] = None
     item_type: str
+    is_kit: bool = False
     uom_category_id: Optional[int] = None
     primary_uom_id: int
     secondary_uom_id: Optional[int] = None
@@ -554,6 +595,7 @@ class ItemResponse(BaseModel):
     is_active: bool
     status: Optional[str] = None
     created_at: Optional[datetime] = None
+    kit_components: List[ItemKitComponentResponse] = Field(default_factory=list)
     model_config = {"from_attributes": True}
 
     @model_validator(mode="after")
@@ -1250,27 +1292,6 @@ class EmployeeResponse(EmployeeCreate):
     position_name: Optional[str] = None
     position_code: Optional[str] = None
     model_config = {"from_attributes": True}
-
-    @field_validator("pan_number")
-    @classmethod
-    def val_pan(cls, v):
-        v = _strip_or_none(v, 10)
-        return v.upper() if v else None
-
-    @field_validator("aadhaar_number")
-    @classmethod
-    def val_aadhaar(cls, v):
-        return _strip_or_none(v, 12)
-
-    @field_validator("email")
-    @classmethod
-    def val_email(cls, v):
-        return _strip_or_none(v, 100)
-
-    @field_validator("phone")
-    @classmethod
-    def val_phone(cls, v):
-        return _strip_or_none(v, 15)
 
 
 # ===================== WAREHOUSE HIERARCHY =====================

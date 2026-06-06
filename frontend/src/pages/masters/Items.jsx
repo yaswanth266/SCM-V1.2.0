@@ -1,7 +1,7 @@
-import React, { useState, useCallback, useEffect } from 'react';
+﻿import React, { useState, useCallback, useEffect } from 'react';
 import {
   Button, Drawer, Form, Input, Select, InputNumber, Switch, Space,
-  Popconfirm, message, Row, Col, Divider, Tabs, Spin, TreeSelect, Modal,
+  Popconfirm, message, Row, Col, Divider, Tabs, Spin, TreeSelect, Modal, Table, Checkbox,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, EyeOutlined,
@@ -48,7 +48,10 @@ const Items = () => {
   const [specValues, setSpecValues] = useState({}); // { spec_id: { value, min_value, max_value, uom_id } }
   const [autoCodePreview, setAutoCodePreview] = useState('');
   const [autoCodeError, setAutoCodeError] = useState('');
+  const [kitComponents, setKitComponents] = useState([]);
   const selectedUomCategoryId = Form.useWatch('uom_category_id', form);
+  const selectedItemCode = Form.useWatch('item_code', form);
+  const selectedIsKit = Form.useWatch('is_kit', form);
 
   const fetchBrands = async () => {
     try {
@@ -308,6 +311,7 @@ const Items = () => {
     setFeatureOptions([]);
     setAttrValues({});
     setSpecValues({});
+    setKitComponents([]);
     setAutoCodePreview('');
     setAutoCodeError('');
     // BUG-FE-009: do NOT auto-generate item_code client-side.
@@ -322,6 +326,7 @@ const Items = () => {
       barcode_type: 'auto',
       valuation_method: 'fifo',
       category_id: undefined,
+      is_kit: false,
     });
     setLevel1Id(undefined);
     setLevel2Id(undefined);
@@ -329,11 +334,59 @@ const Items = () => {
     setDrawerOpen(true);
   };
 
+    const kitComponentSuffix = (index) => {
+    let value = index + 1; // first component starts at b, matching 101010-0001-b
+    const chars = [];
+    while (value >= 0) {
+      chars.unshift(String.fromCharCode(97 + (value % 26)));
+      value = Math.floor(value / 26) - 1;
+    }
+    return chars.join('');
+  };
+
+  const parentKitItemCode = (codeOverride) => String(codeOverride || selectedItemCode || autoCodePreview || editingItem?.item_code || '').trim();
+
+  const kitComponentCode = (index, codeOverride) => {
+    const base = parentKitItemCode(codeOverride);
+    return base ? `${base}-${kitComponentSuffix(index)}`.toLowerCase() : '';
+  };
+
+  const createKitComponentRow = () => ({
+    key: Date.now() + Math.random(),
+    component_code: '',
+    component_name: '',
+    quantity: 1,
+    uom_id: null,
+    remarks: '',
+  });
+
+  const addKitComponent = () => {
+    setKitComponents((prev) => [...prev, createKitComponentRow()]);
+  };
+
+  const updateKitComponent = (key, field, value) => {
+    setKitComponents((prev) => prev.map((row) => (
+      row.key === key ? { ...row, [field]: value } : row
+    )));
+  };
+
+  const removeKitComponent = (key) => {
+    setKitComponents((prev) => prev.filter((row) => row.key !== key));
+  };
+
   const handleEdit = (record) => {
     const recordFeatureIds = Array.isArray(record.feature_ids) && record.feature_ids.length > 0
       ? record.feature_ids
       : (record.feature_id ? [record.feature_id] : []);
     setEditingItem(record);
+    setKitComponents((record.kit_components || []).map((component, idx) => ({
+      key: component.id || `${Date.now()}-${idx}`,
+      component_code: component.component_code || '',
+      component_name: component.component_name || '',
+      quantity: Number(component.quantity || 1),
+      uom_id: component.uom_id || null,
+      remarks: component.remarks || '',
+    })));
     setAutoCodePreview('');
     setAutoCodeError('');
     form.setFieldsValue({
@@ -342,6 +395,7 @@ const Items = () => {
       feature_ids: recordFeatureIds,
       uom_category_id: record.uom_category_id || record.primary_uom?.category_id || uoms.find((u) => u.value === record.primary_uom_id)?.category_id,
       primary_uom_id: record.primary_uom_id || record.primary_uom?.id,
+      is_kit: Boolean(record.is_kit),
       status: record.is_active === false ? 'inactive' : 'active',
     });
     // Reload attributes/specs for this item's category + existing values
@@ -453,6 +507,31 @@ const Items = () => {
         return;
       }
 
+      const savingKit = Boolean(values.is_kit);
+      const normalizedKitComponents = kitComponents
+        .map((row, idx) => ({
+          component_code: kitComponentCode(idx, values.item_code) || null,
+          component_name: row.component_name ? String(row.component_name).trim() : '',
+          quantity: Number(row.quantity || 0),
+          uom_id: row.uom_id || null,
+          sort_order: idx + 1,
+          remarks: row.remarks ? String(row.remarks).trim() : null,
+        }))
+        .filter((row) => row.component_name || row.component_code || row.quantity || row.uom_id);
+      if (savingKit) {
+        if (normalizedKitComponents.length === 0) {
+          message.error('Add at least one component for this item.');
+          setSubmitting(false);
+          return;
+        }
+        const invalidComponent = normalizedKitComponents.find((row) => !row.component_name || !row.quantity || row.quantity <= 0 || !row.uom_id);
+        if (invalidComponent) {
+          message.error('Each component needs a name, quantity greater than zero, and UOM.');
+          setSubmitting(false);
+          return;
+        }
+      }
+
       const { status, ...rest } = values;
       delete rest.secondary_uom_id;
       delete rest.sku;
@@ -466,6 +545,7 @@ const Items = () => {
       const payload = {
         ...rest,
         is_active: status === 'inactive' ? false : true,
+        kit_components: savingKit ? normalizedKitComponents : [],
       };
       let savedItemId;
       if (editingItem) {
@@ -528,6 +608,7 @@ const Items = () => {
       setAttrValues({});
       setCategorySpecs([]);
       setSpecValues({});
+      setKitComponents([]);
       setRefreshKey((k) => k + 1);
     } catch (err) {
       if (err.errorFields) {
@@ -535,12 +616,13 @@ const Items = () => {
         // detection isn't silently lost when a Stock/Pricing/Compliance/Barcode
         // field fails validation.
         const tabFields = {
-          basic: ['item_code', 'name', 'item_type', 'category_id', 'feature_ids', 'status', 'description', 'brand', 'manufacturer', 'dosage_form'],
+          basic: ['item_code', 'name', 'item_type', 'is_kit', 'category_id', 'feature_ids', 'status', 'description', 'brand', 'manufacturer', 'dosage_form'],
           units: ['uom_category_id', 'primary_uom_id', 'conversion_factor', 'pack_size'],
           stock: ['safety_stock', 'reorder_level', 'minimum_stock', 'maximum_stock', 'has_batch', 'has_serial', 'has_expiry', 'shelf_life_days'],
           pricing: ['purchase_price', 'selling_price', 'mrp', 'tax_rate', 'discount_percent', 'valuation_method'],
           compliance: ['hsn_code', 'gst_rate', 'is_controlled_substance', 'schedule_type'],
           barcode: ['barcode_type', 'barcode_value'],
+          kit: ['kit_components'],
         };
         const errorFieldNames = err.errorFields.map((f) => f.name[0]);
         let matched = false;
@@ -576,6 +658,7 @@ const Items = () => {
         message.warning(`Showing first ${EXPORT_CAP} of ${data.total} items. Apply filters to narrow the export.`);
       }
       const exportData = items.map((item) => ({
+        'Readable Code': item.readable_code || '',
         'Item Code': item.item_code,
         'Name': item.name,
 
@@ -606,12 +689,22 @@ const Items = () => {
 
   const columns = [
     {
+      title: 'Readable Code',
+      dataIndex: 'readable_code',
+      key: 'readable_code',
+      width: 240,
+      sorter: true,
+      fixed: 'left',
+      render: (text, record) => (
+        <a onClick={() => navigate(`/masters/items/${record.id}`)}>{text || '-'}</a>
+      ),
+    },
+    {
       title: 'Item Code',
       dataIndex: 'item_code',
       key: 'item_code',
       width: 130,
       sorter: true,
-      fixed: 'left',
       render: (text, record) => (
         <a onClick={() => navigate(`/masters/items/${record.id}`)}>{text}</a>
       ),
@@ -747,6 +840,85 @@ const Items = () => {
             />
           </Popconfirm>
         </Space>
+      ),
+    },
+  ];
+
+  const kitComponentColumns = [
+    {
+      title: '#',
+      width: 48,
+      render: (_, __, index) => index + 1,
+    },
+    {
+      title: 'Component Code',
+      width: 160,
+      render: (_, record) => (
+                <Input
+          value={kitComponentCode(kitComponents.findIndex((row) => row.key === record.key))}
+          readOnly
+          placeholder="101010-0001-b"
+        />
+      ),
+    },
+    {
+      title: 'Component Name',
+      width: 260,
+      render: (_, record) => (
+        <Input
+          value={record.component_name}
+          onChange={(e) => updateKitComponent(record.key, 'component_name', e.target.value)}
+          placeholder="Reagent B"
+        />
+      ),
+    },
+    {
+      title: 'Quantity',
+      width: 120,
+      render: (_, record) => (
+        <InputNumber
+          min={0.001}
+          precision={3}
+          value={record.quantity}
+          onChange={(value) => updateKitComponent(record.key, 'quantity', value)}
+          style={{ width: '100%' }}
+        />
+      ),
+    },
+    {
+      title: 'UOM',
+      width: 170,
+      render: (_, record) => (
+        <Select
+          value={record.uom_id}
+          onChange={(value) => updateKitComponent(record.key, 'uom_id', value)}
+          options={uoms}
+          placeholder="Select UOM"
+          showSearch
+          optionFilterProp="label"
+          allowClear
+          style={{ width: '100%' }}
+        />
+      ),
+    },
+    {
+      title: 'Remarks',
+      width: 220,
+      render: (_, record) => (
+        <Input
+          value={record.remarks}
+          onChange={(e) => updateKitComponent(record.key, 'remarks', e.target.value)}
+          placeholder="Optional"
+        />
+      ),
+    },
+    {
+      title: '',
+      width: 90,
+      render: (_, record) => (
+        <Button danger type="link" onClick={() => removeKitComponent(record.key)}>
+          Remove
+        </Button>
       ),
     },
   ];
@@ -957,14 +1129,14 @@ const Items = () => {
         title={editingItem ? 'Edit Item' : 'Add Item'}
         width={720}
         open={drawerOpen}
-        onClose={() => { setDrawerOpen(false); setEditingItem(null); form.resetFields(); setCategorySpecs([]); setSpecValues({}); }}
+        onClose={() => { setDrawerOpen(false); setEditingItem(null); form.resetFields(); setCategorySpecs([]); setSpecValues({}); setKitComponents([]); }}
         // BUG-FE-012: Form lives OUTSIDE the Drawer (via useForm). With
         // destroyOnHidden Antd unmounts the Form Provider while the form
         // instance still references stale field values. Rely on manual
         // resetFields() in onClose instead.
         extra={
           <Space>
-            <Button onClick={() => { setDrawerOpen(false); setEditingItem(null); form.resetFields(); setCategorySpecs([]); setSpecValues({}); }}>
+            <Button onClick={() => { setDrawerOpen(false); setEditingItem(null); form.resetFields(); setCategorySpecs([]); setSpecValues({}); setKitComponents([]); }}>
               Cancel
             </Button>
             <Button type="primary" onClick={handleSubmit} loading={submitting}>
@@ -1108,7 +1280,7 @@ const Items = () => {
                         <Form.Item
                           name="item_code"
                           label="Item Code"
-                          help={autoCodeError || (autoCodePreview ? 'Auto-generated from Level 1 + Level 2 + Level 3 category sequence.' : undefined)}
+                          help={autoCodeError || (autoCodePreview ? 'System code auto-generated from Level 1 + Level 2 + Level 3 numeric sequence. Readable code is created after save.' : undefined)}
                           validateStatus={autoCodeError ? 'warning' : undefined}
                           rules={[{ required: true, message: 'Item code is required' }]}
                         >
@@ -1140,22 +1312,14 @@ const Items = () => {
                           label="Item Type"
                           rules={[{ required: true, message: 'Select item type' }]}
                         >
-                          <Select
-                            placeholder="Select type"
-                            options={uniqueItemTypes}
-                            onChange={(val) => {
-                              if (val) {
-                                const valLower = val.toLowerCase();
-                                const assetKeywords = ['asset', 'equipment', 'laptop', 'computer', 'it', 'fixed'];
-                                if (assetKeywords.some(kw => valLower.includes(kw))) {
-                                  form.setFieldsValue({ has_serial: true });
-                                }
-                              }
-                            }}
-                          />
+                          <Select placeholder="Select type" options={uniqueItemTypes} />
                         </Form.Item>
                       </Col>
-
+                      <Col span={12}>
+                        <Form.Item name="is_kit" valuePropName="checked" label=" ">
+                          <Checkbox>Has Components / Kit</Checkbox>
+                        </Form.Item>
+                      </Col>
                     </Row>
                     <Row gutter={16}>
                       <Col span={12}>
@@ -1188,6 +1352,39 @@ const Items = () => {
                 ),
               },
               {
+                key: 'kit',
+                label: `Kit Components${kitComponents.length ? ` (${kitComponents.length})` : ''}`,
+                children: (
+                  <div>
+                    {selectedIsKit ? (
+                      <>
+                        <div style={{ marginBottom: 12, color: 'rgba(0,0,0,0.65)' }}>
+                          Define what is inside one parent pack. Stock, indent, procurement, and issue continue to use the parent item.
+                        </div>
+                        <Table
+                          dataSource={kitComponents}
+                          columns={kitComponentColumns}
+                          rowKey="key"
+                          pagination={false}
+                          size="small"
+                          scroll={{ x: 1000 }}
+                          footer={() => (
+                            <Button type="dashed" icon={<PlusOutlined />} onClick={addKitComponent} block>
+                              Add Component
+                            </Button>
+                          )}
+                          locale={{ emptyText: 'No kit components added' }}
+                        />
+                      </>
+                    ) : (
+                      <div style={{ padding: 16, color: 'rgba(0,0,0,0.45)' }}>
+                        Enable Has Components / Kit in Basic to define pack components.
+                      </div>
+                    )}
+                  </div>
+                ),
+              },
+              {
                 key: 'attributes',
                 label: `Attributes${categoryAttributes.length ? ` (${categoryAttributes.length})` : ''}`,
                 children: (
@@ -1195,7 +1392,7 @@ const Items = () => {
                     {categoryAttributes.length === 0 ? (
                       <div style={{ padding: 16, color: 'rgba(0,0,0,0.45)' }}>
                         No attributes defined for this category. Define them under{' '}
-                        <a onClick={() => navigate('/masters/item-attributes')}>Masters → Attributes</a>.
+                        <a onClick={() => navigate('/masters/item-attributes')}>Masters â†’ Attributes</a>.
                       </div>
                     ) : (
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1269,7 +1466,7 @@ const Items = () => {
                     {categorySpecs.length === 0 ? (
                       <div style={{ padding: 16, color: 'rgba(0,0,0,0.45)' }}>
                         No specs mapped for this category. Define them under{' '}
-                        <a onClick={() => navigate('/masters/specs')}>Masters → Specs</a>.
+                        <a onClick={() => navigate('/masters/specs')}>Masters â†’ Specs</a>.
                       </div>
                     ) : (
                       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1655,7 +1852,7 @@ const Items = () => {
             color: '#F5A623',
             fontSize: '28px'
           }}>
-            ⚠️
+            âš ï¸
           </div>
 
           <h2 style={{
@@ -1724,4 +1921,5 @@ const Items = () => {
 };
 
 export default Items;
+
 

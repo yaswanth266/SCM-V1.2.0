@@ -203,6 +203,19 @@ const ItemDetail = () => {
     { title: 'SSCC', dataIndex: 'barcode_sscc', key: 'sscc', render: (v) => v || '-' },
   ];
 
+  const kitComponentColumns = [
+    { title: '#', key: 'index', width: 64, render: (_, __, index) => index + 1 },
+    { title: 'Component Code', dataIndex: 'component_code', key: 'component_code', render: (v) => v || '-' },
+    { title: 'Component Name', dataIndex: 'component_name', key: 'component_name', render: (v) => v || '-' },
+    { title: 'Quantity', dataIndex: 'quantity', key: 'quantity', align: 'right', render: (v) => formatNumber(v) },
+    {
+      title: 'UOM',
+      key: 'uom',
+      render: (_, r) => r.uom_abbreviation || r.uom_name || uoms.find(u => u.id === r.uom_id)?.abbreviation || uoms.find(u => u.id === r.uom_id)?.name || '-',
+    },
+    { title: 'Remarks', dataIndex: 'remarks', key: 'remarks', render: (v) => v || '-' },
+  ];
+
   const transColumns = [
     { title: 'Date', dataIndex: 'posting_date', key: 'date', render: (v) => formatDateTime(v) || formatDate(v) },
     { title: 'Voucher Type', dataIndex: 'voucher_type', key: 'vtype' },
@@ -259,6 +272,8 @@ const ItemDetail = () => {
 
    const itemTypeName = item.item_type ? item.item_type.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '-';
    const barcodeTypeName = BARCODE_TYPES.find((b) => b.value === item.barcode_type)?.label || item.barcode_type || '-';
+   const kitComponents = Array.isArray(item.kit_components) ? item.kit_components : [];
+   const isKitItem = Boolean(item.is_kit);
 
   const barcodeFormat = (() => {
     const bt = (item.barcode_type || '').toUpperCase();
@@ -270,7 +285,7 @@ const ItemDetail = () => {
 
   return (
     <div>
-      <PageHeader title={`${item.item_code} - ${item.name}`} subtitle={itemTypeName}>
+      <PageHeader title={`${item.readable_code || item.item_code} - ${item.name}`} subtitle={itemTypeName}>
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/masters/items')}>
             Back to Items
@@ -283,8 +298,10 @@ const ItemDetail = () => {
           <Col xs={24} md={16}>
             <Descriptions title="Basic" column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered style={{ marginBottom: 24 }}>
               <Descriptions.Item label="Item Code">{item.item_code}</Descriptions.Item>
+              <Descriptions.Item label="Readable Code">{item.readable_code || '-'}</Descriptions.Item>
               <Descriptions.Item label="Name">{item.name}</Descriptions.Item>
               <Descriptions.Item label="Type">{itemTypeName}</Descriptions.Item>
+              <Descriptions.Item label="Has Components / Kit">{item.is_kit ? 'Yes' : 'No'}</Descriptions.Item>
               <Descriptions.Item label="Category">{item.category?.name || item.category_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Brand">{item.brand || '-'}</Descriptions.Item>
               <Descriptions.Item label="Manufacturer">{item.manufacturer || '-'}</Descriptions.Item>
@@ -329,6 +346,20 @@ const ItemDetail = () => {
                 <p style={{ marginTop: 4, color: 'rgba(0,0,0,0.65)' }}>{item.description}</p>
               </div>
             )}
+
+            {isKitItem && (
+              <div style={{ marginTop: 24 }}>
+                <Table
+                  title={() => 'Kit Components'}
+                  columns={kitComponentColumns}
+                  dataSource={kitComponents}
+                  rowKey={(r, index) => r.id || r.component_code || index}
+                  pagination={false}
+                  scroll={{ x: 'max-content' }}
+                  size="small"
+                />
+              </div>
+            )}
           </Col>
           <Col xs={24} md={8} style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: 16 }}>
             <BarcodeDisplay
@@ -348,6 +379,20 @@ const ItemDetail = () => {
           activeKey={activeTab}
           onChange={setActiveTab}
           items={[
+            ...(isKitItem ? [{
+              key: 'kit_components',
+              label: `Kit Components${kitComponents.length ? ` (${kitComponents.length})` : ''}`,
+              children: (
+                <Table
+                  columns={kitComponentColumns}
+                  dataSource={kitComponents}
+                  rowKey={(r, index) => r.id || r.component_code || index}
+                  pagination={false}
+                  scroll={{ x: 'max-content' }}
+                  size="small"
+                />
+              ),
+            }] : []),
             {
               key: 'stock',
               label: 'Stock',

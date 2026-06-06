@@ -1,6 +1,6 @@
 """Item code generator using category hierarchy: L1L2L3-SEQ.
 
-Example: Electronics(10) / Computers(10) / Laptops(10) item 1 -> 101010-001.
+Example: Electronics(10) / Computers(10) / Laptops(10) item 1 -> 101010-0001.
 Each category segment is two digits in the 10-99 range and is stored on
 item_categories.short_code. The complete path is stored on full_code.
 """
@@ -28,8 +28,8 @@ _FORM_MAP = {
 }
 
 ORG_PREFIX_DEFAULT = "BHSPL"
-ITEM_CODE_V2_PAD = 3
-ITEM_CODE_V2_MAX = 999
+ITEM_CODE_V2_PAD = 4
+ITEM_CODE_V2_MAX = 9999
 
 
 def normalize_form_code(dosage_form: str | None) -> str:
@@ -93,7 +93,7 @@ async def _max_existing_sequence(db: AsyncSession, prefix: str) -> int:
         await db.execute(select(Item.item_code).where(Item.item_code.like(f"{prefix}-%")))
     ).scalars().all()
     max_seq = 0
-    pattern = re.compile(rf"^{re.escape(prefix)}-(\d{{3}})$")
+    pattern = re.compile(rf"^{re.escape(prefix)}-(\d{{3,4}})$")
     for code in rows:
         match = pattern.match(code or "")
         if match:
@@ -174,6 +174,8 @@ async def generate_item_code(
         max_db = await _max_existing_sequence(db, prefix)
         if (series.current_number or 0) < max_db:
             series.current_number = max_db
+        if (series.pad_length or 0) < ITEM_CODE_V2_PAD:
+            series.pad_length = ITEM_CODE_V2_PAD
 
     next_num = (series.current_number or 0) + 1
     if next_num > ITEM_CODE_V2_MAX:
@@ -181,7 +183,7 @@ async def generate_item_code(
     series.current_number = next_num
     await db.flush()
 
-    seq = str(next_num).zfill(series.pad_length or ITEM_CODE_V2_PAD)
+    seq = str(next_num).zfill(max(series.pad_length or 0, ITEM_CODE_V2_PAD))
     return f"{prefix}-{seq}"
 
 

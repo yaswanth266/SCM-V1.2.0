@@ -252,8 +252,11 @@ const Categories = () => {
     <Dropdown menu={getContextMenu(nodeData)} trigger={['contextMenu']}>
       <span className="cat-tree-node" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
         <span style={{ fontWeight: 500 }}>{nodeData.title}</span>
+        {nodeData.code && (
+          <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', margin: 0 }}>{nodeData.code}</Tag>
+        )}
         {nodeData.full_code && (
-          <Tag color="blue" style={{ fontSize: 10, lineHeight: '16px', margin: 0 }}>{nodeData.full_code}</Tag>
+          <Tag color="purple" style={{ fontSize: 10, lineHeight: '16px', margin: 0 }}>{nodeData.full_code}</Tag>
         )}
         <Tag
           color={nodeData.is_active === false ? 'red' : 'green'}
@@ -274,6 +277,7 @@ const Categories = () => {
   );
 
   const itemColumns = [
+    { title: 'Readable Code', dataIndex: 'readable_code', key: 'readable_code', width: 220, render: (v) => v || '-' },
     { title: 'Item Code', dataIndex: 'item_code', key: 'code', width: 120 },
     { title: 'Name', dataIndex: 'name', key: 'name', width: 200, ellipsis: true },
     { title: 'Type', dataIndex: 'item_type', key: 'type', width: 120 },

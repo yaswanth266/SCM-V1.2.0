@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+﻿from datetime import datetime, timezone
 from decimal import Decimal
 import re
 import asyncio
@@ -7,6 +7,7 @@ from urllib.parse import urljoin
 import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy import delete, select, func, or_, text
+from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
 from app.config import settings
@@ -17,6 +18,7 @@ from app.models.master import (
     Vendor, VendorItem, VendorContract, VendorRating, VendorType, VendorCategory, VendorVendorType, VendorItemHistory,
     PriceList, PriceListItem,
     Brand, Feature, ItemFeature, ItemAttribute, ItemAttributeValue,
+    MasterItemKitComponent,
     UserGroup, UserGroupMember, UserGroupPermission,
     UserItemPermission, RoleItemPermission,
     Office, Position, Employee,
@@ -426,7 +428,7 @@ async def list_uom_conversions(
 
 
 def _validate_uom_conversion(payload: UOMConversionCreate) -> None:
-    # BUG-FE-087: forbid self-conversion (kg→kg = 5.0 used to be accepted).
+    # BUG-FE-087: forbid self-conversion (kgâ†’kg = 5.0 used to be accepted).
     if payload.from_uom_id == payload.to_uom_id:
         raise HTTPException(
             status_code=422,
@@ -928,6 +930,59 @@ async def _generate_category_short_code(db: AsyncSession, parent_id: int | None)
     raise HTTPException(status_code=422, detail="No more short codes available under this parent (max 90 categories allowed)")
 
 
+def _readable_token(value: str | None, max_len: int | None = None) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        token = "GEN"
+    else:
+        import unicodedata
+        ascii_value = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
+        token = re.sub(r"[^A-Z0-9]+", "-", ascii_value.upper()).strip("-") or "GEN"
+    return token[:max_len] if max_len else token
+
+
+def _category_readable_code(name: str | None, code: str | None = None) -> str:
+    cleaned = re.sub(r"-\d{3,}$", "", (code or "").strip().upper())
+    if cleaned and not re.fullmatch(r"\d+", cleaned):
+        return cleaned
+    return _readable_token(name, 3)
+
+
+async def _unique_category_code(db: AsyncSession, base: str, category_id: int | None = None) -> str:
+    code = (base or "CAT").strip().upper()
+    suffix = ""
+    attempt = code
+    while True:
+        query = select(ItemCategory.id).where(func.lower(ItemCategory.code) == attempt.lower())
+        if category_id:
+            query = query.where(ItemCategory.id != category_id)
+        exists = (await db.execute(query)).scalar_one_or_none()
+        if not exists:
+            return attempt
+        suffix = chr(ord("A") + len(suffix))
+        attempt = f"{code}{suffix}"
+
+
+async def _category_readable_chain(db: AsyncSession, category_id: int | None) -> list[str]:
+    if not category_id:
+        return ["GEN"]
+    rows = (await db.execute(select(ItemCategory))).scalars().all()
+    by_id = {int(row.id): row for row in rows}
+    chain = []
+    current = by_id.get(int(category_id))
+    seen = set()
+    while current and int(current.id) not in seen:
+        seen.add(int(current.id))
+        chain.append(_category_readable_code(current.name, current.code))
+        current = by_id.get(int(current.parent_id)) if current.parent_id else None
+    return list(reversed(chain)) or ["GEN"]
+
+
+async def _item_readable_code(db: AsyncSession, category_id: int | None, item_name: str | None) -> str:
+    chain = await _category_readable_chain(db, category_id)
+    return "-".join([*chain, _readable_token(item_name)])
+
+
 # ==================== ITEM CATEGORIES ====================
 
 @router.get("/categories")
@@ -972,26 +1027,17 @@ async def create_category(
     dup_full = await db.execute(select(ItemCategory).where(ItemCategory.full_code == data["full_code"]))
     if dup_full.scalar_one_or_none():
         raise HTTPException(status_code=409, detail=f"Full code '{data['full_code']}' already exists")
-    # Auto-generate code if not provided
+    # Auto-generate readable category code if not provided, e.g. Laboratory Supplies -> LAB.
     if not data.get("code"):
-        import re, unicodedata
-        # BUG-FE-042: strip diacritics so "Médi" → "MED" rather than "" (regex
-        # would drop accented chars and yield an empty prefix).
-        raw_name = data.get("name") or "CAT"
-        normalized = unicodedata.normalize("NFKD", raw_name)
-        ascii_name = normalized.encode("ascii", "ignore").decode("ascii")
-        prefix = re.sub(r'[^A-Z0-9]', '', ascii_name[:3].upper()) or "CAT"
-        count_result = await db.execute(select(func.count(ItemCategory.id)))
-        count = count_result.scalar() or 0
-        data["code"] = f"{prefix}-{count + 1:04d}"
+        data["code"] = await _unique_category_code(db, _category_readable_code(data.get("name")))
     # BUG-FE-043: case-insensitive uniqueness check
-    code_val = (data.get("code") or "").strip()
+    code_val = _category_readable_code(data.get("name"), data.get("code"))
     existing = await db.execute(
         select(ItemCategory).where(func.lower(ItemCategory.code) == code_val.lower())
     )
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail=f"Category with code '{code_val}' already exists")
-    data["code"] = code_val.upper()
+    data["code"] = code_val
     cat = ItemCategory(**data)
     db.add(cat)
     await db.flush()
@@ -1036,6 +1082,7 @@ async def update_category(
         if not new_code:
             update_data.pop("code")
         else:
+            new_code = _category_readable_code(update_data.get("name", cat.name), new_code)
             # BUG-FE-043: case-insensitive duplicate check on rename
             dup = await db.execute(
                 select(ItemCategory).where(
@@ -1045,7 +1092,9 @@ async def update_category(
             )
             if dup.scalar_one_or_none():
                 raise HTTPException(status_code=409, detail=f"Category with code '{new_code}' already exists")
-            update_data["code"] = new_code.upper()
+            update_data["code"] = new_code
+    elif "name" in update_data:
+        update_data["code"] = await _unique_category_code(db, _category_readable_code(update_data.get("name")), category_id)
     # BUG-FE-041: refuse silent deactivate via PUT when items still reference it
     if update_data.get("is_active") is False and cat.is_active is True:
         item_count = (await db.execute(
@@ -1054,7 +1103,7 @@ async def update_category(
         if item_count > 0:
             raise HTTPException(
                 status_code=409,
-                detail=f"Cannot deactivate category — {item_count} active item(s) still reference it. Use the dedicated delete endpoint with explicit confirmation.",
+                detail=f"Cannot deactivate category â€” {item_count} active item(s) still reference it. Use the dedicated delete endpoint with explicit confirmation.",
             )
     for k, v in update_data.items():
         setattr(cat, k, v)
@@ -1090,7 +1139,7 @@ async def delete_category(
 # ==================== ITEMS ====================
 
 async def _check_items_view_permission(db: AsyncSession, current_user: User) -> None:
-    """BUG-FE-001: items expose price/MRP/HSN — gate to roles that legitimately
+    """BUG-FE-001: items expose price/MRP/HSN â€” gate to roles that legitimately
     need this. Mirrors vendor pattern in list_vendors."""
     from app.utils.dependencies import get_user_permissions, get_user_role_codes
     role_codes = await get_user_role_codes(db, current_user.id)
@@ -1240,6 +1289,77 @@ async def _normalize_item_uom_category(db: AsyncSession, data: dict) -> None:
         data["uom_category_id"] = uom_category_id
 
 
+def _kit_component_suffix(index: int) -> str:
+    value = index + 1  # first component starts at b, matching 101010-0001-b
+    chars = []
+    while value >= 0:
+        chars.append(chr(ord("a") + (value % 26)))
+        value = (value // 26) - 1
+    return "".join(reversed(chars))
+
+
+def _kit_component_code(item_code: str | None, index: int) -> str | None:
+    base = (item_code or "").strip()
+    if not base:
+        return None
+    return f"{base}-{_kit_component_suffix(index)}".lower()
+
+
+def _kit_component_payload(component: MasterItemKitComponent) -> dict:
+    uom = getattr(component, "uom", None)
+    return {
+        "id": component.id,
+        "item_id": component.item_id,
+        "component_code": component.component_code,
+        "component_name": component.component_name,
+        "quantity": component.quantity,
+        "uom_id": component.uom_id,
+        "uom_name": uom.name if uom else None,
+        "uom_abbreviation": uom.abbreviation if uom else None,
+        "sort_order": component.sort_order,
+        "remarks": component.remarks,
+    }
+
+
+def _kit_component_value(component, field: str, default=None):
+    if isinstance(component, dict):
+        return component.get(field, default)
+    return getattr(component, field, default)
+
+
+async def _replace_item_kit_components(
+    db: AsyncSession,
+    item_id: int,
+    is_kit: bool,
+    components,
+    item_code: str | None = None,
+) -> None:
+    await db.execute(delete(MasterItemKitComponent).where(MasterItemKitComponent.item_id == item_id))
+    if not is_kit:
+        return
+    if not components:
+        return
+
+    uom_ids = {int(_kit_component_value(c, "uom_id")) for c in components if _kit_component_value(c, "uom_id")}
+    if uom_ids:
+        rows = await db.execute(select(UOM.id).where(UOM.id.in_(uom_ids)))
+        found = {int(r[0]) for r in rows.all()}
+        missing = sorted(uom_ids - found)
+        if missing:
+            raise HTTPException(status_code=422, detail=f"Unknown UOM id(s) in kit components: {missing}")
+
+    for idx, component in enumerate(components, start=1):
+        db.add(MasterItemKitComponent(
+            item_id=item_id,
+            component_code=_kit_component_code(item_code, idx - 1),
+            component_name=_kit_component_value(component, "component_name"),
+            quantity=_kit_component_value(component, "quantity"),
+            uom_id=_kit_component_value(component, "uom_id"),
+            sort_order=_kit_component_value(component, "sort_order") or idx,
+            remarks=_kit_component_value(component, "remarks"),
+        ))
+
+
 @router.get("/items")
 async def list_items(
     page: int = Query(1, ge=1),
@@ -1262,7 +1382,7 @@ async def list_items(
     count_query = select(func.count(Item.id))
 
     if transactable:
-        # 2026-05-06 — guard transactional flows from items missing the
+        # 2026-05-06 â€” guard transactional flows from items missing the
         # fields required to create a line: UOM, item_code, name. Active
         # check applies regardless of the is_active param when transactable
         # is on, because an inactive item can't transact.
@@ -1303,13 +1423,18 @@ async def list_items(
         query = query.where(Item.is_active == is_active)
         count_query = count_query.where(Item.is_active == is_active)
 
-    query = apply_search_filter(query, Item, search, ["item_code", "name", "sku", "hsn_code"])
-    count_query = apply_search_filter(count_query, Item, search, ["item_code", "name", "sku", "hsn_code"])
+    query = apply_search_filter(query, Item, search, ["item_code", "readable_code", "name", "sku", "hsn_code"])
+    count_query = apply_search_filter(count_query, Item, search, ["item_code", "readable_code", "name", "sku", "hsn_code"])
 
     total = (await db.execute(count_query)).scalar()
     from sqlalchemy.orm import selectinload
     result = await db.execute(
-        query.options(selectinload(Item.primary_uom), selectinload(Item.category), selectinload(Item.feature))
+        query.options(
+            selectinload(Item.primary_uom),
+            selectinload(Item.category),
+            selectinload(Item.feature),
+            selectinload(Item.kit_components).selectinload(MasterItemKitComponent.uom),
+        )
         .offset(offset).limit(limit).order_by(Item.id.desc())
     )
     items = result.scalars().all()
@@ -1333,6 +1458,10 @@ async def list_items(
         data["feature_names"] = feature_names
         data["feature_name"] = feature_names[0] if feature_names else (i.feature.name if i.feature else None)
         data["feature"] = _feature_payload(primary_feature)
+        data["kit_components"] = [
+            _kit_component_payload(c)
+            for c in sorted(i.kit_components or [], key=lambda row: (row.sort_order or 0, row.id or 0))
+        ]
         response_items.append(data)
 
     return build_paginated_response(response_items, total, page, page_size)
@@ -1346,9 +1475,17 @@ async def get_item(
 ):
     await ensure_feature_schema(db)
     await ensure_item_uom_category_schema(db)
+    await ensure_item_category_code_schema(db)
     await _check_items_view_permission(db, current_user)
     from sqlalchemy.orm import selectinload
-    result = await db.execute(select(Item).options(selectinload(Item.primary_uom)).where(Item.id == item_id))
+    result = await db.execute(
+        select(Item)
+        .options(
+            selectinload(Item.primary_uom),
+            selectinload(Item.kit_components).selectinload(MasterItemKitComponent.uom),
+        )
+        .where(Item.id == item_id)
+    )
     item = result.scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
@@ -1366,6 +1503,10 @@ async def get_item(
     data["feature_id"] = feature_ids[0] if feature_ids else None
     data["feature_ids"] = feature_ids
     data["feature_names"] = feature_names
+    data["kit_components"] = [
+        _kit_component_payload(c)
+        for c in sorted(item.kit_components or [], key=lambda row: (row.sort_order or 0, row.id or 0))
+    ]
     return data
 
 
@@ -1375,7 +1516,7 @@ async def create_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission("masters", "create", "items")),
 ):
-    """Item code auto-generates as L1L2L3-SEQ, e.g. 101010-001,
+    """Item code auto-generates as L1L2L3-SEQ, e.g. 101010-0001,
     if the user leaves it blank or sends 'AUTO'. A user-supplied code is
     accepted as 'manual' (must still be unique).
     """
@@ -1386,6 +1527,7 @@ async def create_item(
     await ensure_feature_schema(db)
     await ensure_item_uom_category_schema(db)
     data = payload.model_dump()
+    kit_components = data.pop("kit_components", None)
     requested_feature_ids = data.pop("feature_ids", None)
     if requested_feature_ids is None:
         requested_feature_ids = [data.get("feature_id")] if data.get("feature_id") is not None else []
@@ -1409,7 +1551,7 @@ async def create_item(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         data["coding_status"] = "auto"
     else:
-        # Manual code — verify uniqueness (case-insensitive, BUG-FE-002)
+        # Manual code â€” verify uniqueness (case-insensitive, BUG-FE-002)
         existing = await db.execute(
             select(Item).where(func.lower(Item.item_code) == user_code.lower())
         )
@@ -1419,25 +1561,44 @@ async def create_item(
         data["item_code"] = user_code.upper()
         data["coding_status"] = "manual"
 
+    existing_name = await db.execute(
+        select(Item.id).where(func.lower(Item.name) == str(data.get("name") or "").strip().lower())
+    )
+    if existing_name.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Item with name '{data.get('name')}' already exists. Please use a unique item name.")
+
     # Always populate the form code if dosage_form is set
     if data.get("dosage_form"):
         data["dosage_form_code"] = normalize_form_code(data["dosage_form"])
-
-    # Automatically set has_serial = True for asset/equipment types
-    item_type_lower = (data.get("item_type") or "").lower()
-    asset_keywords = ['asset', 'equipment', 'laptop', 'computer', 'it', 'fixed']
-    if any(kw in item_type_lower for kw in asset_keywords):
-        data["has_serial"] = True
+    data["readable_code"] = await _item_readable_code(db, data.get("category_id"), data.get("name"))
 
     item = Item(**data, created_by=current_user.id)
     if payload.item_type == "equipment" and not payload.dosage_form:
         item.dosage_form = "unit"
-    if any(kw in item_type_lower for kw in asset_keywords):
-        item.has_serial = True
     db.add(item)
-    await db.flush()
-    await _replace_item_features(db, int(item.id), validated_feature_ids)
-    return {"id": item.id, "item_code": item.item_code, "message": "Item created"}
+    try:
+        await db.flush()
+        await _replace_item_features(db, int(item.id), validated_feature_ids)
+        await _replace_item_kit_components(db, int(item.id), bool(item.is_kit), kit_components, item.item_code)
+    except IntegrityError as exc:
+        await db.rollback()
+        raw = str(getattr(exc, "orig", exc))
+        if "item_code" in raw:
+            raise HTTPException(status_code=409, detail="Item code already exists. Please use a unique item code.") from exc
+        if "name" in raw:
+            raise HTTPException(status_code=409, detail="Item name already exists. Please use a unique item name.") from exc
+        raise HTTPException(status_code=409, detail=f"Item could not be created because a referenced or unique value conflicts: {raw}") from exc
+    except OperationalError as exc:
+        await db.rollback()
+        raw = str(getattr(exc, "orig", exc))
+        if "item_master_kit_components" in raw:
+            raise HTTPException(status_code=422, detail="Kit component table is missing. Run `alembic upgrade heads` from the backend, then try again.") from exc
+        raise HTTPException(status_code=500, detail=f"Database error while creating item: {raw}") from exc
+    except SQLAlchemyError as exc:
+        await db.rollback()
+        raw = str(getattr(exc, "orig", exc))
+        raise HTTPException(status_code=500, detail=f"Database error while creating item: {raw}") from exc
+    return {"id": item.id, "item_code": item.item_code, "readable_code": item.readable_code, "message": "Item created"}
 
 
 @router.post("/items/preview-code")
@@ -1457,7 +1618,7 @@ async def preview_item_code(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
-# Wave 11A — bulk backfill endpoint for legacy items
+# Wave 11A â€” bulk backfill endpoint for legacy items
 @router.post("/items/backfill-codes")
 async def backfill_item_codes(
     dry_run: bool = True,
@@ -1482,6 +1643,8 @@ async def update_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     update_data = payload.model_dump(exclude_unset=True)
+    kit_components_explicit = "kit_components" in payload.model_fields_set
+    kit_components = update_data.pop("kit_components", None)
     update_data.pop("category_id", None)
     explicit_feature_update = "feature_ids" in payload.model_fields_set or "feature_id" in payload.model_fields_set
     incoming_feature_ids = update_data.pop("feature_ids", None) if "feature_ids" in update_data else None
@@ -1529,18 +1692,15 @@ async def update_item(
 
     for k, v in update_data.items():
         setattr(item, k, v)
+    if "name" in update_data:
+        item.readable_code = await _item_readable_code(db, item.category_id, item.name)
     # Auto-set dosage_form for equipment if not explicitly provided
     if item.item_type == "equipment" and not item.dosage_form:
         item.dosage_form = "unit"
-
-    # Automatically set has_serial = True for asset/equipment types
-    item_type_lower = (item.item_type or "").lower()
-    asset_keywords = ['asset', 'equipment', 'laptop', 'computer', 'it', 'fixed']
-    if any(kw in item_type_lower for kw in asset_keywords):
-        item.has_serial = True
-
     await db.flush()
     await _replace_item_features(db, int(item.id), validated_feature_ids)
+    if kit_components_explicit or "is_kit" in update_data:
+        await _replace_item_kit_components(db, int(item.id), bool(item.is_kit), kit_components if kit_components_explicit else None, item.item_code)
     return {"success": True, "message": "Item updated"}
 
 
@@ -1667,7 +1827,7 @@ async def get_item_transactions(
     current_user: User = Depends(get_current_user),
 ):
     """BUG-FE-021: minimal transactions stub. Full implementation requires
-    inventory/stock-movement tables — return empty list when those models
+    inventory/stock-movement tables â€” return empty list when those models
     are missing so the UI renders 'No data' instead of silently failing."""
     try:
         from app.models.stock import StockTransaction  # type: ignore
@@ -1704,7 +1864,7 @@ async def deactivate_item(
     current_user: User = Depends(require_permission("masters", "delete", "items")),
 ):
     """BUG-FE-005: refuse deactivation if active stock balances or vendor_items
-    reference this item — would orphan rows. Pass ?force=true to override (admins
+    reference this item â€” would orphan rows. Pass ?force=true to override (admins
     only, when they have already cleaned up dependents)."""
     result = await db.execute(select(Item).where(Item.id == item_id))
     item = result.scalar_one_or_none()
@@ -2538,13 +2698,11 @@ async def _employee_unique_value(db: AsyncSession, column, value, employee_id: i
     return None if exists else value
 
 
-async def _project_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None, cache: dict = None) -> int | None:
+async def _project_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None) -> int | None:
     project_name = _external_text(row, "project.name", "project_name", "projectName", "project", max_len=255)
     project_code = _external_text(row, "project.code", "project_code", "projectCode", max_len=50) or _external_code(project_name, 50)
     if not project_code:
         return None
-    if cache is not None and project_code.lower() in cache["projects"]:
-        return cache["projects"][project_code.lower()]
     project = (await db.execute(select(Project).where(func.lower(Project.code) == project_code.lower()))).scalar_one_or_none()
     if not project:
         if not organization_id:
@@ -2557,17 +2715,13 @@ async def _project_id_from_external(db: AsyncSession, row: dict, stats: dict[str
         stats["projects_created"] += 1
     elif project_name and project.name != project_name:
         project.name = project_name
-    if cache is not None:
-        cache["projects"][project_code.lower()] = project.id
     return project.id
 
 
-async def _office_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int], cache: dict = None) -> int | None:
+async def _office_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int]) -> int | None:
     office_name = _external_text(row, "office.name", "office_name", "officeName", "office", "branch", "location", max_len=255)
     if not office_name:
         return None
-    if cache is not None and office_name.lower() in cache["offices"]:
-        return cache["offices"][office_name.lower()]
     office = (await db.execute(select(Office).where(func.lower(Office.name) == office_name.lower()))).scalar_one_or_none()
     
     level = _external_text(row, "office.level", "office_level", "officeLevel", "level", max_len=50)
@@ -2617,35 +2771,24 @@ async def _office_id_from_external(db: AsyncSession, row: dict, stats: dict[str,
         if address:
             office.address = address
             
-    if cache is not None:
-        cache["offices"][office_name.lower()] = office.id
     return office.id
 
 
-async def _role_id_from_external(db: AsyncSession, row: dict, cache: dict = None) -> int | None:
+async def _role_id_from_external(db: AsyncSession, row: dict) -> int | None:
     role_code = _external_text(row, "position.role_code", "role_code", "roleCode", max_len=50)
     role_name = _external_text(row, "position.role_name", "role_name", "roleName", "role", max_len=100)
-    if cache is not None:
-        if role_code and role_code.lower() in cache["roles"]:
-            return cache["roles"][role_code.lower()]
-        if role_name and role_name.lower() in cache["roles"]:
-            return cache["roles"][role_name.lower()]
     if role_code:
         role = (await db.execute(select(Role).where(func.lower(Role.code) == role_code.lower(), Role.is_active == True))).scalar_one_or_none()  # noqa: E712
         if role:
-            if cache is not None:
-                cache["roles"][role_code.lower()] = role.id
             return role.id
     if role_name:
         role = (await db.execute(select(Role).where(func.lower(Role.name) == role_name.lower(), Role.is_active == True))).scalar_one_or_none()  # noqa: E712
         if role:
-            if cache is not None:
-                cache["roles"][role_name.lower()] = role.id
             return role.id
     return None
 
 
-async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None, cache: dict = None):
+async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None):
     position_id = row.get("position_id")
     if position_id:
         exists = (await db.execute(select(Position.id).where(Position.id == position_id))).scalar_one_or_none()
@@ -2660,12 +2803,10 @@ async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[st
     position_code = position_code or _external_code(position_name, 100)
     if not position_code or not position_name:
         return None
-    if cache is not None and position_code.lower() in cache["positions"]:
-        return cache["positions"][position_code.lower()]
     position = (await db.execute(select(Position).where(func.lower(Position.code) == position_code.lower()))).scalar_one_or_none()
-    project_id = await _project_id_from_external(db, row, stats, organization_id, cache)
-    office_id = await _office_id_from_external(db, row, stats, cache)
-    role_id = await _role_id_from_external(db, row, cache)
+    project_id = await _project_id_from_external(db, row, stats, organization_id)
+    office_id = await _office_id_from_external(db, row, stats)
+    role_id = await _role_id_from_external(db, row)
     if not position:
         position = Position(
             code=position_code,
@@ -2690,12 +2831,10 @@ async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[st
         position.section = _external_text(row, "position.section", "section", "section_name", "sectionName") or position.section
         position.project_id = project_id or position.project_id
         position.office_id = office_id or position.office_id
-    if cache is not None:
-        cache["positions"][position_code.lower()] = position.id
     return position.id
 
 
-async def _upsert_external_employee(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None = None, cache: dict = None) -> tuple[bool, bool]:
+async def _upsert_external_employee(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None = None) -> tuple[bool, bool]:
     employee_code = _external_text(row, "employee.employee_code", "employee_code", "employeeCode", "code", "emp_code", "empCode", max_len=50)
     if not employee_code:
         return False, False
@@ -2729,35 +2868,10 @@ async def _upsert_external_employee(db: AsyncSession, row: dict, stats: dict[str
         12,
     )
     employee.phone = phone or employee.phone
-    
-    if cache is not None:
-        if email:
-            existing_id = cache["emails"].get(email.lower())
-            if existing_id is None or existing_id == employee.id:
-                employee.email = email
-                cache["emails"][email.lower()] = employee.id
-            else:
-                employee.email = None
-        if pan_number:
-            existing_id = cache["pans"].get(pan_number.upper())
-            if existing_id is None or existing_id == employee.id:
-                employee.pan_number = pan_number
-                cache["pans"][pan_number.upper()] = employee.id
-            else:
-                employee.pan_number = None
-        if aadhaar_number:
-            existing_id = cache["aadhaars"].get(aadhaar_number)
-            if existing_id is None or existing_id == employee.id:
-                employee.aadhaar_number = aadhaar_number
-                cache["aadhaars"][aadhaar_number] = employee.id
-            else:
-                employee.aadhaar_number = None
-    else:
-        employee.email = await _employee_unique_value(db, Employee.email, email, employee.id) if email else employee.email
-        employee.pan_number = await _employee_unique_value(db, Employee.pan_number, pan_number, employee.id) if pan_number else employee.pan_number
-        employee.aadhaar_number = await _employee_unique_value(db, Employee.aadhaar_number, aadhaar_number, employee.id) if aadhaar_number else employee.aadhaar_number
-        
-    employee.position_id = await _position_id_from_external(db, row, stats, organization_id, cache) or employee.position_id
+    employee.email = await _employee_unique_value(db, Employee.email, email, employee.id) if email else employee.email
+    employee.pan_number = await _employee_unique_value(db, Employee.pan_number, pan_number, employee.id) if pan_number else employee.pan_number
+    employee.aadhaar_number = await _employee_unique_value(db, Employee.aadhaar_number, aadhaar_number, employee.id) if aadhaar_number else employee.aadhaar_number
+    employee.position_id = await _position_id_from_external(db, row, stats, organization_id) or employee.position_id
     return True, created
 
 
@@ -2813,53 +2927,12 @@ async def sync_employees_from_external_api(
     if not rows:
         raise HTTPException(status_code=422, detail="Employee API response did not contain employee rows")
 
-    # In-memory Cache dictionary to prevent N+1 query disaster
-    cache = {
-        "projects": {},
-        "offices": {},
-        "roles": {},
-        "positions": {},
-        "emails": {},
-        "pans": {},
-        "aadhaars": {},
-    }
-    
-    # Pre-populate project codes
-    projects = (await db.execute(select(Project.code, Project.id))).all()
-    cache["projects"] = {code.lower(): pid for code, pid in projects if code}
-
-    # Pre-populate office names
-    offices = (await db.execute(select(Office.name, Office.id))).all()
-    cache["offices"] = {name.lower(): oid for name, oid in offices if name}
-
-    # Pre-populate role codes and names
-    roles = (await db.execute(select(Role.code, Role.name, Role.id))).all()
-    for code, name, rid in roles:
-        if code:
-            cache["roles"][code.lower()] = rid
-        if name:
-            cache["roles"][name.lower()] = rid
-
-    # Pre-populate position codes
-    positions = (await db.execute(select(Position.code, Position.id))).all()
-    cache["positions"] = {code.lower(): pos_id for code, pos_id in positions if code}
-
-    # Pre-populate uniqueness check caches
-    employees_data = (await db.execute(select(Employee.id, Employee.email, Employee.pan_number, Employee.aadhaar_number))).all()
-    for emp_id, email, pan, aadhaar in employees_data:
-        if email:
-            cache["emails"][email.lower()] = emp_id
-        if pan:
-            cache["pans"][pan.upper()] = emp_id
-        if aadhaar:
-            cache["aadhaars"][aadhaar] = emp_id
-
     created = 0
     updated = 0
     skipped = 0
     org_stats = {"projects_created": 0, "offices_created": 0, "positions_created": 0}
     for row in rows:
-        processed, was_created = await _upsert_external_employee(db, row, org_stats, current_user.organization_id, cache=cache)
+        processed, was_created = await _upsert_external_employee(db, row, org_stats, current_user.organization_id)
         if not processed:
             skipped += 1
         elif was_created:
@@ -2984,7 +3057,7 @@ async def list_vendors(
     current_user: User = Depends(get_current_user),
 ):
     await ensure_vendor_type_schema(db)
-    # R-001 (re-audit): vendors contain bank/GST/DL info — gate to roles that
+    # R-001 (re-audit): vendors contain bank/GST/DL info â€” gate to roles that
     # actually need them. Procurement (PO+MR forms), warehouse (GRN), masters,
     # accounts (payments). Read fails for nurse/field_staff/etc.
     from app.utils.dependencies import get_user_permissions, get_user_role_codes
@@ -3056,7 +3129,7 @@ async def get_vendor(
     current_user: User = Depends(get_current_user),
 ):
     await ensure_vendor_type_schema(db)
-    # BUG-FE-052: mirror the role guard from list_vendors — vendor records
+    # BUG-FE-052: mirror the role guard from list_vendors â€” vendor records
     # contain bank/GST/DL/PII that must not leak to nurses/field_staff/etc.
     from app.utils.dependencies import get_user_permissions, get_user_role_codes
     role_codes = await get_user_role_codes(db, current_user.id)
@@ -3096,13 +3169,13 @@ async def create_vendor(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=409, detail=f"Vendor with code '{code_val}' already exists")
     # BUG-PRO-105 fix: refuse a second active vendor with the same GSTIN (when
-    # one is supplied). The DB has no UNIQUE constraint on gst_number — adding
+    # one is supplied). The DB has no UNIQUE constraint on gst_number â€” adding
     # one is DEFERRED (migration); enforced at the application layer here.
     if payload.gst_number and payload.gst_number.strip():
         gst_dupe = await db.execute(
             select(Vendor.id, Vendor.vendor_code).where(
                 Vendor.gst_number == payload.gst_number,
-                Vendor.is_active == True,  # noqa: E712 — explicit boolean for SQL
+                Vendor.is_active == True,  # noqa: E712 â€” explicit boolean for SQL
             )
         )
         dupe = gst_dupe.first()
@@ -3208,7 +3281,7 @@ async def deactivate_vendor(
         raise HTTPException(
             status_code=409,
             detail=(
-                "Cannot deactivate vendor — has " + ", ".join(refs) +
+                "Cannot deactivate vendor â€” has " + ", ".join(refs) +
                 ". Close them first or pass ?force=true."
             ),
         )
@@ -3435,7 +3508,7 @@ async def list_vendor_purchase_orders(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """BUG-FE-055: vendor PO history tab. Stub — returns empty list when the
+    """BUG-FE-055: vendor PO history tab. Stub â€” returns empty list when the
     procurement model isn't importable so the FE can still render."""
     try:
         from app.models.procurement import PurchaseOrder  # type: ignore
@@ -3879,28 +3952,26 @@ async def list_warehouses(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    from app.utils.dependencies import user_is_managerial, user_warehouse_ids
-    is_managerial = await user_is_managerial(db, current_user.id)
-
     query = select(Warehouse).options(selectinload(Warehouse.parent)).order_by(Warehouse.name)
     if is_active is not None:
         query = query.where(Warehouse.is_active == is_active)
+    if exclude_virtual:
+        query = query.where(Warehouse.type != "virtual")
+    if type:
+        query = query.where(Warehouse.type == type)
+    query = apply_search_filter(query, Warehouse, search, ["code", "name", "city"])
 
-    if is_managerial:
-        # Managers see all non-virtual warehouses by default
-        if exclude_virtual:
-            query = query.where(Warehouse.type != "virtual")
-        if type:
-            query = query.where(Warehouse.type == type)
-    else:
-        # Non-managerial users only see warehouses assigned to them,
-        # whether virtual or real. We do not exclude their assigned virtual ones.
+    # Warehouse-scope isolation matching /inventory/balance R-005.
+    # Without this gate, field/operator users see all 11 warehouses in
+    # dropdowns and on the warehouse picker, even though stock queries
+    # against unauthorized warehouses are rejected â€” confusing UX and a
+    # listing-side privilege leak.
+    from app.utils.dependencies import user_is_managerial, user_warehouse_ids
+    if not await user_is_managerial(db, current_user.id):
         scoped_wh = await user_warehouse_ids(db, current_user.id)
         if not scoped_wh:
             return []
         query = query.where(Warehouse.id.in_(scoped_wh))
-
-    query = apply_search_filter(query, Warehouse, search, ["code", "name", "city"])
 
     result = await db.execute(query)
     whs = result.scalars().all()
@@ -4130,7 +4201,7 @@ async def create_bin(
     current_user: User = Depends(get_current_user),
 ):
     data = payload.model_dump()
-    # BUG-FE-065: verify rack→line→location chain exists. Without this, FE can
+    # BUG-FE-065: verify rackâ†’lineâ†’location chain exists. Without this, FE can
     # post `rack_id` referencing a different warehouse and silently nest the
     # bin under the wrong tree.
     rack = (await db.execute(
@@ -4148,14 +4219,14 @@ async def create_bin(
     )).scalar_one_or_none()
     if loc is None:
         raise HTTPException(status_code=404, detail="Line has no parent location")
-    # BUG-INV-114: a bin cannot be BOTH a reserve bin and a pick bin — those
+    # BUG-INV-114: a bin cannot be BOTH a reserve bin and a pick bin â€” those
     # are mutually-exclusive roles in the replenishment model. Without this
     # check the FE form happily set both to True and replenishment rules picked
     # the wrong source.
     if data.get("is_reserve") and data.get("is_pick_bin"):
         raise HTTPException(
             status_code=422,
-            detail="A bin cannot be both is_reserve and is_pick_bin — pick exactly one role",
+            detail="A bin cannot be both is_reserve and is_pick_bin â€” pick exactly one role",
         )
     bin_obj = WarehouseBin(**data)
     db.add(bin_obj)
@@ -4463,7 +4534,7 @@ async def list_lines_whtree(
 
     BUG-FE-064: verify entity_id is actually a WarehouseLocation, otherwise the
     alias silently returns lines for whatever id was passed (e.g. a warehouse id
-    or rack id) — leaking cross-tenant rows on collisions.
+    or rack id) â€” leaking cross-tenant rows on collisions.
     """
     loc = (await db.execute(
         select(WarehouseLocation.id).where(WarehouseLocation.id == entity_id)
@@ -4713,12 +4784,12 @@ async def update_bin(
         if k in allowed:
             setattr(bin_obj, k, v)
     # BUG-INV-114: re-validate the mutually-exclusive flag pair after applying
-    # updates — a payload that sets one flag while the other is already True
+    # updates â€” a payload that sets one flag while the other is already True
     # on the row would otherwise leave both True silently.
     if bin_obj.is_reserve and bin_obj.is_pick_bin:
         raise HTTPException(
             status_code=422,
-            detail="A bin cannot be both is_reserve and is_pick_bin — pick exactly one role",
+            detail="A bin cannot be both is_reserve and is_pick_bin â€” pick exactly one role",
         )
     await db.flush()
     return {"success": True, "message": "Bin updated"}
@@ -4780,7 +4851,7 @@ async def list_departments(
 
 # =====================================================================
 # SUPPLIER (material vendor) PORTAL LOGIN MANAGEMENT
-# coordinator-side CRUD — mirrors carrier login endpoints in logistics.py
+# coordinator-side CRUD â€” mirrors carrier login endpoints in logistics.py
 # =====================================================================
 
 from app.services.auth_service import hash_password as _hash_password  # noqa: E402
@@ -4950,7 +5021,6 @@ async def list_supplier_logins(
         }
         for v in vendors
     ]
-
 
 # ==================== BILL OF MATERIALS (BOM) ====================
 
