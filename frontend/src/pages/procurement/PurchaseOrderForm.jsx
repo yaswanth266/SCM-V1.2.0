@@ -1,97 +1,346 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Button, Card, Descriptions, Tabs, Table, Spin, Space, message,
-  Tag, Empty, Typography, Divider, Progress, Popconfirm, Steps, Timeline,
-  Row, Col, Tooltip, Select,
+  Card, Button, Form, Input, InputNumber, Select, Space, DatePicker,
+  message, Row, Col, Table, Divider, Typography, Tooltip, Tag
 } from 'antd';
 import {
-  ArrowLeftOutlined, PrinterOutlined, CheckOutlined,
-  CloseCircleOutlined, SendOutlined, PlusOutlined,
-  FileDoneOutlined, DollarOutlined, InboxOutlined,
-  CarryOutOutlined, AuditOutlined, CheckCircleOutlined, PaperClipOutlined,
+  PlusOutlined, ArrowLeftOutlined, SaveOutlined, SendOutlined,
+  MinusCircleOutlined
 } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
 import dayjs from 'dayjs';
-import { useReactToPrint } from 'react-to-print';
 import PageHeader from '../../components/PageHeader';
-import { PurchaseOrderPrint } from '../../components/PrintTemplates';
-import StatusTag from '../../components/StatusTag';
+import ItemSelector from '../../components/ItemSelector';
 import AttachmentUploader from '../../components/AttachmentUploader';
 import api from '../../config/api';
 import {
-  formatCurrency, formatDate, getErrorMessage, formatDateTime,
+  formatCurrency, getErrorMessage, formatDateForAPI
 } from '../../utils/helpers';
+import { DATE_FORMAT } from '../../utils/constants';
 
-const { Text, Title } = Typography;
-
-const PO_STATUS_STEPS = [
-  { key: 'draft', title: 'Draft', icon: <AuditOutlined /> },
-  { key: 'pending_approval', title: 'Pending Approval', icon: <SendOutlined /> },
-  { key: 'approved', title: 'Approved', icon: <CheckOutlined /> },
-  { key: 'accepted', title: 'Accepted by Supplier', icon: <CheckCircleOutlined /> },
-  { key: 'partially_received', title: 'Partially Received', icon: <InboxOutlined /> },
-  { key: 'received', title: 'Received', icon: <CarryOutOutlined /> },
-  { key: 'closed', title: 'Closed', icon: <CheckCircleOutlined /> },
-];
+const { TextArea } = Input;
+const { Text } = Typography;
 
 const PurchaseOrderForm = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const printRef = useRef(null);
+  const isNew = !id || id === 'new';
 
-  const [po, setPo] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('items');
+  const [form] = Form.useForm();
+  const [loading, setLoading] = useState(!isNew);
+  const [submitting, setSubmitting] = useState(false);
+  const [editingPO, setEditingPO] = useState(null);
 
-  // Related data
-  const [grnList, setGrnList] = useState([]);
-  const [invoiceList, setInvoiceList] = useState([]);
-  const [paymentList, setPaymentList] = useState([]);
-  const [tabLoading, setTabLoading] = useState(false);
+  // Form selections and items
+  const [poItems, setPoItems] = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [selectedVendor, setSelectedVendor] = useState(null);
+  const [mrOptions, setMrOptions] = useState([]);
+  const [quotationOptions, setQuotationOptions] = useState([]);
+  const [warehouses, setWarehouses] = useState([]);
+  const [projects, setProjects] = useState([]);
 
-  // Action states
-  const [actionLoading, setActionLoading] = useState(false);
+  // Discount
+  const [discountType, setDiscountType] = useState('percent');
+  const [discountValue, setDiscountValue] = useState(0);
 
-  const isAmendLocked = (() => {
-    if (!po?.supplier_delivery_date) return false;
-    const now = dayjs();
-    const deliveryDate = dayjs(po.supplier_delivery_date);
-    return now.isAfter(deliveryDate.subtract(2, 'day'));
-  })();
+  // Attachment
+  const [attachmentUrl, setAttachmentUrl] = useState('');
+  const [fileList, setFileList] = useState([]);
 
-  const handleAmendPO = async () => {
-    setActionLoading(true);
+  const createEmptyItem = () => {
+    const vendorGstin = (selectedVendor?.gst_number || '').trim();
+    const hasGstin = !!vendorGstin;
+    return {
+      key: Date.now() + Math.random(),
+      item_id: null,
+      item_name: '',
+      qty: 1,
+      uom: '',
+      rate: 0,
+      cgst_percent: hasGstin ? 9 : 0,
+      sgst_percent: hasGstin ? 9 : 0,
+      igst_percent: hasGstin ? 0 : 18,
+      tax_amount: 0,
+      amount: 0,
+    };
+  };
+
+  const loadLookups = useCallback(async () => {
     try {
-      const res = await api.post(`/procurement/purchase-orders/${id}/amend`);
-      const newId = res.data?.id;
-      message.success(res.data?.message || 'PO Amendment created successfully');
-      navigate(`/procurement/purchase-orders?edit_id=${newId}`);
+      const [vendorRes, whRes, projRes] = await Promise.allSettled([
+        api.get('/masters/vendors', { params: { page_size: 200, status: 'active' } }),
+        api.get('/masters/warehouses', { params: { page_size: 200 } }),
+        api.get('/masters/projects', { params: { page_size: 200 } }),
+      ]);
+      if (vendorRes.status === 'fulfilled') {
+        const d = vendorRes.value.data;
+        const items = d.items || d.data || d || [];
+        setVendors(items.map((v) => ({
+          label: `[${v.vendor_code}] ${v.name}`,
+          value: v.id,
+          vendor: v,
+        })));
+      }
+      if (whRes.status === 'fulfilled') {
+        const w = whRes.value.data;
+        setWarehouses((w.items || w.data || w || []).map((i) => ({ label: i.name || i.warehouse_name, value: i.id })));
+      }
+      if (projRes.status === 'fulfilled') {
+        const p = projRes.value.data;
+        setProjects((p.items || p.data || p || []).map((i) => ({ label: i.name || i.project_name, value: i.id })));
+      }
+    } catch { /* silent */ }
+  }, []);
+
+  const loadMROptions = useCallback(async (search = '') => {
+    try {
+      const res = await api.get('/procurement/material-requests', {
+        params: { page_size: 50, search, status: 'approved' },
+      });
+      const data = res.data;
+      const items = data.items || data.data || data || [];
+      setMrOptions(items.map((mr) => ({ label: mr.mr_number, value: mr.id })));
+    } catch { /* silent */ }
+  }, []);
+
+  const loadQuotationOptions = useCallback(async (search = '') => {
+    try {
+      const res = await api.get('/procurement/quotations', {
+        params: { page_size: 50, search, status: 'accepted' },
+      });
+      const data = res.data;
+      const items = data.items || data.data || data || [];
+      setQuotationOptions(items.map((q) => ({ label: `${q.quotation_number} - ${q.vendor_name || ''}`, value: q.id })));
+    } catch { /* silent */ }
+  }, []);
+
+  // Item row calculations
+  const recalcItem = (item) => {
+    const base = (item.qty || 0) * (item.rate || 0);
+    const cgstAmt = (base * (item.cgst_percent || 0)) / 100;
+    const sgstAmt = (base * (item.sgst_percent || 0)) / 100;
+    const igstAmt = (base * (item.igst_percent || 0)) / 100;
+    item.tax_amount = Number((cgstAmt + sgstAmt + igstAmt).toFixed(2));
+    item.amount = Number((base + cgstAmt + sgstAmt + igstAmt).toFixed(2));
+    return item;
+  };
+
+  const updatePoItem = (key, field, value) => {
+    setPoItems((prev) =>
+      prev.map((item) => {
+        if (item.key !== key) return item;
+        const updated = { ...item, [field]: value };
+        if (field === 'igst_percent' && value > 0) {
+          updated.cgst_percent = 0;
+          updated.sgst_percent = 0;
+        }
+        if ((field === 'cgst_percent' || field === 'sgst_percent') && value > 0) {
+          updated.igst_percent = 0;
+        }
+        return recalcItem(updated);
+      })
+    );
+  };
+
+  const addPoItemRow = () => {
+    setPoItems((prev) => [...prev, createEmptyItem()]);
+  };
+
+  const removePoItemRow = (key) => {
+    setPoItems((prev) => prev.filter((i) => i.key !== key));
+  };
+
+  const calcGrossTotal = () =>
+    poItems.reduce((sum, item) => sum + (item.qty || 0) * (item.rate || 0), 0);
+
+  const calcDiscountAmount = () => {
+    const gross = calcGrossTotal();
+    if (discountType === 'percent') return gross * (discountValue || 0) / 100;
+    return discountValue || 0;
+  };
+
+  const calcSubtotal = () => calcGrossTotal() - calcDiscountAmount();
+
+  const calcTaxComponents = () => {
+    const gross = calcGrossTotal();
+    const discAmt = calcDiscountAmount();
+    const discRatio = gross > 0 ? (gross - discAmt) / gross : 1;
+
+    let cgst = 0, sgst = 0, igst = 0;
+    poItems.forEach((item) => {
+      const base = (item.qty || 0) * (item.rate || 0) * discRatio;
+      cgst += (base * (item.cgst_percent || 0)) / 100;
+      sgst += (base * (item.sgst_percent || 0)) / 100;
+      igst += (base * (item.igst_percent || 0)) / 100;
+    });
+    return { cgst, sgst, igst };
+  };
+
+  const calcCGST = () => calcTaxComponents().cgst;
+  const calcSGST = () => calcTaxComponents().sgst;
+  const calcIGST = () => calcTaxComponents().igst;
+  const calcTaxTotal = () => calcCGST() + calcSGST() + calcIGST();
+  const calcGrandTotal = () => calcSubtotal() + calcTaxTotal();
+
+  const handleVendorChange = (vendorId) => {
+    const found = vendors.find((v) => v.value === vendorId);
+    setSelectedVendor(found ? found.vendor : null);
+  };
+
+  const handleQuotationSelect = async (quotationId) => {
+    if (!quotationId) return;
+    try {
+      const res = await api.get(`/procurement/quotations/${quotationId}`);
+      const qData = res.data;
+      if (qData.vendor_id) {
+        form.setFieldsValue({ vendor_id: qData.vendor_id });
+        handleVendorChange(qData.vendor_id);
+      }
+      if (qData.mr_id) {
+        form.setFieldsValue({ mr_id: qData.mr_id });
+      }
+
+      const vendorGstin = (selectedVendor?.gst_number || '').trim();
+      const hasGstin = !!vendorGstin;
+
+      const items = (qData.items || []).map((item, idx) => {
+        let cg = item.cgst_rate || item.cgst_percent || 0;
+        let sg = item.sgst_rate || item.sgst_percent || 0;
+        let ig = item.igst_rate || item.igst_percent || 0;
+        const taxRate = item.tax_rate || 0;
+
+        if (!hasGstin) {
+          ig = ig > 0 ? ig : (cg + sg > 0 ? cg + sg : taxRate);
+          cg = 0;
+          sg = 0;
+        } else if (cg === 0 && sg === 0 && ig === 0 && taxRate > 0) {
+          cg = taxRate / 2;
+          sg = taxRate / 2;
+          ig = 0;
+        }
+
+        const row = {
+          key: item.id || Date.now() + idx,
+          item_id: item.item_id,
+          item_code: item.item_code || '',
+          item_name: item.item_name || '',
+          qty: item.qty || item.quantity || 0,
+          uom_id: item.uom_id || null,
+          uom: item.uom_name || item.uom || '',
+          rate: item.rate || item.unit_price || 0,
+          discount_percent: item.discount || item.discount_percent || 0,
+          cgst_percent: cg,
+          sgst_percent: sg,
+          igst_percent: ig,
+          tax_amount: 0,
+          amount: 0,
+        };
+        return recalcItem(row);
+      });
+      setPoItems(items.length > 0 ? items : [createEmptyItem()]);
+      message.success('Items loaded from quotation');
     } catch (err) {
       message.error(getErrorMessage(err));
-    } finally {
-      setActionLoading(false);
     }
   };
 
-  const handlePrint = useReactToPrint({
-    content: () => printRef.current,
-    documentTitle: po ? `PO_${po.po_number}` : 'PurchaseOrder',
-  });
+  const handleMRSelect = async (mrId) => {
+    if (!mrId) return;
+    try {
+      const res = await api.get(`/procurement/material-requests/${mrId}`);
+      const mrData = res.data;
+      const patch = {};
+      if (mrData.warehouse_id) patch.warehouse_id = mrData.warehouse_id;
+      if (mrData.project_id) patch.project_id = mrData.project_id;
+      if (mrData.required_date) patch.expected_delivery_date = dayjs(mrData.required_date);
+      if (Object.keys(patch).length) form.setFieldsValue(patch);
 
-  useEffect(() => {
-    if (id) {
-      fetchPO();
-    } else {
-      // If no id, redirect to PO list (creation is handled via drawer in PurchaseOrders.jsx)
-      navigate('/procurement/purchase-orders');
+      const vendorGstin = (selectedVendor?.gst_number || '').trim();
+      const hasGstin = !!vendorGstin;
+
+      const items = (mrData.items || []).map((item, idx) => {
+        const row = {
+          key: item.id || Date.now() + idx,
+          item_id: item.item_id,
+          item_code: item.item_code || '',
+          item_name: item.item_name || '',
+          qty: item.qty || item.quantity || 0,
+          uom_id: item.uom_id || null,
+          uom: item.uom_name || item.uom || '',
+          rate: 0,
+          discount_percent: 0,
+          cgst_percent: hasGstin ? 9 : 0,
+          sgst_percent: hasGstin ? 9 : 0,
+          igst_percent: hasGstin ? 0 : 18,
+          tax_amount: 0,
+          amount: 0,
+        };
+        return recalcItem(row);
+      });
+      if (items.length > 0) {
+        setPoItems(items);
+        message.success('Items loaded from material request — enter vendor rates');
+      }
+    } catch (err) {
+      message.error(getErrorMessage(err));
     }
-  }, [id]);
+  };
 
   const fetchPO = async () => {
     setLoading(true);
     try {
       const res = await api.get(`/procurement/purchase-orders/${id}`);
-      setPo(res.data);
+      const data = res.data;
+      setEditingPO(data);
+      form.setFieldsValue({
+        ...data,
+        po_date: data.po_date ? dayjs(data.po_date) : null,
+        expected_delivery_date: data.expected_delivery_date ? dayjs(data.expected_delivery_date) : null,
+      });
+
+      if (data.vendor_id) {
+        try {
+          const vRes = await api.get(`/masters/vendors/${data.vendor_id}`);
+          setSelectedVendor(vRes.data || null);
+        } catch {
+          setSelectedVendor(null);
+        }
+      }
+
+      const items = (data.items || []).map((item, idx) => {
+        const row = {
+          key: item.id || Date.now() + idx,
+          item_id: item.item_id,
+          item_name: item.item_name || (item.item ? `[${item.item.item_code}] ${item.item.item_name || item.item.name}` : ''),
+          qty: item.qty || item.quantity || 0,
+          uom: item.uom || item.unit || '',
+          uom_id: item.uom_id || null,
+          rate: item.rate || item.unit_price || 0,
+          discount_pct: item.discount_pct || 0,
+          cgst_percent: item.cgst_percent || item.cgst_rate || 0,
+          sgst_percent: item.sgst_percent || item.sgst_rate || 0,
+          igst_percent: item.igst_percent || item.igst_rate || 0,
+          tax_amount: 0,
+          amount: 0,
+        };
+        return recalcItem(row);
+      });
+      setPoItems(items.length > 0 ? items : [createEmptyItem()]);
+      setDiscountType(data.discount_type || 'percent');
+      setDiscountValue(data.discount_value || 0);
+
+      setAttachmentUrl(data.attachment_url || '');
+      if (data.attachment_url) {
+        setFileList([{
+          uid: '-1',
+          name: data.attachment_url.split('/').pop() || 'Attachment',
+          status: 'done',
+          url: data.attachment_url,
+        }]);
+      } else {
+        setFileList([]);
+      }
     } catch (err) {
       message.error(getErrorMessage(err));
       navigate('/procurement/purchase-orders');
@@ -101,866 +350,480 @@ const PurchaseOrderForm = () => {
   };
 
   useEffect(() => {
-    if (po && activeTab === 'grn_history') fetchGRNs();
-    if (po && activeTab === 'payments') fetchPayments();
-  }, [activeTab, po]);
-
-  const fetchGRNs = async () => {
-    setTabLoading(true);
-    try {
-      const res = await api.get(`/procurement/purchase-orders/${id}/grns`, { params: { page_size: 100 } });
-      setGrnList(res.data.items || res.data.data || res.data || []);
-    } catch {
-      // If specific endpoint fails, try general GRN endpoint filtered by PO
-      try {
-        const res = await api.get('/warehouse/grn', { params: { po_id: id, page_size: 100 } });
-        setGrnList(res.data.items || res.data.data || res.data || []);
-      } catch {
-        // silent
-      }
-    } finally {
-      setTabLoading(false);
-    }
-  };
-
-  const fetchPayments = async () => {
-    setTabLoading(true);
-    try {
-      const [invRes, payRes] = await Promise.allSettled([
-        api.get(`/procurement/purchase-orders/${id}/invoices`, { params: { page_size: 100 } }),
-        api.get(`/procurement/purchase-orders/${id}/payments`, { params: { page_size: 100 } }),
-      ]);
-      if (invRes.status === 'fulfilled') {
-        setInvoiceList(invRes.value.data.items || invRes.value.data.data || invRes.value.data || []);
-      }
-      if (payRes.status === 'fulfilled') {
-        setPaymentList(payRes.value.data.items || payRes.value.data.data || payRes.value.data || []);
-      }
-    } catch {
-      // silent
-    } finally {
-      setTabLoading(false);
-    }
-  };
-
-  // Actions
-  const handleSubmitForApproval = async () => {
-    setActionLoading(true);
-    try {
-      await api.post(`/procurement/purchase-orders/${id}/submit`);
-      message.success('PO submitted for approval');
+    loadLookups();
+    loadMROptions();
+    loadQuotationOptions();
+    if (!isNew) {
       fetchPO();
+    } else {
+      form.setFieldsValue({
+        po_date: dayjs(),
+        expected_delivery_date: dayjs().add(14, 'day'),
+      });
+      setPoItems([createEmptyItem()]);
+    }
+  }, [id]);
+
+  const handleSubmit = async (submitAction = 'draft') => {
+    try {
+      const values = await form.validateFields();
+      const validItems = poItems.filter((i) => i.item_id);
+      if (validItems.length === 0) {
+        message.error('Please add at least one item');
+        return;
+      }
+
+      const vendorCreditLimit = Number(selectedVendor?.credit_limit || 0);
+      const newPoTotal = Number(calcGrandTotal() || 0);
+      if (vendorCreditLimit > 0 && newPoTotal > vendorCreditLimit) {
+        const ok = window.confirm(
+          'This PO total (' + formatCurrency(newPoTotal) +
+          ') exceeds the vendor credit limit (' + formatCurrency(vendorCreditLimit) +
+          '). Continue anyway?'
+        );
+        if (!ok) return;
+      }
+
+      const hasMedicineLine = validItems.some((it) => {
+        const t = (it.item_type || '').toLowerCase();
+        return t === 'medicine' || it.requires_prescription || it.is_schedule_h1 || it.is_narcotic;
+      });
+      if (hasMedicineLine) {
+        const vendorDl = (selectedVendor?.drug_license_number || '').trim();
+        if (!vendorDl) {
+          message.error(
+            'This PO contains medicine items but the selected vendor has no Drug License on file. ' +
+            'Either pick a DL-holding vendor or update the vendor master.'
+          );
+          return;
+        }
+      }
+
+      if (selectedVendor !== null) {
+        const vendorGstin = (selectedVendor?.gst_number || '').trim();
+        if (!vendorGstin) {
+          const hasIntra = validItems.some((it) =>
+            (Number(it.cgst_percent) || 0) > 0 || (Number(it.sgst_percent) || 0) > 0
+          );
+          if (hasIntra) {
+            message.error(
+              'Vendor has no GSTIN — CGST/SGST cannot be applied. ' +
+              'Use IGST or update the vendor first.'
+            );
+            return;
+          }
+        }
+      }
+
+      setSubmitting(true);
+
+      let status = 'draft';
+      if (submitAction === 'submit') status = 'pending_approval';
+
+      const payload = {
+        ...values,
+        po_date: formatDateForAPI(values.po_date),
+        expected_delivery_date: formatDateForAPI(values.expected_delivery_date),
+        attachment_url: attachmentUrl || null,
+        status,
+        subtotal: Number(calcGrossTotal().toFixed(2)),
+        discount_type: discountType,
+        discount_value: discountValue,
+        discount_total: Number(calcDiscountAmount().toFixed(2)),
+        cgst_total: Number(calcCGST().toFixed(2)),
+        sgst_total: Number(calcSGST().toFixed(2)),
+        igst_total: Number(calcIGST().toFixed(2)),
+        tax_total: Number(calcTaxTotal().toFixed(2)),
+        grand_total: Number(calcGrandTotal().toFixed(2)),
+        items: validItems.map((item) => ({
+          item_id: item.item_id,
+          qty: item.qty,
+          uom_id: item.uom_id || (typeof item.uom === 'number' ? item.uom : null),
+          rate: (item.rate === null || item.rate === undefined || item.rate === '') ? null : item.rate,
+          discount_pct: 0,
+          cgst_rate: item.cgst_percent || item.cgst_rate || 0,
+          sgst_rate: item.sgst_percent || item.sgst_rate || 0,
+          igst_rate: item.igst_percent || item.igst_rate || 0,
+          tax_amount: item.tax_amount,
+          amount: item.amount,
+        })),
+      };
+
+      if (!isNew && editingPO) {
+        await api.put(`/procurement/purchase-orders/${editingPO.id}`, payload);
+        if (submitAction === 'submit' && editingPO.status === 'draft') {
+          try {
+            await api.post(`/procurement/purchase-orders/${editingPO.id}/submit`);
+            message.success('Purchase Order submitted for approval');
+          } catch (submitErr) {
+            message.error({
+              content: 'PO saved as draft, but submit-for-approval failed: '
+                + getErrorMessage(submitErr) + ' — retry submit from PO details.',
+              duration: 8,
+            });
+          }
+        } else {
+          message.success('Purchase Order updated successfully');
+        }
+      } else {
+        const res = await api.post('/procurement/purchase-orders', { ...payload, status: 'draft' });
+        const newId = res.data?.id;
+        if (submitAction === 'submit' && newId) {
+          try {
+            await api.post(`/procurement/purchase-orders/${newId}/submit`);
+            message.success('Purchase Order created and submitted for approval');
+          } catch (submitErr) {
+            message.error({
+              content: 'PO created as draft, but submit-for-approval failed: '
+                + getErrorMessage(submitErr) + ' — retry submit from PO details.',
+              duration: 8,
+            });
+          }
+        } else {
+          message.success('Purchase Order created as draft');
+        }
+      }
+      navigate('/procurement/purchase-orders');
     } catch (err) {
+      if (err.errorFields) return;
       message.error(getErrorMessage(err));
     } finally {
-      setActionLoading(false);
+      setSubmitting(false);
     }
   };
 
-  const handleApprove = async () => {
-    setActionLoading(true);
-    try {
-      await api.post(`/procurement/purchase-orders/${id}/approve`);
-      message.success('PO approved');
-      fetchPO();
-    } catch (err) {
-      message.error(getErrorMessage(err));
-    } finally {
-      setActionLoading(false);
-    }
-  };
+  const poItemColumns = [
+    { title: '#', width: 40, render: (_, __, idx) => idx + 1 },
+    {
+      title: 'Item',
+      dataIndex: 'item_id',
+      width: 250,
+      render: (val, record) => (
+        record.item_name ? (
+          <Tooltip title={record.item_name}>
+            <Text ellipsis style={{ maxWidth: 200 }}>{record.item_name}</Text>
+          </Tooltip>
+        ) : (
+          <ItemSelector
+            value={val}
+            onChange={(itemId, item) => {
+              updatePoItem(record.key, 'item_id', itemId);
+              if (item) {
+                updatePoItem(record.key, 'item_name', item.item_name || item.name || '');
+                updatePoItem(record.key, 'uom', item.uom || item.default_uom || item.primary_uom?.name || '');
+                updatePoItem(record.key, 'uom_id', item.primary_uom_id || item.uom_id || null);
+                const rate = parseFloat(item.purchase_price || 0);
+                if (rate > 0) updatePoItem(record.key, 'rate', rate);
 
-  const handleCancel = async () => {
-    setActionLoading(true);
-    try {
-      await api.post(`/procurement/purchase-orders/${id}/cancel`);
-      message.success('PO cancelled');
-      fetchPO();
-    } catch (err) {
-      message.error(getErrorMessage(err));
-    } finally {
-      setActionLoading(false);
-    }
-  };
+                const vendorGstin = (selectedVendor?.gst_number || '').trim();
+                const hasGstin = !!vendorGstin;
 
-  const handleCreateGRN = () => {
-    navigate(`/warehouse/grn/new?po_id=${id}`);
-  };
+                let cg = parseFloat(item.cgst_rate || item.cgst_percent || 0);
+                let sg = parseFloat(item.sgst_rate || item.sgst_percent || 0);
+                let ig = parseFloat(item.igst_rate || item.igst_percent || 0);
+                const tax = parseFloat(item.tax_rate || 0);
 
-  const handleCreateInvoice = () => {
-    // Land on Invoices list with ?po_id= so the page auto-opens the drawer
-    // and calls handlePOSelect to pre-fill vendor + items from this PO.
-    navigate(`/accounts/invoices?new=1&po_id=${id}`);
-  };
+                if (!hasGstin) {
+                  ig = ig > 0 ? ig : (cg + sg > 0 ? cg + sg : tax);
+                  cg = 0;
+                  sg = 0;
+                } else if (cg === 0 && sg === 0 && ig === 0 && tax > 0) {
+                  cg = tax / 2;
+                  sg = tax / 2;
+                  ig = 0;
+                }
 
-  if (loading) {
-    return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-        <Spin size="large" tip="Loading Purchase Order..." />
-      </div>
-    );
-  }
-
-  if (!po) {
-    return (
-      <div>
-        <PageHeader title="Purchase Order Not Found" />
-        <Empty description="The requested purchase order was not found." />
-        <div style={{ textAlign: 'center', marginTop: 24 }}>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/procurement/purchase-orders')}>
-            Back to Purchase Orders
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const poItems = po.items || [];
-  const currentStepIdx = PO_STATUS_STEPS.findIndex((s) => s.key === po.status);
-  const isCancelled = po.status === 'cancelled';
-
-  // Calculate total received
-  const totalOrderedQty = poItems.reduce((sum, i) => sum + Number(i.qty || i.quantity || 0), 0);
-  const totalReceivedQty = poItems.reduce((sum, i) => sum + Number(i.received_qty || 0), 0);
-  const overallProgress = totalOrderedQty > 0 ? Math.round((totalReceivedQty / totalOrderedQty) * 100) : 0;
-
-  // Calculate tax and discount totals dynamically from items
-  const discountTotal = po.discount_amount || po.discount_total || poItems.reduce((sum, i) => sum + (Number(i.qty || 0) * Number(i.rate || 0) * Number(i.discount_percent || i.discount_pct || 0)) / 100, 0);
-  const cgstTotal = po.cgst_amount || po.cgst_total || poItems.reduce((sum, i) => sum + (Number(i.qty || 0) * Number(i.rate || 0) * (1 - Number(i.discount_percent || i.discount_pct || 0)/100) * Number(i.cgst_percent || i.cgst_rate || 0)) / 100, 0);
-  const sgstTotal = po.sgst_amount || po.sgst_total || poItems.reduce((sum, i) => sum + (Number(i.qty || 0) * Number(i.rate || 0) * (1 - Number(i.discount_percent || i.discount_pct || 0)/100) * Number(i.sgst_percent || i.sgst_rate || 0)) / 100, 0);
-  const igstTotal = po.igst_amount || po.igst_total || poItems.reduce((sum, i) => sum + (Number(i.qty || 0) * Number(i.rate || 0) * (1 - Number(i.discount_percent || i.discount_pct || 0)/100) * Number(i.igst_percent || i.igst_rate || 0)) / 100, 0);
-  const taxTotal = po.tax_amount || po.tax_total || (cgstTotal + sgstTotal + igstTotal);
-
-  // Parse vehicle/freight cost from remarks
-  let vehicleCost = 0;
-  if (po.remarks) {
-    const match = po.remarks.match(/Includes vehicle cost:\s*(\d+(\.\d+)?)/);
-    if (match) {
-      vehicleCost = parseFloat(match[1]);
-    }
-  }
+                updatePoItem(record.key, 'cgst_percent', cg);
+                updatePoItem(record.key, 'sgst_percent', sg);
+                updatePoItem(record.key, 'igst_percent', ig);
+                updatePoItem(record.key, 'tax_rate', tax);
+              }
+            }}
+            style={{ width: '100%' }}
+          />
+        )
+      ),
+    },
+    {
+      title: 'Qty', dataIndex: 'qty', width: 80,
+      render: (val, record) => (
+        <InputNumber min={0.01} value={val} onChange={(v) => updatePoItem(record.key, 'qty', v)} style={{ width: '100%' }} size="small" />
+      ),
+    },
+    {
+      title: 'UOM', dataIndex: 'uom', width: 70,
+      render: (val) => <Text style={{ fontSize: 12 }}>{val || '-'}</Text>,
+    },
+    {
+      title: 'Rate', dataIndex: 'rate', width: 100,
+      render: (val, record) => (
+        <InputNumber min={0} value={val} onChange={(v) => updatePoItem(record.key, 'rate', v)} style={{ width: '100%' }} size="small" />
+      ),
+    },
+    {
+      title: 'CGST%', dataIndex: 'cgst_percent', width: 75,
+      render: (val, record) => (
+        <InputNumber min={0} max={28} value={val} onChange={(v) => updatePoItem(record.key, 'cgst_percent', v)} style={{ width: '100%' }} size="small" />
+      ),
+    },
+    {
+      title: 'SGST%', dataIndex: 'sgst_percent', width: 75,
+      render: (val, record) => (
+        <InputNumber min={0} max={28} value={val} onChange={(v) => updatePoItem(record.key, 'sgst_percent', v)} style={{ width: '100%' }} size="small" />
+      ),
+    },
+    {
+      title: 'IGST%', dataIndex: 'igst_percent', width: 75,
+      render: (val, record) => (
+        <InputNumber min={0} max={28} value={val} onChange={(v) => updatePoItem(record.key, 'igst_percent', v)} style={{ width: '100%' }} size="small" />
+      ),
+    },
+    {
+      title: 'Tax', dataIndex: 'tax_amount', width: 90, align: 'right',
+      render: (val) => <Text style={{ fontSize: 12 }}>{formatCurrency(val)}</Text>,
+    },
+    {
+      title: 'Amount', dataIndex: 'amount', width: 110, align: 'right',
+      render: (val) => <Text strong style={{ fontSize: 12 }}>{formatCurrency(val)}</Text>,
+    },
+    {
+      title: '', width: 40,
+      render: (_, record) =>
+        poItems.length > 1 ? (
+          <MinusCircleOutlined style={{ color: '#ff4d4f', cursor: 'pointer' }} onClick={() => removePoItemRow(record.key)} />
+        ) : null,
+    },
+  ];
 
   return (
     <div>
-      <div style={{ display: 'none' }}>
-        <PurchaseOrderPrint ref={printRef} data={po} />
-      </div>
-      <PageHeader title={po.po_number} subtitle="Purchase Order Detail">
-        <Space className="no-print">
-          {po.status === 'draft' && (
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              onClick={handleSubmitForApproval}
-              loading={actionLoading}
-            >
-              Submit for Approval
-            </Button>
-          )}
-          {po.status === 'pending_approval' && (
-            <Popconfirm title="Approve this Purchase Order?" onConfirm={handleApprove}>
-              <Button type="primary" icon={<CheckOutlined />} loading={actionLoading}>
-                Approve
-              </Button>
-            </Popconfirm>
-          )}
-          {['approved', 'accepted', 'partially_received'].includes(po.status) && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateGRN}>
-              Create GRN
-            </Button>
-          )}
-          {['approved', 'accepted', 'partially_received', 'received'].includes(po.status) && (
-            <Button icon={<DollarOutlined />} onClick={handleCreateInvoice}>
-              Create Invoice
-            </Button>
-          )}
-          {['approved', 'accepted', 'rejected'].includes(po.status) && (
-            <Tooltip title={isAmendLocked ? "Cannot amend: amendments are locked within 2 days of supplier delivery date" : "Amend this PO to create a new version"}>
-              <Button
-                type="default"
-                danger
-                icon={<PlusOutlined />}
-                disabled={isAmendLocked}
-                onClick={handleAmendPO}
-                loading={actionLoading}
-              >
-                Amend PO
-              </Button>
-            </Tooltip>
-          )}
-          {!['closed', 'cancelled', 'received'].includes(po.status) && (
-            <Popconfirm
-              title="Cancel this Purchase Order?"
-              onConfirm={handleCancel}
-              okButtonProps={{ danger: true }}
-            >
-              <Button danger icon={<CloseCircleOutlined />} loading={actionLoading}>
-                Cancel
-              </Button>
-            </Popconfirm>
-          )}
-          <Button icon={<PrinterOutlined />} onClick={handlePrint}>
-            Print PO
-          </Button>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/procurement/purchase-orders')}>
-            Back
-          </Button>
-        </Space>
+      <PageHeader
+        title={isNew ? 'Create Purchase Order' : `Edit ${editingPO?.po_number || ''}`}
+        subtitle={isNew ? 'Generate a new purchase order' : 'Edit purchase order details'}
+      >
+        <Button onClick={() => navigate('/procurement/purchase-orders')} icon={<ArrowLeftOutlined />}>
+          Back to List
+        </Button>
       </PageHeader>
 
-      {/* Status Timeline */}
-      <Card style={{ marginBottom: 16 }}>
-        {po.status === 'rejected' ? (
-          <div style={{ textAlign: 'center', padding: '8px 0' }}>
-            <Tag color="red" style={{ fontSize: 14, padding: '4px 16px' }}>This Purchase Order has been Rejected by the Supplier</Tag>
-          </div>
-        ) : isCancelled ? (
-          <div style={{ textAlign: 'center', padding: '8px 0' }}>
-            <Tag color="red" style={{ fontSize: 14, padding: '4px 16px' }}>This Purchase Order has been Cancelled</Tag>
-          </div>
-        ) : (
-          <Steps
-            current={currentStepIdx >= 0 ? currentStepIdx : 0}
-            size="small"
-            items={PO_STATUS_STEPS.map((step, idx) => ({
-              title: step.title,
-              icon: step.icon,
-              status: idx < currentStepIdx ? 'finish' : idx === currentStepIdx ? 'process' : 'wait',
-            }))}
-          />
-        )}
-      </Card>
-
-      {/* PO Header Info */}
-      <Card style={{ marginBottom: 16 }}>
-        <Row gutter={24}>
-          <Col xs={24} lg={16}>
-            <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
-              <Descriptions.Item label="PO Number">
-                <Space>
-                  <Text strong>{po.po_number}</Text>
-                  {po.versions && po.versions.length > 1 && (
-                    <Select
-                      value={po.id}
-                      style={{ width: 140 }}
-                      onChange={(val) => navigate(`/procurement/purchase-orders/${val}`)}
-                      options={po.versions.map((v) => ({
-                        label: `V${v.version_number} (${v.status.replace(/_/g, ' ')})`,
-                        value: v.id,
-                      }))}
-                      size="small"
-                    />
-                  )}
-                </Space>
-              </Descriptions.Item>
-              <Descriptions.Item label="PO Date">{formatDate(po.po_date)}</Descriptions.Item>
-              <Descriptions.Item label="Status"><StatusTag status={po.status} /></Descriptions.Item>
-              <Descriptions.Item label="Vendor" span={2}>
-                <Text strong>{po.vendor_name || po.vendor || '-'}</Text>
-                {po.vendor_code && <Text type="secondary"> ({po.vendor_code})</Text>}
-              </Descriptions.Item>
-              <Descriptions.Item label="Expected Delivery">{formatDate(po.expected_delivery_date)}</Descriptions.Item>
-              <Descriptions.Item label="Supplier Delivery Date">
-                {po.supplier_delivery_date ? formatDate(po.supplier_delivery_date) : 'Not confirmed'}
-              </Descriptions.Item>
-              <Descriptions.Item label="MR Reference">{po.mr_number || po.mr_reference || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Quotation Ref">{po.quotation_number || po.quotation_reference || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Project">{po.project_name || po.project || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Warehouse">{po.warehouse_name || po.warehouse || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Payment Terms">{po.payment_terms || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Currency">{po.currency || 'INR'}</Descriptions.Item>
-              <Descriptions.Item label="Billing Address" span={3}>{po.billing_address || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Shipping Address" span={3}>{po.shipping_address || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Remarks" span={3}>{po.remarks || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Created By">{po.created_by_name || po.created_by || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Created At">{formatDateTime(po.created_at)}</Descriptions.Item>
-              <Descriptions.Item label="Approved By">{po.approved_by_name || po.approved_by || '-'}</Descriptions.Item>
-            </Descriptions>
-          </Col>
-          <Col xs={24} lg={8}>
-            <Card size="small" style={{ background: '#fafafa', height: '100%' }}>
-              <div style={{ textAlign: 'center', marginBottom: 16 }}>
-                <Text type="secondary">Grand Total</Text>
-                <Title level={3} style={{ margin: '4px 0', color: '#eb2f96' }}>
-                  {formatCurrency(po.grand_total)}
-                </Title>
-              </div>
-              <Divider style={{ margin: '12px 0' }} />
-              <Row style={{ padding: '4px 0' }}>
-                <Col span={14}><Text type="secondary">Subtotal:</Text></Col>
-                <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(po.subtotal)}</Text></Col>
-              </Row>
-              {(discountTotal > 0) && (
-                <Row style={{ padding: '4px 0' }}>
-                  <Col span={14}><Text type="secondary">Discount:</Text></Col>
-                  <Col span={10} style={{ textAlign: 'right' }}><Text type="danger">-{formatCurrency(discountTotal)}</Text></Col>
-                </Row>
-              )}
-              {(cgstTotal > 0) && (
-                <Row style={{ padding: '4px 0' }}>
-                  <Col span={14}><Text type="secondary">CGST:</Text></Col>
-                  <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(cgstTotal)}</Text></Col>
-                </Row>
-              )}
-              {(sgstTotal > 0) && (
-                <Row style={{ padding: '4px 0' }}>
-                  <Col span={14}><Text type="secondary">SGST:</Text></Col>
-                  <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(sgstTotal)}</Text></Col>
-                </Row>
-              )}
-              {(igstTotal > 0) && (
-                <Row style={{ padding: '4px 0' }}>
-                  <Col span={14}><Text type="secondary">IGST:</Text></Col>
-                  <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(igstTotal)}</Text></Col>
-                </Row>
-              )}
-              <Row style={{ padding: '4px 0' }}>
-                <Col span={14}><Text type="secondary">Tax Total:</Text></Col>
-                <Col span={10} style={{ textAlign: 'right' }}><Text>{formatCurrency(taxTotal)}</Text></Col>
-              </Row>
-              {vehicleCost > 0 && (
-                <Row style={{ padding: '4px 0' }}>
-                  <Col span={14}><Text type="secondary">Vehicle / Freight Cost:</Text></Col>
-                  <Col span={10} style={{ textAlign: 'right' }}><Text>+{formatCurrency(vehicleCost)}</Text></Col>
-                </Row>
-              )}
-              <Divider style={{ margin: '12px 0' }} />
-              <div style={{ textAlign: 'center' }}>
-                <Text type="secondary">Receiving Progress</Text>
-                <Progress
-                  percent={overallProgress}
-                  status={overallProgress >= 100 ? 'success' : 'active'}
-                  strokeColor={overallProgress >= 100 ? '#52c41a' : '#eb2f96'}
-                  style={{ marginTop: 8 }}
+      <Card>
+        <Form form={form} layout="vertical">
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="vendor_id" label="Vendor" rules={[{ required: true, message: 'Vendor is required' }]}>
+                <Select
+                  options={vendors}
+                  placeholder="Select vendor"
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={(val) => {
+                    handleVendorChange(val);
+                    // Clear items GSTIN tax since vendor changed
+                    setPoItems(poItems.map(item => recalcItem({ ...item, cgst_percent: 0, sgst_percent: 0, igst_percent: 0 })));
+                  }}
                 />
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  {totalReceivedQty} of {totalOrderedQty} units received
-                </Text>
-              </div>
-            </Card>
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="mr_id" label="Material Request Link">
+                <Select
+                  options={mrOptions}
+                  placeholder="Select MR (optional)"
+                  showSearch
+                  optionFilterProp="label"
+                  allowClear
+                  onChange={handleMRSelect}
+                  onSearch={loadMROptions}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="quotation_id" label="Quotation Link">
+                <Select
+                  options={quotationOptions}
+                  placeholder="Select Quotation (optional)"
+                  showSearch
+                  optionFilterProp="label"
+                  allowClear
+                  onChange={handleQuotationSelect}
+                  onSearch={loadQuotationOptions}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="po_date" label="PO Date" rules={[{ required: true, message: 'PO Date is required' }]}>
+                <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="expected_delivery_date" label="Expected Delivery Date" rules={[{ required: true, message: 'Required' }]}>
+                <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="warehouse_id" label="Target Warehouse" rules={[{ required: true, message: 'Required' }]}>
+                <Select options={warehouses} placeholder="Select warehouse" optionFilterProp="label" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="project_id" label="Project">
+                <Select options={projects} placeholder="Select project" allowClear optionFilterProp="label" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="payment_terms" label="Payment Terms">
+                <Input placeholder="e.g. Net 30 days" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="currency" label="Currency">
+                <Select
+                  options={[
+                    { label: 'INR', value: 'INR' },
+                    { label: 'USD', value: 'USD' },
+                    { label: 'EUR', value: 'EUR' },
+                  ]}
+                  defaultValue="INR"
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item name="billing_address" label="Billing Address">
+                <TextArea rows={2} placeholder="Enter billing address..." />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="shipping_address" label="Shipping Address">
+                <TextArea rows={2} placeholder="Enter shipping address..." />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item name="remarks" label="Remarks">
+            <TextArea rows={2} placeholder="Any remarks..." />
+          </Form.Item>
+        </Form>
+
+        <Divider orientation="left">Items</Divider>
+        <Table
+          dataSource={poItems}
+          columns={poItemColumns}
+          rowKey="key"
+          pagination={false}
+          size="small"
+          scroll={{ x: 1000 }}
+          footer={() => (
+            <Button type="dashed" onClick={addPoItemRow} icon={<PlusOutlined />} block>
+              Add Item
+            </Button>
+          )}
+        />
+
+        <Divider />
+
+        <Row gutter={24}>
+          <Col span={12}>
+            {/* Attachment Uploader */}
+            <div style={{ marginBottom: 16 }}>
+              <Text strong style={{ display: 'block', marginBottom: 8 }}>PO Attachment</Text>
+              <AttachmentUploader
+                entityType="purchase_order"
+                entityId={isNew ? null : id}
+                label="PO Document"
+                onUploadSuccess={(url) => setAttachmentUrl(url)}
+              />
+            </div>
+          </Col>
+          <Col span={12}>
+            <div style={{ background: '#fafafa', padding: 16, borderRadius: 8 }}>
+              <Row style={{ padding: '6px 0' }} align="middle">
+                <Col span={12}><Text strong>Gross Total:</Text></Col>
+                <Col span={12} style={{ textAlign: 'right' }}><Text>{formatCurrency(calcGrossTotal())}</Text></Col>
+              </Row>
+
+              <Row style={{ padding: '6px 0' }} align="middle" gutter={8}>
+                <Col span={10}><Text strong>Discount:</Text></Col>
+                <Col span={6}>
+                  <Select
+                    value={discountType}
+                    onChange={(v) => setDiscountType(v)}
+                    options={[
+                      { label: '%', value: 'percent' },
+                      { label: 'Val', value: 'amount' },
+                    ]}
+                    size="small"
+                    style={{ width: '100%' }}
+                  />
+                </Col>
+                <Col span={8}>
+                  <InputNumber
+                    min={0}
+                    value={discountValue}
+                    onChange={(v) => setDiscountValue(v || 0)}
+                    size="small"
+                    style={{ width: '100%' }}
+                  />
+                </Col>
+              </Row>
+
+              <Row style={{ padding: '6px 0' }} align="middle">
+                <Col span={12}><Text strong>Net Subtotal:</Text></Col>
+                <Col span={12} style={{ textAlign: 'right' }}><Text>{formatCurrency(calcSubtotal())}</Text></Col>
+              </Row>
+
+              {calcCGST() > 0 && (
+                <Row style={{ padding: '4px 0' }}>
+                  <Col span={12}><Text type="secondary">CGST:</Text></Col>
+                  <Col span={12} style={{ textAlign: 'right' }}><Text>{formatCurrency(calcCGST())}</Text></Col>
+                </Row>
+              )}
+              {calcSGST() > 0 && (
+                <Row style={{ padding: '4px 0' }}>
+                  <Col span={12}><Text type="secondary">SGST:</Text></Col>
+                  <Col span={12} style={{ textAlign: 'right' }}><Text>{formatCurrency(calcSGST())}</Text></Col>
+                </Row>
+              )}
+              {calcIGST() > 0 && (
+                <Row style={{ padding: '4px 0' }}>
+                  <Col span={12}><Text type="secondary">IGST:</Text></Col>
+                  <Col span={12} style={{ textAlign: 'right' }}><Text>{formatCurrency(calcIGST())}</Text></Col>
+                </Row>
+              )}
+
+              <Divider style={{ margin: '8px 0' }} />
+
+              <Row style={{ padding: '6px 0' }} align="middle">
+                <Col span={12}><Text strong style={{ fontSize: 16 }}>Grand Total:</Text></Col>
+                <Col span={12} style={{ textAlign: 'right' }}>
+                  <Text strong style={{ fontSize: 18, color: '#eb2f96' }}>{formatCurrency(calcGrandTotal())}</Text>
+                </Col>
+              </Row>
+            </div>
           </Col>
         </Row>
-      </Card>
 
-      {/* Tabs: Items, GRN History, Payments */}
-      <Card>
-        <Tabs
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          items={[
-            {
-              key: 'items',
-              label: (
-                <span><FileDoneOutlined /> Items ({poItems.length})</span>
-              ),
-              children: (
-                <div>
-                  <Table
-                    dataSource={poItems}
-                    rowKey={(r) => r.id || r.item_id}
-                    size="small"
-                    pagination={false}
-                    scroll={{ x: 'max-content' }}
-                    columns={[
-                      { title: '#', width: 40, render: (_, __, idx) => idx + 1 },
-                      {
-                        title: 'Item Code',
-                        dataIndex: 'item_code',
-                        key: 'code',
-                        width: 120,
-                        render: (v, r) => v || (r.item && r.item.item_code) || '-',
-                      },
-                      {
-                        title: 'Item Name',
-                        dataIndex: 'item_name',
-                        key: 'name',
-                        width: 220,
-                        render: (v, r) => {
-                          const name = v || (r.item && (r.item.item_name || r.item.name)) || '-';
-                          const isNew = po.comparison && po.comparison.added_item_ids && po.comparison.added_item_ids.includes(r.item_id);
-                          return (
-                            <Space>
-                              <span>{name}</span>
-                              {isNew && <Tag color="green" style={{ fontWeight: 600 }}>NEW</Tag>}
-                            </Space>
-                          );
-                        },
-                      },
-                      {
-                        title: 'UOM',
-                        dataIndex: 'uom',
-                        key: 'uom',
-                        width: 70,
-                        render: (v, r) => v || r.unit || '-',
-                      },
-                      {
-                        title: 'Ordered Qty',
-                        dataIndex: 'qty',
-                        key: 'qty',
-                        width: 100,
-                        align: 'right',
-                        render: (v, r) => {
-                          const qty = v || r.quantity || 0;
-                          const mod = po.comparison && po.comparison.modified_items && po.comparison.modified_items[String(r.item_id)];
-                          if (mod && mod.old_qty !== qty) {
-                            return (
-                              <span style={{ color: '#fa8c16', fontWeight: 600 }}>
-                                {qty} <span style={{ fontSize: '11px', textDecoration: 'line-through', opacity: 0.7, color: '#8c8c8c' }}>(was {mod.old_qty})</span>
-                              </span>
-                            );
-                          }
-                          return qty;
-                        },
-                      },
-                      {
-                        title: 'Received Qty',
-                        dataIndex: 'received_qty',
-                        key: 'received',
-                        width: 120,
-                        align: 'right',
-                        render: (receivedQty, record) => {
-                          const ordered = record.qty || record.quantity || 0;
-                          const received = receivedQty || 0;
-                          const pct = ordered > 0 ? Math.round((received / ordered) * 100) : 0;
-                          return (
-                            <div>
-                              <Text>{received} / {ordered}</Text>
-                              <Progress
-                                percent={pct}
-                                size="small"
-                                status={pct >= 100 ? 'success' : 'active'}
-                                showInfo={false}
-                                strokeColor={pct >= 100 ? '#52c41a' : '#eb2f96'}
-                              />
-                            </div>
-                          );
-                        },
-                      },
-                      {
-                        title: 'Rate',
-                        dataIndex: 'rate',
-                        key: 'rate',
-                        width: 100,
-                        align: 'right',
-                        render: (v, r) => {
-                          const rate = v || r.unit_price || 0;
-                          const mod = po.comparison && po.comparison.modified_items && po.comparison.modified_items[String(r.item_id)];
-                          if (mod && mod.old_rate !== rate) {
-                            return (
-                              <span style={{ color: '#fa8c16', fontWeight: 600 }}>
-                                {formatCurrency(rate)} <span style={{ fontSize: '11px', textDecoration: 'line-through', opacity: 0.7, color: '#8c8c8c' }}>(was {formatCurrency(mod.old_rate)})</span>
-                              </span>
-                            );
-                          }
-                          return formatCurrency(rate);
-                        },
-                      },
-                      {
-                        title: 'Disc%',
-                        dataIndex: 'discount_percent',
-                        key: 'disc',
-                        width: 70,
-                        align: 'right',
-                        render: (v, r) => `${v || r.discount_pct || 0}%`,
-                      },
-                      {
-                        title: 'CGST%',
-                        dataIndex: 'cgst_percent',
-                        key: 'cgst',
-                        width: 70,
-                        align: 'right',
-                        render: (v, r) => `${v || r.cgst_rate || 0}%`,
-                      },
-                      {
-                        title: 'SGST%',
-                        dataIndex: 'sgst_percent',
-                        key: 'sgst',
-                        width: 70,
-                        align: 'right',
-                        render: (v, r) => `${v || r.sgst_rate || 0}%`,
-                      },
-                      {
-                        title: 'IGST%',
-                        dataIndex: 'igst_percent',
-                        key: 'igst',
-                        width: 70,
-                        align: 'right',
-                        render: (v, r) => `${v || r.igst_rate || 0}%`,
-                      },
-                      {
-                        title: 'Tax Amount',
-                        dataIndex: 'tax_amount',
-                        key: 'tax_amt',
-                        width: 100,
-                        align: 'right',
-                        render: (v) => formatCurrency(v),
-                      },
-                      {
-                        title: 'Amount',
-                        dataIndex: 'amount',
-                        key: 'amount',
-                        width: 120,
-                        align: 'right',
-                        render: (v, r) => <Text strong>{formatCurrency(v || r.total)}</Text>,
-                      },
-                    ]}
-                    summary={(pageData) => {
-                      let itemsTotal = 0;
-                      pageData.forEach((r) => {
-                        itemsTotal += parseFloat(r.amount || r.total || 0);
-                      });
-                      
-                      let vCost = 0;
-                      if (po.remarks) {
-                        const match = po.remarks.match(/Includes vehicle cost:\s*(\d+(\.\d+)?)/);
-                        if (match) vCost = parseFloat(match[1]);
-                      }
+        <Divider />
 
-                      return (
-                        <Table.Summary>
-                          {vCost > 0 && (
-                            <>
-                              <Table.Summary.Row>
-                                <Table.Summary.Cell colSpan={12} align="right"><Text type="secondary">Items Subtotal:</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell align="right"><Text type="secondary">{formatCurrency(itemsTotal)}</Text></Table.Summary.Cell>
-                              </Table.Summary.Row>
-                              <Table.Summary.Row>
-                                <Table.Summary.Cell colSpan={12} align="right"><Text type="secondary">Vehicle / Logistics Cost:</Text></Table.Summary.Cell>
-                                <Table.Summary.Cell align="right"><Text type="secondary">+{formatCurrency(vCost)}</Text></Table.Summary.Cell>
-                              </Table.Summary.Row>
-                            </>
-                          )}
-                          <Table.Summary.Row>
-                            <Table.Summary.Cell colSpan={12} align="right"><Text strong>Grand Total:</Text></Table.Summary.Cell>
-                            <Table.Summary.Cell align="right"><Text strong style={{ color: '#eb2f96' }}>{formatCurrency(po.grand_total)}</Text></Table.Summary.Cell>
-                          </Table.Summary.Row>
-                        </Table.Summary>
-                      );
-                    }}
-                  />
-                  {po.comparison && po.comparison.removed_items && po.comparison.removed_items.length > 0 && (
-                    <div style={{ marginTop: 24 }}>
-                      <Divider orientation="left" plain>
-                        <span style={{ color: '#ff4d4f', fontWeight: 600 }}>Removed Items (Compared to V{po.comparison.parent_version})</span>
-                      </Divider>
-                      <Table
-                        dataSource={po.comparison.removed_items}
-                        rowKey="item_id"
-                        size="small"
-                        pagination={false}
-                        scroll={{ x: 'max-content' }}
-                        columns={[
-                          { title: '#', width: 40, render: (_, __, idx) => idx + 1 },
-                          {
-                            title: <span style={{ color: '#ff4d4f' }}>Item Code</span>,
-                            dataIndex: 'item_code',
-                            key: 'code',
-                            width: 120,
-                            render: (v) => <span style={{ textDecoration: 'line-through', color: '#ff4d4f', opacity: 0.8 }}>{v || '-'}</span>,
-                          },
-                          {
-                            title: <span style={{ color: '#ff4d4f' }}>Item Name</span>,
-                            dataIndex: 'item_name',
-                            key: 'name',
-                            width: 220,
-                            render: (v) => <span style={{ textDecoration: 'line-through', color: '#ff4d4f', opacity: 0.8 }}>{v || '-'}</span>,
-                          },
-                          {
-                            title: <span style={{ color: '#ff4d4f' }}>UOM</span>,
-                            dataIndex: 'uom_name',
-                            key: 'uom',
-                            width: 70,
-                            render: (v) => <span style={{ textDecoration: 'line-through', color: '#ff4d4f', opacity: 0.8 }}>{v || '-'}</span>,
-                          },
-                          {
-                            title: <span style={{ color: '#ff4d4f' }}>Qty (Removed)</span>,
-                            dataIndex: 'qty',
-                            key: 'qty',
-                            width: 100,
-                            align: 'right',
-                            render: (v) => <span style={{ textDecoration: 'line-through', color: '#ff4d4f', opacity: 0.8 }}>{v}</span>,
-                          },
-                          {
-                            title: <span style={{ color: '#ff4d4f' }}>Rate</span>,
-                            dataIndex: 'rate',
-                            key: 'rate',
-                            width: 100,
-                            align: 'right',
-                            render: (v) => <span style={{ textDecoration: 'line-through', color: '#ff4d4f', opacity: 0.8 }}>{formatCurrency(v)}</span>,
-                          },
-                          {
-                            title: <span style={{ color: '#ff4d4f' }}>Total</span>,
-                            key: 'total',
-                            width: 120,
-                            align: 'right',
-                            render: (_, r) => <span style={{ textDecoration: 'line-through', color: '#ff4d4f', opacity: 0.8 }}>{formatCurrency((r.qty || 0) * (r.rate || 0))}</span>,
-                          },
-                        ]}
-                      />
-                    </div>
-                  )}
-                </div>
-              ),
-            },
-            {
-              key: 'grn_history',
-              label: (
-                <span><InboxOutlined /> GRN History</span>
-              ),
-              children: (
-                <Table
-                  dataSource={grnList}
-                  loading={tabLoading}
-                  rowKey="id"
-                  size="small"
-                  pagination={{ pageSize: 20, showSizeChanger: true }}
-                  scroll={{ x: 'max-content' }}
-                  locale={{ emptyText: <Empty description="No GRNs created against this PO yet" /> }}
-                  columns={[
-                    {
-                      title: 'GRN Number',
-                      dataIndex: 'grn_number',
-                      key: 'grn',
-                      width: 150,
-                      render: (text, record) => (
-                        <a onClick={() => navigate(`/warehouse/grn/${record.id}`)}>{text || '-'}</a>
-                      ),
-                    },
-                    {
-                      title: 'GRN Date',
-                      dataIndex: 'grn_date',
-                      key: 'date',
-                      width: 120,
-                      render: (v) => formatDate(v),
-                    },
-                    {
-                      title: 'Received By',
-                      dataIndex: 'received_by_name',
-                      key: 'by',
-                      width: 140,
-                      render: (v, r) => v || r.received_by || '-',
-                    },
-                    {
-                      title: 'Items',
-                      dataIndex: 'item_count',
-                      key: 'items',
-                      width: 70,
-                      align: 'right',
-                      render: (v, r) => v || (r.items && r.items.length) || '-',
-                    },
-                    {
-                      title: 'Total Qty Received',
-                      dataIndex: 'total_received_qty',
-                      key: 'qty',
-                      width: 130,
-                      align: 'right',
-                      render: (v, r) => {
-                        if (v) return v;
-                        if (r.items) return r.items.reduce((s, i) => s + (i.received_qty || i.qty || 0), 0);
-                        return '-';
-                      },
-                    },
-                    {
-                      title: 'QC Status',
-                      dataIndex: 'qc_status',
-                      key: 'qc',
-                      width: 120,
-                      render: (s) => s ? <StatusTag status={s} /> : '-',
-                    },
-                    {
-                      title: 'Status',
-                      dataIndex: 'status',
-                      key: 'status',
-                      width: 120,
-                      render: (s) => <StatusTag status={s} />,
-                    },
-                  ]}
-                />
-              ),
-            },
-            {
-              key: 'payments',
-              label: (
-                <span><DollarOutlined /> Payment Status</span>
-              ),
-              children: (
-                <>
-                  <Divider orientation="left">Linked Invoices</Divider>
-                  <Table
-                    dataSource={invoiceList}
-                    loading={tabLoading}
-                    rowKey="id"
-                    size="small"
-                    pagination={false}
-                    scroll={{ x: 'max-content' }}
-                    locale={{ emptyText: <Empty description="No invoices linked to this PO" /> }}
-                    columns={[
-                      {
-                        title: 'Invoice Number',
-                        dataIndex: 'invoice_number',
-                        key: 'inv',
-                        width: 150,
-                        render: (text, record) => (
-                          <a onClick={() => navigate(`/accounts/invoices/${record.id}`)}>{text || '-'}</a>
-                        ),
-                      },
-                      { title: 'Invoice Date', dataIndex: 'invoice_date', key: 'date', width: 120, render: (v) => formatDate(v) },
-                      { title: 'Due Date', dataIndex: 'due_date', key: 'due', width: 120, render: (v) => formatDate(v) },
-                      { title: 'Amount', dataIndex: 'total_amount', key: 'amt', width: 130, align: 'right', render: (v) => formatCurrency(v) },
-                      { title: 'Paid', dataIndex: 'paid_amount', key: 'paid', width: 130, align: 'right', render: (v) => formatCurrency(v) },
-                      { title: 'Balance', dataIndex: 'balance_amount', key: 'bal', width: 130, align: 'right', render: (v) => formatCurrency(v) },
-                      { title: 'Status', dataIndex: 'status', key: 'status', width: 120, render: (s) => <StatusTag status={s} /> },
-                    ]}
-                  />
-
-                  <Divider orientation="left" style={{ marginTop: 32 }}>Payments</Divider>
-                  <Table
-                    dataSource={paymentList}
-                    loading={tabLoading}
-                    rowKey="id"
-                    size="small"
-                    pagination={false}
-                    scroll={{ x: 'max-content' }}
-                    locale={{ emptyText: <Empty description="No payments recorded for this PO" /> }}
-                    columns={[
-                      {
-                        title: 'Payment No',
-                        dataIndex: 'payment_number',
-                        key: 'pay',
-                        width: 150,
-                        render: (text, record) => (
-                          <a onClick={() => navigate(`/accounts/payments/${record.id}`)}>{text || '-'}</a>
-                        ),
-                      },
-                      { title: 'Payment Date', dataIndex: 'payment_date', key: 'date', width: 120, render: (v) => formatDate(v) },
-                      { title: 'Mode', dataIndex: 'payment_mode', key: 'mode', width: 120, render: (v) => v ? v.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : '-' },
-                      { title: 'Reference', dataIndex: 'reference_number', key: 'ref', width: 150, render: (v) => v || '-' },
-                      { title: 'Amount', dataIndex: 'amount', key: 'amt', width: 130, align: 'right', render: (v) => <Text strong>{formatCurrency(v)}</Text> },
-                      { title: 'Status', dataIndex: 'status', key: 'status', width: 120, render: (s) => <StatusTag status={s} /> },
-                    ]}
-                  />
-
-                  {/* Payment Summary */}
-                  {(invoiceList.length > 0 || paymentList.length > 0) && (
-                    <Card size="small" style={{ marginTop: 16, maxWidth: 400 }}>
-                      <Descriptions size="small" column={1}>
-                        <Descriptions.Item label="PO Grand Total">
-                          <Text strong>{formatCurrency(po.grand_total)}</Text>
-                        </Descriptions.Item>
-                        <Descriptions.Item label="Total Invoiced">
-                          {formatCurrency(invoiceList.reduce((s, i) => s + (i.total_amount || 0), 0))}
-                        </Descriptions.Item>
-                        <Descriptions.Item label="Total Paid">
-                          <Text type="success">
-                            {formatCurrency(paymentList.reduce((s, p) => s + (p.amount || 0), 0))}
-                          </Text>
-                        </Descriptions.Item>
-                        <Descriptions.Item label="Outstanding">
-                          <Text type="danger">
-                            {formatCurrency(
-                              (po.grand_total || 0) -
-                              paymentList.reduce((s, p) => s + (p.amount || 0), 0)
-                            )}
-                          </Text>
-                        </Descriptions.Item>
-                      </Descriptions>
-                    </Card>
-                  )}
-                </>
-              ),
-            },
-            {
-              key: 'timeline',
-              label: (
-                <span><CarryOutOutlined /> Activity</span>
-              ),
-              children: (
-                <Timeline
-                  mode="left"
-                  items={[
-                    ...(po.activity_log || po.history || []).map((log) => ({
-                      color: log.action === 'approved' ? 'green' : log.action === 'cancelled' ? 'red' : 'blue',
-                      children: (
-                        <div>
-                          <Text strong>
-                            {(log.action || log.event || '').replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
-                          </Text>
-                          <br />
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            {log.user_name || log.user || 'System'} - {formatDateTime(log.timestamp || log.created_at)}
-                          </Text>
-                          {log.remarks && (
-                            <>
-                              <br />
-                              <Text style={{ fontSize: 12 }}>{log.remarks}</Text>
-                            </>
-                          )}
-                        </div>
-                      ),
-                    })),
-                    // Fallback entries from PO data
-                    ...(!(po.activity_log || po.history || []).length
-                      ? [
-                          {
-                            color: 'blue',
-                            children: (
-                              <div>
-                                <Text strong>PO Created</Text>
-                                <br />
-                                <Text type="secondary" style={{ fontSize: 12 }}>
-                                  {po.created_by_name || po.created_by || 'System'} - {formatDateTime(po.created_at)}
-                                </Text>
-                              </div>
-                            ),
-                          },
-                          ...(po.approved_at
-                            ? [{
-                                color: 'green',
-                                children: (
-                                  <div>
-                                    <Text strong>PO Approved</Text>
-                                    <br />
-                                    <Text type="secondary" style={{ fontSize: 12 }}>
-                                      {po.approved_by_name || po.approved_by || 'System'} - {formatDateTime(po.approved_at)}
-                                    </Text>
-                                  </div>
-                                ),
-                              }]
-                            : []),
-                          ...(po.status === 'cancelled'
-                            ? [{
-                                color: 'red',
-                                children: (
-                                  <div>
-                                    <Text strong>PO Cancelled</Text>
-                                    <br />
-                                    <Text type="secondary" style={{ fontSize: 12 }}>
-                                      {po.cancelled_by_name || 'System'} - {formatDateTime(po.cancelled_at || po.updated_at)}
-                                    </Text>
-                                  </div>
-                                ),
-                              }]
-                            : []),
-                        ]
-                      : []),
-                  ]}
-                />
-              ),
-            },
-            // Wave 11.1 BUG_0092 — attachments tab on PO detail
-            {
-              key: 'attachments',
-              label: <span><PaperClipOutlined /> Attachments</span>,
-              children: (
-                <AttachmentUploader
-                  entityType="purchase_order"
-                  entityId={id}
-                  label="PO Document"
-                />
-              ),
-            },
-          ]}
-        />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <Button onClick={() => navigate('/procurement/purchase-orders')}>
+            Cancel
+          </Button>
+          <Button onClick={() => handleSubmit('draft')} loading={submitting}>
+            Save as Draft
+          </Button>
+          <Button type="primary" icon={<SendOutlined />} onClick={() => handleSubmit('submit')} loading={submitting}>
+            Submit for Approval
+          </Button>
+        </div>
       </Card>
     </div>
   );

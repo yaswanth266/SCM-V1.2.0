@@ -42,26 +42,48 @@ async def process_dispatch_stock_deduction(db: AsyncSession, d: DispatchOrder, c
     )
     items = items_res.scalars().all()
 
+    # Pre-fetch all matching MaterialIssueItems to handle split rows sequentially
+    used_mi_item_ids = set()
+    mi_ids = {d.material_issue_id}
+    for item in items:
+        if item.material_issue_id:
+            mi_ids.add(item.material_issue_id)
+    mi_ids = {mid for mid in mi_ids if mid is not None}
+    
+    mi_items = []
+    if mi_ids:
+        from app.models.issue import MaterialIssueItem
+        mi_items_res = await db.execute(
+            select(MaterialIssueItem)
+            .where(MaterialIssueItem.issue_id.in_(mi_ids))
+            .order_by(MaterialIssueItem.id.asc())
+        )
+        mi_items = list(mi_items_res.scalars().all())
+
     for item in items:
         batch_id = None
         bin_id = None
         rate = Decimal("0")
-        
-        mi_id = item.material_issue_id or d.material_issue_id
         uom_id = 1
-        if mi_id:
-            mi_item_res = await db.execute(
-                select(MaterialIssueItem).where(
-                    MaterialIssueItem.issue_id == mi_id,
-                    MaterialIssueItem.item_id == item.material_id
-                ).limit(1)
-            )
-            mi_item = mi_item_res.scalar_one_or_none()
-            if mi_item:
-                batch_id = mi_item.batch_id
-                bin_id = mi_item.bin_id
-                rate = mi_item.rate or Decimal("0")
-                uom_id = mi_item.uom_id or 1
+        
+        # Match with the first unused mi_item for this material
+        mi_item = None
+        target_mi_id = item.material_issue_id or d.material_issue_id
+        for mi_it in mi_items:
+            if mi_it.item_id == item.material_id and mi_it.issue_id == target_mi_id and mi_it.id not in used_mi_item_ids:
+                mi_item = mi_it
+                used_mi_item_ids.add(mi_it.id)
+                break
+                
+        if not mi_item and target_mi_id:
+            # Fallback to the first matching one
+            mi_item = next((mi_it for mi_it in mi_items if mi_it.item_id == item.material_id and mi_it.issue_id == target_mi_id), None)
+            
+        if mi_item:
+            batch_id = mi_item.batch_id
+            bin_id = mi_item.bin_id
+            rate = mi_item.rate or Decimal("0")
+            uom_id = mi_item.uom_id or 1
                 
         # 1. Release reservation in source warehouse
         await release_reservation(
@@ -145,6 +167,7 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
             st_map = {
                 "DISPATCHED": "dispatched",
                 "IN_TRANSIT": "in_transit",
+                "TRANSPORTER_ACKNOWLEDGED": "in_transit",
                 "COMPLETED": "delivered",
                 "ACKNOWLEDGED": "acknowledged"
             }
@@ -355,10 +378,10 @@ async def get_dispatch(
     current_user: User = Depends(get_current_user)
 ):
     await sync_mdos_to_dispatches(db)
-    if dispatch_id.isdigit():
+    if isinstance(dispatch_id, int) or (isinstance(dispatch_id, str) and dispatch_id.isdigit()):
         query = select(DispatchOrder).where(DispatchOrder.id == int(dispatch_id))
     else:
-        query = select(DispatchOrder).where(DispatchOrder.dispatch_number == dispatch_id)
+        query = select(DispatchOrder).where(DispatchOrder.dispatch_number == str(dispatch_id))
         
     query = query.options(
         selectinload(DispatchOrder.items).selectinload(DispatchOrderItem.material),
@@ -371,8 +394,59 @@ async def get_dispatch(
     if not h:
         raise HTTPException(status_code=404, detail="Dispatch not found")
         
+    actual_qtys = {}
+    remarks_map = {}
+    ack_serials_map = {}
+    actual_delivery_loc = None
+    acknowledged_by_designation = getattr(h, "delivery_acknowledged_by_designation", None)
+    acknowledged_by_phone = getattr(h, "delivery_acknowledged_by_phone", None)
+    acknowledged_by_email = getattr(h, "delivery_acknowledged_by_email", None)
+    acknowledged_by_department = None
+    acknowledged_by_employee_code = None
+    receiver_id_proof_type = getattr(h, "receiver_id_proof_type", None)
+    receiver_id_proof_number = getattr(h, "receiver_id_proof_number", None)
+    delivery_latitude = getattr(h, "delivery_location_latitude", None)
+    delivery_longitude = getattr(h, "delivery_location_longitude", None)
+
+    if h.delivery_acknowledged:
+        from app.models.dispatch import DispatchDeliveryAcknowledgement
+        res_ack = await db.execute(
+            select(DispatchDeliveryAcknowledgement)
+            .options(selectinload(DispatchDeliveryAcknowledgement.items))
+            .where(DispatchDeliveryAcknowledgement.dispatch_id == h.id)
+            .order_by(DispatchDeliveryAcknowledgement.created_at.desc())
+        )
+        delivery_ack = res_ack.scalar_one_or_none()
+        if delivery_ack:
+            actual_delivery_loc = delivery_ack.actual_delivery_location
+            acknowledged_by_department = delivery_ack.acknowledged_by_department
+            acknowledged_by_employee_code = delivery_ack.acknowledged_by_employee_code
+            
+            if not acknowledged_by_designation:
+                acknowledged_by_designation = delivery_ack.acknowledged_by_designation
+            if not acknowledged_by_phone:
+                acknowledged_by_phone = delivery_ack.acknowledged_by_phone
+            if not acknowledged_by_email:
+                acknowledged_by_email = delivery_ack.acknowledged_by_email
+            if not receiver_id_proof_type:
+                receiver_id_proof_type = delivery_ack.receiver_id_proof_type
+            if not receiver_id_proof_number:
+                receiver_id_proof_number = delivery_ack.receiver_id_proof_number
+            if not delivery_latitude:
+                delivery_latitude = delivery_ack.delivery_latitude
+            if not delivery_longitude:
+                delivery_longitude = delivery_ack.delivery_longitude
+
+            for ack_item in delivery_ack.items:
+                actual_qtys[ack_item.dispatch_item_id] = ack_item.quantity_received
+                remarks_map[ack_item.dispatch_item_id] = ack_item.remarks
+                ack_serials_map[ack_item.dispatch_item_id] = ack_item.serial_numbers
+
     items_list = []
     for item in h.items:
+        rec_qty = actual_qtys.get(item.id, item.dispatched_quantity)
+        item_remarks = remarks_map.get(item.id, None)
+        rec_serials = ack_serials_map.get(item.id, item.serial_numbers or []) if h.delivery_acknowledged else (item.serial_numbers or [])
         items_list.append({
             "id": item.id,
             "dispatch_id": h.dispatch_number,
@@ -382,13 +456,40 @@ async def get_dispatch(
             "requested_quantity": item.requested_quantity,
             "approved_quantity": item.approved_quantity,
             "dispatched_quantity": item.dispatched_quantity,
+            "acknowledged_qty": rec_qty,
+            "remarks": item_remarks,
             "uom": item.uom,
             "request_date": item.request_date,
             "material_name": item.material.name if item.material else None,
             "material_code": item.material.item_code if item.material else None,
-            "serial_numbers": item.serial_numbers or []
+            "serial_numbers": rec_serials
         })
         
+    is_ready_for_acknowledgement = True
+    transporter_status_message = ""
+    if h.dispatch_number.startswith("MDO-") or h.dispatch_number.startswith("DO-"):
+        from app.models.logistics import LogisticsMainDispatchOrder, LogisticsServiceOrder, LogisticsServiceOrderVehicle
+        res_mdo = await db.execute(
+            select(LogisticsMainDispatchOrder).where(LogisticsMainDispatchOrder.mdo_number == h.dispatch_number)
+        )
+        mdo = res_mdo.scalar_one_or_none()
+        if mdo:
+            res_so = await db.execute(
+                select(LogisticsServiceOrder).where(LogisticsServiceOrder.mdo_id == mdo.id)
+            )
+            so = res_so.scalars().first()
+            if so:
+                res_v = await db.execute(
+                    select(LogisticsServiceOrderVehicle).where(LogisticsServiceOrderVehicle.so_id == so.id)
+                )
+                vehicles = res_v.scalars().all()
+                for veh in vehicles:
+                    veh_status = veh.vehicle_status.name if hasattr(veh.vehicle_status, "name") else veh.vehicle_status
+                    if veh_status not in ("TRANSPORTER_ACKNOWLEDGED", "DELIVERY_ACKNOWLEDGED"):
+                        is_ready_for_acknowledgement = False
+                        transporter_status_message = f"Pending transporter arrival confirmation for vehicle {veh.vehicle_registration_no}."
+                        break
+
     return {
         "id": h.id,
         "dispatch_id": h.dispatch_number,
@@ -406,11 +507,23 @@ async def get_dispatch(
         "delivery_acknowledged": h.delivery_acknowledged,
         "delivery_acknowledged_at": h.delivery_acknowledged_at,
         "delivery_acknowledged_by_name": h.delivery_acknowledged_by_name,
+        "delivery_acknowledged_by_designation": acknowledged_by_designation,
+        "delivery_acknowledged_by_phone": acknowledged_by_phone,
+        "delivery_acknowledged_by_email": acknowledged_by_email,
+        "delivery_acknowledged_by_department": acknowledged_by_department,
+        "delivery_acknowledged_by_employee_code": acknowledged_by_employee_code,
         "receiver_signature_url": h.receiver_signature_url,
+        "receiver_id_proof_type": receiver_id_proof_type,
+        "receiver_id_proof_number": receiver_id_proof_number,
+        "actual_delivery_location": actual_delivery_loc,
+        "delivery_location_latitude": delivery_latitude,
+        "delivery_location_longitude": delivery_longitude,
         "delivery_photo_urls": h.delivery_photo_urls,
         "goods_condition_on_delivery": h.goods_condition_on_delivery,
         "delivery_remarks": h.delivery_remarks,
-        "items": items_list
+        "items": items_list,
+        "is_ready_for_acknowledgement": is_ready_for_acknowledgement,
+        "transporter_status_message": transporter_status_message
     }
 
 @router.post("", response_model=DispatchResponse)

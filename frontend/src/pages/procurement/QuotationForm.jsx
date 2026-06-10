@@ -2,14 +2,15 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Button, Form, Input, InputNumber, Select, Space, DatePicker,
   message, Row, Col, Table, Card, Descriptions, Divider,
-  Typography, Tooltip, Empty, Spin, Popconfirm,
+  Typography, Tooltip, Empty, Spin, Popconfirm, Upload, Alert,
 } from 'antd';
 import {
   PlusOutlined, ArrowLeftOutlined, CheckOutlined, CloseOutlined,
   EditOutlined, MinusCircleOutlined, SaveOutlined, ShoppingCartOutlined, PrinterOutlined,
+  UploadOutlined, FileTextOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useReactToPrint } from 'react-to-print';
 import PageHeader from '../../components/PageHeader';
 import { SupplierQuotationPrint } from '../../components/PrintTemplates';
@@ -27,7 +28,9 @@ const { Text } = Typography;
 const QuotationForm = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const isNew = !id || id === 'new';
+  const isEdit = new URLSearchParams(location.search).get('edit') === 'true';
   const printRef = useRef(null);
   const handlePrint = useReactToPrint({ content: () => printRef.current, documentTitle: 'Quotation' });
 
@@ -35,10 +38,11 @@ const QuotationForm = () => {
   const [loading, setLoading] = useState(!isNew);
   const [submitting, setSubmitting] = useState(false);
   const [quotation, setQuotation] = useState(null);
-  const [editMode, setEditMode] = useState(isNew);
+  const [editMode, setEditMode] = useState(isNew || isEdit);
 
   // Items
   const [quotationItems, setQuotationItems] = useState([]);
+  const [termsUrl, setTermsUrl] = useState('');
 
   // Lookups
   const [vendors, setVendors] = useState([]);
@@ -115,6 +119,7 @@ const QuotationForm = () => {
       const res = await api.get(`/procurement/quotations/${id}`);
       const data = res.data;
       setQuotation(data);
+      setTermsUrl(data.terms_url || '');
       form.setFieldsValue({
         ...data,
         quotation_date: data.quotation_date ? dayjs(data.quotation_date) : null,
@@ -236,45 +241,68 @@ const QuotationForm = () => {
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
-      // BUG-PRO-146 fix: discount_pct=100 with rate>0 nets out to 0 — refuse.
       const validItems = quotationItems.filter(
-        (i) => i.item_id && Number(i.rate) > 0 && Number(i.discount_pct || 0) < 100
+        (i) => i.item_id && Number(i.qty) > 0
       );
       if (validItems.length === 0) {
-        message.error('Please add at least one item with a rate (and discount < 100%)');
+        message.error('Please add at least one item');
         return;
       }
       setSubmitting(true);
 
-      const payload = {
-        ...values,
-        quotation_date: formatDateForAPI(values.quotation_date),
-        valid_until: formatDateForAPI(values.valid_until),
-        total_amount: Number(calcSubtotal().toFixed(2)),
-        cgst_amount: Number(calcCGSTTotal().toFixed(2)),
-        sgst_amount: Number(calcSGSTTotal().toFixed(2)),
-        igst_amount: Number(calcIGSTTotal().toFixed(2)),
-        tax_amount: Number(calcTaxTotal().toFixed(2)),
-        grand_total: Number(calcGrandTotal().toFixed(2)),
-        items: validItems.map((item) => ({
-          item_id: item.item_id,
-          qty: item.qty,
-          uom_id: item.uom_id,
-          rate: item.rate,
-          discount_pct: item.discount_pct || 0,
-          cgst_rate: item.cgst_rate || 0,
-          sgst_rate: item.sgst_rate || 0,
-          igst_rate: item.igst_rate || 0,
-          tax_rate: (item.cgst_rate || 0) + (item.sgst_rate || 0) + (item.igst_rate || 0),
-          amount: item.amount,
-        })),
-      };
-
       if (isNew) {
-        const res = await api.post('/procurement/quotations', payload);
-        message.success('Quotation created');
-        navigate(`/procurement/quotations/${res.data.id || res.data.data?.id}`);
+        const rfqPayload = {
+          mr_id: values.mr_id || null,
+          vendor_ids: values.vendor_ids || [],
+          rfq_date: formatDateForAPI(values.quotation_date),
+          valid_until: formatDateForAPI(values.valid_until),
+          currency: values.currency || 'INR',
+          delivery_days: values.delivery_days || null,
+          payment_terms: values.payment_terms || null,
+          with_vehicle: values.with_vehicle || false,
+          remarks: values.remarks || '',
+          terms_url: termsUrl || null,
+          items: validItems.map((item) => ({
+            item_id: item.item_id,
+            qty: item.qty,
+            uom_id: item.uom_id,
+            rate: item.rate || 0,
+            discount_pct: item.discount_pct || 0,
+            cgst_rate: item.cgst_rate || 0,
+            sgst_rate: item.sgst_rate || 0,
+            igst_rate: item.igst_rate || 0,
+            tax_rate: (item.cgst_rate || 0) + (item.sgst_rate || 0) + (item.igst_rate || 0),
+            remarks: item.remarks || '',
+          })),
+        };
+        const res = await api.post('/procurement/rfqs', rfqPayload);
+        message.success(res.data?.message || 'RFQ created successfully');
+        navigate('/procurement/quotations');
       } else {
+        const payload = {
+          ...values,
+          quotation_date: formatDateForAPI(values.quotation_date),
+          valid_until: formatDateForAPI(values.valid_until),
+          terms_url: termsUrl || null,
+          total_amount: Number(calcSubtotal().toFixed(2)),
+          cgst_amount: Number(calcCGSTTotal().toFixed(2)),
+          sgst_amount: Number(calcSGSTTotal().toFixed(2)),
+          igst_amount: Number(calcIGSTTotal().toFixed(2)),
+          tax_amount: Number(calcTaxTotal().toFixed(2)),
+          grand_total: Number(calcGrandTotal().toFixed(2)),
+          items: validItems.map((item) => ({
+            item_id: item.item_id,
+            qty: item.qty,
+            uom_id: item.uom_id,
+            rate: item.rate,
+            discount_pct: item.discount_pct || 0,
+            cgst_rate: item.cgst_rate || 0,
+            sgst_rate: item.sgst_rate || 0,
+            igst_rate: item.igst_rate || 0,
+            tax_rate: (item.cgst_rate || 0) + (item.sgst_rate || 0) + (item.igst_rate || 0),
+            amount: item.amount,
+          })),
+        };
         await api.put(`/procurement/quotations/${id}`, payload);
         message.success('Quotation updated');
         setEditMode(false);
@@ -362,6 +390,35 @@ const QuotationForm = () => {
             <Descriptions.Item label="Status"><StatusTag status={quotation.status} /></Descriptions.Item>
             <Descriptions.Item label="Grand Total"><Text strong>{formatCurrency(quotation.grand_total)}</Text></Descriptions.Item>
             <Descriptions.Item label="Remarks" span={3}>{quotation.remarks || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Terms & Conditions Document" span={3}>
+              {quotation.terms_url ? (
+                <div>
+                  <Space style={{ marginBottom: 12 }}>
+                    <Button type="primary" size="small" icon={<UploadOutlined />} href={quotation.terms_url} target="_blank" download>
+                      Download Document
+                    </Button>
+                  </Space>
+                  {quotation.terms_url.toLowerCase().endsWith('.pdf') ? (
+                    <iframe
+                      src={quotation.terms_url}
+                      width="100%"
+                      height="500px"
+                      style={{ border: '1px solid #d9d9d9', borderRadius: 8 }}
+                      title="Terms and Conditions Preview"
+                    />
+                  ) : (
+                    <Alert
+                      message="Doc/Docx Preview Not Supported"
+                      description="Word documents (.doc/.docx) cannot be previewed directly in the browser. Please use the Download button to view."
+                      type="info"
+                      showIcon
+                    />
+                  )}
+                </div>
+              ) : (
+                'None'
+              )}
+            </Descriptions.Item>
           </Descriptions>
 
           <Divider orientation="left">Items</Divider>
@@ -469,30 +526,6 @@ const QuotationForm = () => {
       ),
     },
     {
-      title: 'Rate', dataIndex: 'rate', width: 110,
-      render: (val, record) => <InputNumber min={0} value={val} onChange={(v) => updateItem(record.key, 'rate', v)} style={{ width: '100%' }} prefix="₹" />,
-    },
-    {
-      title: 'Disc %', dataIndex: 'discount_pct', width: 80,
-      render: (val, record) => <InputNumber min={0} max={100} value={val} onChange={(v) => updateItem(record.key, 'discount_pct', v)} style={{ width: '100%' }} />,
-    },
-    {
-      title: 'CGST %', dataIndex: 'cgst_rate', width: 80,
-      render: (val, record) => <InputNumber min={0} max={100} value={val} onChange={(v) => updateItem(record.key, 'cgst_rate', v)} style={{ width: '100%' }} />,
-    },
-    {
-      title: 'SGST %', dataIndex: 'sgst_rate', width: 80,
-      render: (val, record) => <InputNumber min={0} max={100} value={val} onChange={(v) => updateItem(record.key, 'sgst_rate', v)} style={{ width: '100%' }} />,
-    },
-    {
-      title: 'IGST %', dataIndex: 'igst_rate', width: 80,
-      render: (val, record) => <InputNumber min={0} max={100} value={val} onChange={(v) => updateItem(record.key, 'igst_rate', v)} style={{ width: '100%' }} />,
-    },
-    {
-      title: 'Amount', dataIndex: 'amount', width: 110, align: 'right',
-      render: (val) => formatCurrency(val),
-    },
-    {
       title: '', width: 40,
       render: (_, record) => quotationItems.length > 1 ? (
         <MinusCircleOutlined style={{ color: '#ff4d4f', cursor: 'pointer' }} onClick={() => removeItemRow(record.key)} />
@@ -502,7 +535,7 @@ const QuotationForm = () => {
 
   return (
     <div>
-      <PageHeader title={isNew ? 'Create Quotation' : `Edit ${quotation?.quotation_number || ''}`} subtitle={isNew ? 'Create a new vendor quotation' : 'Edit quotation'}>
+      <PageHeader title={isNew ? 'Create RFQ' : `Edit ${quotation?.quotation_number || ''}`} subtitle={isNew ? 'Create a new RFQ' : 'Edit RFQ'}>
         <Space>
           <Button onClick={() => navigate('/procurement/quotations')} icon={<ArrowLeftOutlined />}>Back</Button>
           {!isNew && <Button onClick={() => setEditMode(false)}>Cancel Edit</Button>}
@@ -519,9 +552,15 @@ const QuotationForm = () => {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item name="vendor_id" label="Vendor" rules={[{ required: true, message: 'Required' }]}>
-                <Select options={vendors} placeholder="Select vendor" showSearch optionFilterProp="label" onSearch={(v) => loadVendors(v)} />
-              </Form.Item>
+              {isNew ? (
+                <Form.Item name="vendor_ids" label="Vendors" rules={[{ required: true, message: 'Required' }]}>
+                  <Select mode="multiple" options={vendors} placeholder="Select vendors" showSearch optionFilterProp="label" onSearch={(v) => loadVendors(v)} />
+                </Form.Item>
+              ) : (
+                <Form.Item name="vendor_id" label="Vendor" rules={[{ required: true, message: 'Required' }]}>
+                  <Select options={vendors} placeholder="Select vendor" showSearch optionFilterProp="label" onSearch={(v) => loadVendors(v)} />
+                </Form.Item>
+              )}
             </Col>
           </Row>
           <Row gutter={16}>
@@ -553,6 +592,71 @@ const QuotationForm = () => {
               </Form.Item>
             </Col>
           </Row>
+          
+          <Divider orientation="left">Terms &amp; Conditions Document</Divider>
+          <Row gutter={16}>
+            <Col span={24}>
+              <Form.Item label="Upload Terms and Conditions (PDF or Word Document)">
+                <Upload
+                  accept=".pdf,.doc,.docx"
+                  beforeUpload={async (file) => {
+                    const isAllowed = ['.pdf', '.doc', '.docx'].some(ext => file.name.toLowerCase().endsWith(ext));
+                    if (!isAllowed) {
+                      message.error('Only PDF or Word documents (.doc, .docx) are allowed!');
+                      return false;
+                    }
+                    
+                    const fd = new FormData();
+                    fd.append('file', file);
+                    fd.append('entity_type', 'quotation');
+                    fd.append('entity_id', '0');
+                    
+                    try {
+                      const res = await api.post('/attachments/upload', fd, {
+                        headers: { 'Content-Type': 'multipart/form-data' },
+                      });
+                      const url = res.data?.url || res.data?.file_path;
+                      if (url) {
+                        setTermsUrl(url);
+                        message.success(`${file.name} uploaded successfully.`);
+                      }
+                    } catch (err) {
+                      message.error(getErrorMessage(err));
+                    }
+                    return false;
+                  }}
+                  showUploadList={false}
+                >
+                  <Button icon={<UploadOutlined />}>Select Document</Button>
+                </Upload>
+                {termsUrl && (
+                  <div style={{ marginTop: 16 }}>
+                    <Space style={{ marginBottom: 8 }}>
+                      <span style={{ fontWeight: 600 }}>Uploaded File:</span>
+                      <a href={termsUrl} target="_blank" rel="noopener noreferrer">{termsUrl.split('/').pop()}</a>
+                      <Button type="link" danger onClick={() => setTermsUrl('')} style={{ padding: 0 }}>Remove</Button>
+                    </Space>
+                    {termsUrl.toLowerCase().endsWith('.pdf') ? (
+                      <iframe
+                        src={termsUrl}
+                        width="100%"
+                        height="400px"
+                        style={{ border: '1px solid #d9d9d9', borderRadius: 8 }}
+                        title="Terms and Conditions Upload Preview"
+                      />
+                    ) : (
+                      <Alert
+                        message="Doc/Docx Preview Not Supported"
+                        description="Word documents (.doc/.docx) cannot be previewed directly in the browser. You can download it to view."
+                        type="info"
+                        showIcon
+                      />
+                    )}
+                  </div>
+                )}
+              </Form.Item>
+            </Col>
+          </Row>
         </Form>
 
         <Divider orientation="left">Items</Divider>
@@ -562,49 +666,9 @@ const QuotationForm = () => {
           rowKey="key"
           pagination={false}
           size="small"
-          scroll={{ x: 900 }}
+          scroll={{ x: 600 }}
           footer={() => (
             <Button type="dashed" onClick={addItemRow} icon={<PlusOutlined />} block>Add Item</Button>
-          )}
-          summary={() => (
-            <Table.Summary>
-              <Table.Summary.Row>
-                <Table.Summary.Cell colSpan={9} align="right"><Text strong>Subtotal:</Text></Table.Summary.Cell>
-                <Table.Summary.Cell align="right"><Text>{formatCurrency(calcSubtotal())}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell />
-              </Table.Summary.Row>
-              {calcCGSTTotal() > 0 && (
-                <Table.Summary.Row>
-                  <Table.Summary.Cell colSpan={9} align="right"><Text strong>CGST:</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell align="right"><Text>{formatCurrency(calcCGSTTotal())}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell />
-                </Table.Summary.Row>
-              )}
-              {calcSGSTTotal() > 0 && (
-                <Table.Summary.Row>
-                  <Table.Summary.Cell colSpan={9} align="right"><Text strong>SGST:</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell align="right"><Text>{formatCurrency(calcSGSTTotal())}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell />
-                </Table.Summary.Row>
-              )}
-              {calcIGSTTotal() > 0 && (
-                <Table.Summary.Row>
-                  <Table.Summary.Cell colSpan={9} align="right"><Text strong>IGST:</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell align="right"><Text>{formatCurrency(calcIGSTTotal())}</Text></Table.Summary.Cell>
-                  <Table.Summary.Cell />
-                </Table.Summary.Row>
-              )}
-              <Table.Summary.Row>
-                <Table.Summary.Cell colSpan={9} align="right"><Text strong>Tax Total:</Text></Table.Summary.Cell>
-                <Table.Summary.Cell align="right"><Text>{formatCurrency(calcTaxTotal())}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell />
-              </Table.Summary.Row>
-              <Table.Summary.Row>
-                <Table.Summary.Cell colSpan={9} align="right"><Text strong style={{ fontSize: 15 }}>Grand Total:</Text></Table.Summary.Cell>
-                <Table.Summary.Cell align="right"><Text strong style={{ fontSize: 15 }}>{formatCurrency(calcGrandTotal())}</Text></Table.Summary.Cell>
-                <Table.Summary.Cell />
-              </Table.Summary.Row>
-            </Table.Summary>
           )}
         />
 
@@ -612,7 +676,7 @@ const QuotationForm = () => {
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button onClick={() => navigate('/procurement/quotations')}>Cancel</Button>
           <Button type="primary" icon={<SaveOutlined />} onClick={handleSubmit} loading={submitting}>
-            {isNew ? 'Create Quotation' : 'Update Quotation'}
+            {isNew ? 'Create RFQ' : 'Update Quotation'}
           </Button>
         </div>
       </Card>

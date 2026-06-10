@@ -9,7 +9,7 @@ import {
   CloseCircleOutlined, MinusCircleOutlined, SaveOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import PageHeader from '../../components/PageHeader';
 import StatusTag from '../../components/StatusTag';
 import ItemSelector from '../../components/ItemSelector';
@@ -46,13 +46,15 @@ const MR_STATUS_FLOW = ['draft', 'pending_approval', 'approved', 'partially_orde
 const MaterialRequestForm = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const isNew = !id || id === 'new';
+  const isEdit = new URLSearchParams(location.search).get('edit') === 'true';
 
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(!isNew);
   const [submitting, setSubmitting] = useState(false);
   const [mr, setMr] = useState(null);
-  const [editMode, setEditMode] = useState(isNew);
+  const [editMode, setEditMode] = useState(isNew || isEdit);
 
   // Items
   const [mrItems, setMrItems] = useState([

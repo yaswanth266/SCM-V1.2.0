@@ -65,27 +65,66 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
                 print(f"[SCM Integration] Indent {mdo.indent_id} not found.")
                 return
 
-            # Extract dispatched quantities to auto-receive
-            shipped_qtys = {}
-            for sdo in mdo.sdos:
-                for mat in sdo.materials:
-                    shipped_qtys[mat.material_id] = shipped_qtys.get(mat.material_id, 0.0) + float(mat.quantity)
+            # Extract received quantities to auto-receive (checking DispatchDeliveryAcknowledgement first)
+            from app.models.dispatch import DispatchOrder, DispatchDeliveryAcknowledgement
+            res_do = await db.execute(
+                select(DispatchOrder).where(DispatchOrder.dispatch_number == mdo.mdo_number)
+            )
+            dispatch_order = res_do.scalar_one_or_none()
 
-            # Fallback to Material Issue items if SDO materials list is empty
-            if not shipped_qtys and mdo.material_issue_id:
-                res_mi_items = await db.execute(
-                    select(MaterialIssueItem).where(MaterialIssueItem.issue_id == mdo.material_issue_id)
+            delivery_ack = None
+            if dispatch_order:
+                res_ack_deliv = await db.execute(
+                    select(DispatchDeliveryAcknowledgement)
+                    .options(selectinload(DispatchDeliveryAcknowledgement.items))
+                    .where(DispatchDeliveryAcknowledgement.dispatch_id == dispatch_order.id)
+                    .order_by(DispatchDeliveryAcknowledgement.created_at.desc())
                 )
-                for mi_item in res_mi_items.scalars().all():
-                    shipped_qtys[mi_item.item_id] = shipped_qtys.get(mi_item.item_id, 0.0) + float(mi_item.qty)
+                delivery_ack = res_ack_deliv.scalar_one_or_none()
 
-            if not shipped_qtys:
-                # Direct fallback to indent items approved quantities
-                for ind_item in indent.items:
-                    target_qty = float(ind_item.approved_qty or ind_item.requested_qty or 0)
-                    shipped_qtys[ind_item.item_id] = target_qty
+            actual_qtys = {}
+            if delivery_ack and delivery_ack.items:
+                for ack_item in delivery_ack.items:
+                    qty_val = float(ack_item.quantity_received if ack_item.quantity_received is not None else (ack_item.quantity_accepted or 0))
+                    actual_qtys[ack_item.material_id] = actual_qtys.get(ack_item.material_id, 0.0) + qty_val
 
-            total_received_qty = sum(shipped_qtys.values())
+            received_qtys_to_use = {}
+            if actual_qtys:
+                received_qtys_to_use = actual_qtys
+            else:
+                # Extract dispatched quantities to auto-receive
+                shipped_qtys = {}
+                for sdo in mdo.sdos:
+                    for mat in sdo.materials:
+                        shipped_qtys[mat.material_id] = shipped_qtys.get(mat.material_id, 0.0) + float(mat.quantity)
+
+                # Fallback to Material Issue items if SDO materials list is empty
+                if not shipped_qtys and mdo.material_issue_id:
+                    res_mi_items = await db.execute(
+                        select(MaterialIssueItem).where(MaterialIssueItem.issue_id == mdo.material_issue_id)
+                    )
+                    for mi_item in res_mi_items.scalars().all():
+                        shipped_qtys[mi_item.item_id] = shipped_qtys.get(mi_item.item_id, 0.0) + float(mi_item.qty)
+
+                if not shipped_qtys:
+                    # Direct fallback to indent items approved quantities
+                    for ind_item in indent.items:
+                        target_qty = float(ind_item.approved_qty or ind_item.requested_qty or 0)
+                        shipped_qtys[ind_item.item_id] = target_qty
+                
+                received_qtys_to_use = shipped_qtys
+
+            total_received_qty = sum(received_qtys_to_use.values())
+
+            # Determine if this acknowledgement covers all approved quantities on the indent
+            all_received_in_this_ack = True
+            for ind_item in indent.items:
+                qty_to_ack = received_qtys_to_use.get(ind_item.item_id, 0.0)
+                approved_qty = float(ind_item.approved_qty if ind_item.approved_qty is not None else (ind_item.requested_qty or 0))
+                if qty_to_ack < approved_qty:
+                    all_received_in_this_ack = False
+
+            ack_status = "completed" if all_received_in_this_ack else "partial"
 
             # Create IndentAcknowledgement header
             ack = IndentAcknowledgement(
@@ -93,7 +132,7 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
                 acknowledged_by=current_user_id,
                 acknowledged_at=datetime.now(timezone.utc),
                 received_qty=Decimal(str(total_received_qty)),
-                status="completed",
+                status=ack_status,
                 remarks=f"Auto-acknowledged via SCM logistics dispatch delivery for {mdo.mdo_number}.",
                 scan_timestamp=datetime.now(timezone.utc)
             )
@@ -105,7 +144,8 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
             all_items_fully_acknowledged = True
             
             for ind_item in indent.items:
-                qty_to_ack = shipped_qtys.get(ind_item.item_id, 0.0)
+                qty_to_ack = received_qtys_to_use.get(ind_item.item_id, 0.0)
+
 
                 # Fetch past acknowledged quantity for this item in database to calculate total acknowledged qty
                 from app.models.indent import IndentAcknowledgementItem as _IAI

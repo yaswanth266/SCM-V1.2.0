@@ -162,14 +162,31 @@ export const buildQueryString = (params) => {
 
 export const getErrorMessage = (error) => {
   if (typeof error === 'string') return error;
+
+  // BUG-FE-130: backend 422 validation errors are returned as
+  // { success: false, message: 'Validation failed', errors: [{loc, msg, type}] }
+  // NOT as { detail: [...] }. Handle 'errors' array first so the field-level
+  // messages are surfaced instead of the generic 'Validation failed' fallback.
+  const errorsArr = error?.response?.data?.errors;
+  if (Array.isArray(errorsArr) && errorsArr.length > 0) {
+    return errorsArr.map((d) => {
+      const field = (d.loc || []).filter(l => l !== 'body').join(' → ') || '';
+      // Strip the 'Value error, ' prefix Pydantic v2 adds to the msg
+      const raw = d.msg || d.message || '';
+      const msg = raw.replace(/^Value error,\s*/i, '');
+      return field ? `${field}: ${msg}` : msg;
+    }).join('\n');
+  }
+
   if (error?.response?.data?.detail) {
     const detail = error.response.data.detail;
     if (typeof detail === 'string') return detail;
     if (Array.isArray(detail)) return detail.map((d) => {
       const field = (d.loc || []).filter(l => l !== 'body').join(' → ') || '';
-      const msg = d.msg || d.message || '';
+      const raw = d.msg || d.message || '';
+      const msg = raw.replace(/^Value error,\s*/i, '');
       return field ? `${field}: ${msg}` : msg;
-    }).join(', ');
+    }).join('\n');
     // BUG-FE-123: previously fell through to JSON.stringify which leaks
     // internal field paths and types into the toast. Surface a generic
     // message instead and let the caller log the full object.
@@ -198,18 +215,18 @@ export const getErrorMessage = (error) => {
 //   }
 export const applyFieldErrors = (form, error) => {
   if (!form || typeof form.setFields !== 'function') return [];
-  const detail = error?.response?.data?.detail;
-  if (!Array.isArray(detail)) return [];
+  // Handle both 'errors' array (backend 422 custom format) and 'detail' array (raw FastAPI format)
+  const source = error?.response?.data?.errors || error?.response?.data?.detail;
+  if (!Array.isArray(source)) return [];
   const fieldEntries = [];
-  for (const d of detail) {
+  for (const d of source) {
     const loc = (d.loc || []).filter((l) => l !== 'body');
     if (!loc.length) continue;
     // Antd NamePath: single string for top-level fields, array for nested.
     const name = loc.length === 1 ? loc[0] : loc;
-    fieldEntries.push({
-      name,
-      errors: [d.msg || d.message || 'Invalid value'],
-    });
+    const raw = d.msg || d.message || 'Invalid value';
+    const msg = raw.replace(/^Value error,\s*/i, '');
+    fieldEntries.push({ name, errors: [msg] });
   }
   if (fieldEntries.length) {
     form.setFields(fieldEntries);

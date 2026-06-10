@@ -23,20 +23,20 @@ const AcknowledgeDelivery = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryDispatchNo = searchParams.get('dispatchNo');
-  
+
   const [form] = Form.useForm();
-  
+
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  
+
   // SCM lookup states
   const [warehouses, setWarehouses] = useState([]);
   const [dispatches, setDispatches] = useState([]);
-  
+
   // User operating choices
   const [selectedWarehouseId, setSelectedWarehouseId] = useState(null);
   const [selectedDispatchId, setSelectedDispatchId] = useState(null);
-  
+
   // Active dispatch details
   const [dispatch, setDispatch] = useState(null);
   const [items, setItems] = useState([]);
@@ -53,10 +53,10 @@ const AcknowledgeDelivery = () => {
           api.get('/masters/warehouses', { params: { page_size: 200 } }),
           api.get('/warehouse/dispatch', { params: { page_size: 200 } })
         ]);
-        
+
         const whsList = warehouseRes.data?.items || warehouseRes.data?.data || warehouseRes.data || [];
         setWarehouses(whsList);
-        
+
         const dispList = dispatchRes.data?.items || dispatchRes.data?.data || dispatchRes.data || [];
         setDispatches(dispList);
 
@@ -90,7 +90,7 @@ const AcknowledgeDelivery = () => {
   // Filter available dispatches for operating warehouse based on parent relationship
   const filteredDispatches = dispatches.filter(d => {
     if (!selectedWarehouseId) return false;
-    
+
     const opWh = warehouses.find(w => w.id === selectedWarehouseId);
     if (!opWh) return false;
 
@@ -117,7 +117,7 @@ const AcknowledgeDelivery = () => {
         const found = dispatches.find(d => d.dispatch_id === queryDispatchNo);
         if (found) targetId = found.id;
       }
-      
+
       if (targetId) {
         setSelectedDispatchId(targetId);
         // Ensure the operating warehouse matches the destination warehouse
@@ -142,7 +142,7 @@ const AcknowledgeDelivery = () => {
         const res = await api.get(`/warehouse/dispatch/${selectedDispatchId}`);
         const data = res.data;
         setDispatch(data);
-        
+
         // Map the dispatch items — carry serial numbers from dispatch
         const initialItems = (data.items || []).map((it, idx) => ({
           key: it.id || idx,
@@ -151,23 +151,46 @@ const AcknowledgeDelivery = () => {
           material_name: it.material_name || `Item ${it.material_id}`,
           material_code: it.material_code || `CODE-${it.material_id}`,
           quantity_dispatched: Number(it.dispatched_quantity || 0),
-          quantity_received: Number(it.dispatched_quantity || 0),
+          quantity_received: data.delivery_acknowledged ? Number(it.acknowledged_qty || 0) : Number(it.dispatched_quantity || 0),
           uom: it.uom || 'Nos',
           serial_numbers: it.serial_numbers || [],
           has_serial: !!(it.has_serial || (it.serial_numbers && it.serial_numbers.length > 0)),
-          remarks: ''
+          remarks: data.delivery_acknowledged ? (it.remarks || '') : ''
         }));
-        
+
         setItems(initialItems);
-        
-        // Pre-fill some defaults
-        form.setFieldsValue({
-          acknowledged_by_name: '',
-          acknowledged_by_phone: '',
-          receiver_id_proof_type: 'NONE',
-          receiver_signature_url: undefined
-        });
-        setUploadedUrls({});
+
+        // Pre-fill fields from acknowledgement data if acknowledged
+        if (data.delivery_acknowledged) {
+          form.setFieldsValue({
+            acknowledged_by_name: data.delivery_acknowledged_by_name || '',
+            acknowledged_by_phone: data.delivery_acknowledged_by_phone || '',
+            acknowledged_by_designation: data.delivery_acknowledged_by_designation || '',
+            acknowledged_by_department: data.delivery_acknowledged_by_department || '',
+            receiver_id_proof_type: data.receiver_id_proof_type || 'NONE',
+            receiver_id_proof_number: data.receiver_id_proof_number || '',
+            actual_delivery_location: data.actual_delivery_location || '',
+            photo_review: data.delivery_photo_urls?.review || '',
+            signature_image: data.receiver_signature_url || undefined
+          });
+          setUploadedUrls({
+            signature_image: data.receiver_signature_url || undefined,
+            materials_photos: data.delivery_photo_urls?.photo || undefined
+          });
+        } else {
+          form.setFieldsValue({
+            acknowledged_by_name: '',
+            acknowledged_by_phone: '',
+            acknowledged_by_designation: '',
+            acknowledged_by_department: '',
+            receiver_id_proof_type: 'NONE',
+            receiver_id_proof_number: '',
+            actual_delivery_location: '',
+            photo_review: '',
+            signature_image: undefined
+          });
+          setUploadedUrls({});
+        }
       } catch (err) {
         message.error('Failed to load dispatch details: ' + getErrorMessage(err));
       } finally {
@@ -200,27 +223,103 @@ const AcknowledgeDelivery = () => {
 
 
 
-  const handleReceivedQtyChange = (key, val) => {
-    setItems(prev => prev.map(it => it.key === key ? { ...it, quantity_received: val } : it));
+  const distributeQuantityAndSerials = (itemsList, targetMaterialId, totalReceivedQty, selectedSerials) => {
+    let remainingQty = totalReceivedQty;
+    let serialIndex = 0;
+
+    return itemsList.map(item => {
+      if (item.material_id === targetMaterialId) {
+        const allocatedQty = Math.min(item.quantity_dispatched, remainingQty);
+        remainingQty -= allocatedQty;
+
+        let itemSerials = [];
+        if (item.has_serial && selectedSerials) {
+          const numSerialsNeeded = Math.round(allocatedQty);
+          itemSerials = selectedSerials.slice(serialIndex, serialIndex + numSerialsNeeded);
+          serialIndex += numSerialsNeeded;
+        } else if (item.has_serial) {
+          const numSerialsNeeded = Math.round(allocatedQty);
+          itemSerials = (item.serial_numbers || []).slice(0, numSerialsNeeded);
+        }
+
+        return {
+          ...item,
+          quantity_received: allocatedQty,
+          serial_numbers: itemSerials
+        };
+      }
+      return item;
+    });
   };
 
-  const handleRemarksChange = (key, val) => {
-    setItems(prev => prev.map(it => it.key === key ? { ...it, remarks: val } : it));
+  const handleReceivedQtyChange = (materialId, val) => {
+    setItems(prev => {
+      const existingSerials = prev
+        .filter(it => it.material_id === materialId)
+        .reduce((acc, it) => [...acc, ...(it.serial_numbers || [])], []);
+      return distributeQuantityAndSerials(prev, materialId, val || 0, existingSerials);
+    });
   };
 
-  const handleSerialNumbersChange = (key, serials) => {
-    setItems(prev => prev.map(it => it.key === key ? { ...it, serial_numbers: serials } : it));
+  const handleRemarksChange = (materialId, val) => {
+    setItems(prev => prev.map(it => it.material_id === materialId ? { ...it, remarks: val } : it));
   };
+
+  const handleSerialNumbersChange = (materialId, serials) => {
+    setItems(prev => {
+      const totalReceived = prev
+        .filter(it => it.material_id === materialId)
+        .reduce((acc, it) => acc + (it.quantity_received || 0), 0);
+      return distributeQuantityAndSerials(prev, materialId, totalReceived, serials);
+    });
+  };
+
+  const groupedItems = React.useMemo(() => {
+    const grouped = {};
+    items.forEach(it => {
+      const key = it.material_id;
+      if (!grouped[key]) {
+        grouped[key] = {
+          key: it.material_id,
+          material_id: it.material_id,
+          material_name: it.material_name,
+          material_code: it.material_code,
+          quantity_dispatched: 0,
+          quantity_received: 0,
+          uom: it.uom,
+          serial_numbers: [],
+          has_serial: false,
+          remarks: []
+        };
+      }
+      grouped[key].quantity_dispatched += it.quantity_dispatched;
+      grouped[key].quantity_received += it.quantity_received;
+      if (it.serial_numbers) {
+        grouped[key].serial_numbers = [...grouped[key].serial_numbers, ...it.serial_numbers];
+      }
+      if (it.has_serial) {
+        grouped[key].has_serial = true;
+      }
+      if (it.remarks) {
+        grouped[key].remarks.push(it.remarks);
+      }
+    });
+
+    return Object.values(grouped).map(g => ({
+      ...g,
+      remarks: g.remarks.filter(Boolean).join('; ')
+    }));
+  }, [items]);
 
   const handleSubmit = async () => {
     if (!dispatch) {
       message.warning("Please select a valid dispatch order to acknowledge.");
       return;
     }
-    
+
     try {
       const values = await form.validateFields();
-      
+
       const signatureUrl = uploadedUrls.signature_image;
       if (!signatureUrl) {
         message.error('Signature image proof is mandatory!');
@@ -239,7 +338,7 @@ const AcknowledgeDelivery = () => {
       }
 
       setSubmitting(true);
-      
+
       const payload = {
         acknowledgement_type: items.some(it => it.quantity_received < it.quantity_dispatched) ? 'PARTIAL_DELIVERY' : 'FULL_DELIVERY',
         acknowledged_by_name: values.acknowledged_by_name || 'Receiver Rep',
@@ -343,6 +442,7 @@ const AcknowledgeDelivery = () => {
           value={r.quantity_received}
           onChange={(val) => handleReceivedQtyChange(r.key, val)}
           style={{ width: '100%' }}
+          disabled={!!dispatch?.delivery_acknowledged || dispatch?.is_ready_for_acknowledgement === false}
         />
       )
     },
@@ -351,9 +451,15 @@ const AcknowledgeDelivery = () => {
       key: 'serial_numbers',
       width: 150,
       render: (_, r) => {
-        // Find the original dispatch item to get the complete list of dispatched serials
-        const origItem = dispatch?.items?.find(item => item.id === r.id);
-        const dispatchedSerials = origItem?.serial_numbers || [];
+        if (dispatch?.delivery_acknowledged) {
+          return (r.serial_numbers || []).length > 0 ? (
+            <Space wrap>{(r.serial_numbers || []).map(s => <Tag key={s} color="blue">{s}</Tag>)}</Space>
+          ) : <span style={{ color: '#94a3b8' }}>—</span>;
+        }
+        // Collect union of dispatched serials across all splits of this material
+        const dispatchedSerials = (dispatch?.items || [])
+          .filter(item => item.material_id === r.material_id)
+          .reduce((acc, item) => [...acc, ...(item.serial_numbers || [])], []);
 
         return (
           <SerialNumbersModal
@@ -380,6 +486,7 @@ const AcknowledgeDelivery = () => {
           value={r.remarks}
           onChange={(e) => handleRemarksChange(r.key, e.target.value)}
           style={{ width: '100%' }}
+          disabled={!!dispatch?.delivery_acknowledged || dispatch?.is_ready_for_acknowledgement === false}
         />
       )
     }
@@ -387,31 +494,34 @@ const AcknowledgeDelivery = () => {
 
   return (
     <div style={{ padding: '28px', background: 'radial-gradient(ellipse at top, #f8fafc 0%, #f1f5f9 80%)', minHeight: '100vh', color: '#334155' }}>
-      <PageHeader 
-        title="Delivery Acknowledgement & Touch-Signature POD Portal" 
-        subtitle="Verify outbound dispatch shipments, check quantities, draw signatures and submit digital POD proofs."
+      <PageHeader
+        title="Delivery Acknowledgement"
+        subtitle="Verify outbound dispatch shipments, check quantities,and submit digital POD proofs."
       >
         <Space>
           <Button onClick={() => navigate('/logistics/dispatch')} icon={<ArrowLeftOutlined />}>
             Back to Plans
           </Button>
-          <Button 
-            type="primary" 
-            icon={<CheckCircleOutlined />} 
-            loading={submitting} 
-            onClick={handleSubmit}
-            style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)', borderColor: 'transparent', fontWeight: 'bold' }}
-          >
-            Acknowledge Dispatch
-          </Button>
+          {!dispatch?.delivery_acknowledged && (
+            <Button
+              type="primary"
+              icon={<CheckCircleOutlined />}
+              loading={submitting}
+              disabled={dispatch && dispatch.is_ready_for_acknowledgement === false}
+              onClick={handleSubmit}
+              style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)', borderColor: 'transparent', fontWeight: 'bold' }}
+            >
+              Acknowledge Dispatch
+            </Button>
+          )}
         </Space>
       </PageHeader>
 
       <Row gutter={[20, 20]}>
         {/* Step 1: Operating Location & Dispatch Search */}
         <Col span={24}>
-          <Card 
-            title={<span style={{ color: '#0f172a', fontWeight: 800 }}>1. Search SCM Outbound Dispatch</span>}
+          <Card
+            title={<span style={{ color: '#0f172a', fontWeight: 800 }}>Search SCM Dispatch</span>}
             size="small"
             style={{ borderRadius: '12px', border: '1px solid #cbd5e1', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}
           >
@@ -432,7 +542,7 @@ const AcknowledgeDelivery = () => {
                   />
                 </Form.Item>
               </Col>
-              
+
               <Col xs={24} md={12}>
                 <Form.Item label={<span style={{ color: '#4f46e5', fontWeight: 600 }}>Select Dispatch Number</span>} style={{ marginBottom: 0 }}>
                   <Select
@@ -440,9 +550,9 @@ const AcknowledgeDelivery = () => {
                     placeholder="Search by Dispatch No..."
                     value={selectedDispatchId}
                     onChange={(val) => setSelectedDispatchId(val)}
-                    options={filteredDispatches.map(d => ({ 
-                      label: `${d.dispatch_id} (To: ${d.destination_warehouse_name || d.destination_user_name || 'Client Drop'})`, 
-                      value: d.id 
+                    options={filteredDispatches.map(d => ({
+                      label: `${d.dispatch_id} (To: ${d.destination_warehouse_name || d.destination_user_name || 'Client Drop'})`,
+                      value: d.id
                     }))}
                     style={{ width: '100%' }}
                     filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
@@ -452,12 +562,23 @@ const AcknowledgeDelivery = () => {
             </Row>
           </Card>
         </Col>
+        {dispatch && dispatch.is_ready_for_acknowledgement === false && (
+          <Col span={24}>
+            <Alert
+              message="Awaiting Transporter/Driver Arrival"
+              description={dispatch.transporter_status_message || "The transporter has not yet reported arrival at the destination for the vehicle carrying this dispatch order. Consignee receipt acknowledgment is locked until the vehicle has gated out and reported arrival."}
+              type="warning"
+              showIcon
+              style={{ borderRadius: '12px', border: '1px solid #ffe58f', background: '#fffbe6' }}
+            />
+          </Col>
+        )}
 
         {dispatch ? (
           <>
             {/* Step 2: Dispatch Shipment details */}
             <Col span={24}>
-              <Card 
+              <Card
                 title={<span style={{ color: '#0f172a', fontWeight: 800 }}>2. Shipment Manifest Summary</span>}
                 size="small"
                 style={{ borderRadius: '12px', border: '1px solid #cbd5e1', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}
@@ -491,13 +612,13 @@ const AcknowledgeDelivery = () => {
 
             {/* Step 3: Material Line Items Verification */}
             <Col span={24}>
-              <Card 
+              <Card
                 title={<span style={{ color: '#0f172a', fontWeight: 800 }}>3. Materials Receipt Check</span>}
                 size="small"
                 style={{ borderRadius: '12px', border: '1px solid #cbd5e1', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}
               >
                 <Table
-                  dataSource={items}
+                  dataSource={groupedItems}
                   columns={columns}
                   pagination={false}
                   bordered
@@ -508,7 +629,7 @@ const AcknowledgeDelivery = () => {
 
             {/* Step 4: Secure Digital POD Evidence */}
             <Col xs={24} md={12}>
-              <Card 
+              <Card
                 title={<span style={{ color: '#0f172a', fontWeight: 800 }}>4. Signatory Credentials</span>}
                 size="small"
                 style={{ borderRadius: '12px', border: '1px solid #cbd5e1', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', height: '100%' }}
@@ -516,36 +637,36 @@ const AcknowledgeDelivery = () => {
                 <Form form={form} layout="vertical">
                   <Row gutter={16}>
                     <Col span={12}>
-                      <Form.Item 
-                        name="acknowledged_by_name" 
-                        label={<span style={{ fontWeight: 600 }}>Receiver Name</span>} 
+                      <Form.Item
+                        name="acknowledged_by_name"
+                        label={<span style={{ fontWeight: 600 }}>Receiver Name</span>}
                         rules={[{ required: true, message: 'Receiver name is required' }]}
                       >
-                        <Input placeholder="E.g., Nilesh Patil" />
+                        <Input placeholder="E.g., Nilesh Patil" disabled={!!dispatch?.delivery_acknowledged || dispatch?.is_ready_for_acknowledgement === false} />
                       </Form.Item>
                     </Col>
                     <Col span={12}>
-                      <Form.Item 
-                        name="acknowledged_by_phone" 
-                        label={<span style={{ fontWeight: 600 }}>Contact Number</span>} 
+                      <Form.Item
+                        name="acknowledged_by_phone"
+                        label={<span style={{ fontWeight: 600 }}>Contact Number</span>}
                         rules={[{ required: true, message: 'Phone number is required' }]}
                       >
-                        <Input placeholder="E.g., 9988001122" />
+                        <Input placeholder="E.g., 9988001122" disabled={!!dispatch?.delivery_acknowledged || dispatch?.is_ready_for_acknowledgement === false} />
                       </Form.Item>
                     </Col>
                     <Col span={12}>
                       <Form.Item name="acknowledged_by_designation" label="Designation">
-                        <Input placeholder="E.g., Store In-Charge" />
+                        <Input placeholder="E.g., Store In-Charge" disabled={!!dispatch?.delivery_acknowledged || dispatch?.is_ready_for_acknowledgement === false} />
                       </Form.Item>
                     </Col>
                     <Col span={12}>
                       <Form.Item name="acknowledged_by_department" label="Department">
-                        <Input placeholder="E.g., Warehouse Ops" />
+                        <Input placeholder="E.g., Warehouse Ops" disabled={!!dispatch?.delivery_acknowledged || dispatch?.is_ready_for_acknowledgement === false} />
                       </Form.Item>
                     </Col>
                     <Col span={12}>
                       <Form.Item name="receiver_id_proof_type" label="ID Proof Type">
-                        <Select>
+                        <Select disabled={!!dispatch?.delivery_acknowledged || dispatch?.is_ready_for_acknowledgement === false}>
                           <Select.Option value="NONE">None</Select.Option>
                           <Select.Option value="AADHAR">Aadhar Card</Select.Option>
                           <Select.Option value="PAN">PAN Card</Select.Option>
@@ -555,12 +676,12 @@ const AcknowledgeDelivery = () => {
                     </Col>
                     <Col span={12}>
                       <Form.Item name="receiver_id_proof_number" label="ID Proof Number">
-                        <Input placeholder="Enter ID characters" />
+                        <Input placeholder="Enter ID characters" disabled={!!dispatch?.delivery_acknowledged || dispatch?.is_ready_for_acknowledgement === false} />
                       </Form.Item>
                     </Col>
                     <Col span={24}>
                       <Form.Item name="actual_delivery_location" label="Delivery Bin / drop-off Address">
-                        <Input placeholder="E.g., Main Yard, Sector 4 Bin" />
+                        <Input placeholder="E.g., Main Yard, Sector 4 Bin" disabled={!!dispatch?.delivery_acknowledged || dispatch?.is_ready_for_acknowledgement === false} />
                       </Form.Item>
                     </Col>
                   </Row>
@@ -569,7 +690,7 @@ const AcknowledgeDelivery = () => {
             </Col>
 
             <Col xs={24} md={12}>
-              <Card 
+              <Card
                 title={<span style={{ color: '#0f172a', fontWeight: 800 }}>5. Secure Signature & Photos Evidence</span>}
                 size="small"
                 style={{ borderRadius: '12px', border: '1px solid #cbd5e1', boxShadow: '0 4px 12px rgba(0,0,0,0.03)', height: '100%' }}
@@ -577,39 +698,43 @@ const AcknowledgeDelivery = () => {
                 <Form form={form} layout="vertical">
                   {/* Upload Signature Proof / Stamp Photo */}
                   <Form.Item name="signature_image" label={<span style={{ fontWeight: 600, fontSize: '13px' }}>📝 Receiver Signature / Stamp Photo</span>}>
-                    <Upload
-                      maxCount={1}
-                      accept="image/*"
-                      customRequest={async ({ file, onSuccess, onError }) => {
-                        try {
-                          await handleUploadFile(file, 'signature_image');
-                          onSuccess(null, file);
-                        } catch (err) {
-                          onError(err);
-                        }
-                      }}
-                      showUploadList={false}
-                    >
-                      <Button
-                        icon={<UploadOutlined />}
-                        style={{
-                          background: uploadedUrls.signature_image ? 'linear-gradient(135deg,#16a34a,#15803d)' : 'linear-gradient(135deg,#4f46e5,#3730a3)',
-                          color: '#fff',
-                          borderColor: 'transparent',
-                          fontWeight: 600,
-                          borderRadius: '8px',
-                          height: '40px',
-                          paddingInline: '20px'
+                    {!dispatch?.delivery_acknowledged && dispatch?.is_ready_for_acknowledgement !== false && (
+                      <Upload
+                        maxCount={1}
+                        accept="image/*"
+                        customRequest={async ({ file, onSuccess, onError }) => {
+                          try {
+                            await handleUploadFile(file, 'signature_image');
+                            onSuccess(null, file);
+                          } catch (err) {
+                            onError(err);
+                          }
                         }}
+                        showUploadList={false}
                       >
-                        {uploadedUrls.signature_image ? '✓ Signature Uploaded — Click to Replace' : 'Upload Signature / Stamp Photo'}
-                      </Button>
-                    </Upload>
+                        <Button
+                          icon={<UploadOutlined />}
+                          style={{
+                            background: uploadedUrls.signature_image ? 'linear-gradient(135deg,#16a34a,#15803d)' : 'linear-gradient(135deg,#4f46e5,#3730a3)',
+                            color: '#fff',
+                            borderColor: 'transparent',
+                            fontWeight: 600,
+                            borderRadius: '8px',
+                            height: '40px',
+                            paddingInline: '20px'
+                          }}
+                        >
+                          {uploadedUrls.signature_image ? '✓ Signature Uploaded — Click to Replace' : 'Upload Signature / Stamp Photo'}
+                        </Button>
+                      </Upload>
+                    )}
                   </Form.Item>
 
                   {uploadedUrls.signature_image && (
                     <div style={{ marginBottom: '20px', background: 'linear-gradient(135deg,#f0fdf4,#dcfce7)', padding: '16px', borderRadius: '12px', border: '2px solid #86efac' }}>
-                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#166534', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>✓ Signature Preview — Click image to zoom</span>
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#166534', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        {dispatch?.delivery_acknowledged ? '✓ Saved Signature Proof — Click image to zoom' : '✓ Signature Preview — Click image to zoom'}
+                      </span>
                       <Image.PreviewGroup>
                         <Image
                           src={uploadedUrls.signature_image}
@@ -623,39 +748,43 @@ const AcknowledgeDelivery = () => {
 
                   {/* Upload Material Photos */}
                   <Form.Item name="materials_photos" label={<span style={{ fontWeight: 600, fontSize: '13px' }}>📦 Materials Condition Photo Evidence</span>}>
-                    <Upload
-                      maxCount={1}
-                      accept="image/*"
-                      customRequest={async ({ file, onSuccess, onError }) => {
-                        try {
-                          await handleUploadFile(file, 'materials_photos');
-                          onSuccess(null, file);
-                        } catch (err) {
-                          onError(err);
-                        }
-                      }}
-                      showUploadList={false}
-                    >
-                      <Button
-                        icon={<UploadOutlined />}
-                        style={{
-                          background: uploadedUrls.materials_photos ? 'linear-gradient(135deg,#16a34a,#15803d)' : 'linear-gradient(135deg,#0891b2,#0e7490)',
-                          color: '#fff',
-                          borderColor: 'transparent',
-                          fontWeight: 600,
-                          borderRadius: '8px',
-                          height: '40px',
-                          paddingInline: '20px'
+                    {!dispatch?.delivery_acknowledged && dispatch?.is_ready_for_acknowledgement !== false && (
+                      <Upload
+                        maxCount={1}
+                        accept="image/*"
+                        customRequest={async ({ file, onSuccess, onError }) => {
+                          try {
+                            await handleUploadFile(file, 'materials_photos');
+                            onSuccess(null, file);
+                          } catch (err) {
+                            onError(err);
+                          }
                         }}
+                        showUploadList={false}
                       >
-                        {uploadedUrls.materials_photos ? '✓ Photo Uploaded — Click to Replace' : 'Upload Materials Condition Photo'}
-                      </Button>
-                    </Upload>
+                        <Button
+                          icon={<UploadOutlined />}
+                          style={{
+                            background: uploadedUrls.materials_photos ? 'linear-gradient(135deg,#16a34a,#15803d)' : 'linear-gradient(135deg,#0891b2,#0e7490)',
+                            color: '#fff',
+                            borderColor: 'transparent',
+                            fontWeight: 600,
+                            borderRadius: '8px',
+                            height: '40px',
+                            paddingInline: '20px'
+                          }}
+                        >
+                          {uploadedUrls.materials_photos ? '✓ Photo Uploaded — Click to Replace' : 'Upload Materials Condition Photo'}
+                        </Button>
+                      </Upload>
+                    )}
                   </Form.Item>
 
                   {uploadedUrls.materials_photos && (
                     <div style={{ marginBottom: '20px', background: 'linear-gradient(135deg,#f0f9ff,#e0f2fe)', padding: '16px', borderRadius: '12px', border: '2px solid #7dd3fc' }}>
-                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#075985', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>✓ Materials Photo Preview — Click image to zoom</span>
+                      <span style={{ display: 'block', fontSize: '11px', fontWeight: 700, color: '#075985', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        {dispatch?.delivery_acknowledged ? '✓ Saved Materials Photo Evidence — Click image to zoom' : '✓ Materials Photo Preview — Click image to zoom'}
+                      </span>
                       <Image.PreviewGroup>
                         <Image
                           src={uploadedUrls.materials_photos}
@@ -668,8 +797,8 @@ const AcknowledgeDelivery = () => {
                   )}
 
                   {uploadedUrls.materials_photos && (
-                    <Form.Item name="photo_review" label={<span style={{ fontWeight: 600 }}>Photo Condition Assessment Remarks</span>} rules={[{ required: true, message: 'Please describe the condition visible in the photo' }]}>
-                      <TextArea rows={3} placeholder="E.g., Checked items inside box; packaging intact, no leakage found, all serial tags visible." />
+                    <Form.Item name="photo_review" label={<span style={{ fontWeight: 600 }}>Photo Condition Assessment Remarks</span>} rules={[{ required: !dispatch?.delivery_acknowledged, message: 'Please describe the condition visible in the photo' }]}>
+                      <TextArea rows={3} placeholder="E.g., Checked items inside box; packaging intact, no leakage found, all serial tags visible." disabled={!!dispatch?.delivery_acknowledged} />
                     </Form.Item>
                   )}
                 </Form>

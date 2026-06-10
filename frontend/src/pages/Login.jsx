@@ -178,8 +178,8 @@ const Login = () => {
               </>
             ) : (
               <>
-                Supply chain for the{' '}
-                <em>last mile&nbsp;of&nbsp;care.</em>
+                Here, every supply chain creates a lifeline{' '}
+
               </>
             )}
           </h1>

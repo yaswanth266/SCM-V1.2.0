@@ -59,10 +59,26 @@ export default function CarrierPortal() {
   const [sos, setSos] = useState([]);
   const [soLoading, setSoLoading] = useState(false);
   const [acknowledgingSo, setAcknowledgingSo] = useState(null);
+  const [acknowledgingAction, setAcknowledgingAction] = useState('accept');
   const [ackForm] = Form.useForm();
   const [reportingVehicle, setReportingVehicle] = useState(null);
   const [submittingIssue, setSubmittingIssue] = useState(false);
   const [issueForm] = Form.useForm();
+
+  const arrivalPendingVehicles = [];
+  (sos || []).forEach(so => {
+    if (so.vehicles) {
+      so.vehicles.forEach(v => {
+        if (v.vehicle_status === 'IN_TRANSIT') {
+          arrivalPendingVehicles.push({
+            ...v,
+            so_number: so.so_number,
+            so_id: so.id
+          });
+        }
+      });
+    }
+  });
 
   const fetch = async () => {
     try {
@@ -96,16 +112,30 @@ export default function CarrierPortal() {
   const submitAcknowledgement = async (values) => {
     try {
       const payload = {
-        ...values,
-        arrival_date: values.arrival_date ? values.arrival_date.format('YYYY-MM-DD') : null
+        action: acknowledgingAction,
+        remarks: values.remarks,
+        arrival_date: acknowledgingAction === 'accept' && values.arrival_date ? values.arrival_date.format('YYYY-MM-DD') : null
       };
       await carrierApi.post(`/carrier/so/${acknowledgingSo.id}/acknowledge`, payload);
-      message.success('Service Order contract acknowledged successfully!');
+      message.success(`Service Order contract ${acknowledgingAction === 'accept' ? 'accepted' : 'rejected'} successfully!`);
       setAcknowledgingSo(null);
       ackForm.resetFields();
       await fetchSos();
     } catch (e) {
       message.error(e?.response?.data?.message || e?.response?.data?.detail || 'Failed to acknowledge Service Order');
+    }
+  };
+
+  const handleReportArrival = async (vehicle) => {
+    try {
+      setLoading(true);
+      await carrierApi.post(`/carrier/so/vehicle/${vehicle.id}/arrive`);
+      message.success(`Arrival reported successfully for vehicle ${vehicle.vehicle_registration_no}!`);
+      await fetchSos();
+    } catch (e) {
+      message.error(e?.response?.data?.message || e?.response?.data?.detail || 'Failed to report vehicle arrival');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -363,6 +393,65 @@ export default function CarrierPortal() {
             },
             {
               key: '2',
+              label: <span style={{ fontWeight: 'bold', fontSize: '14px' }}>SO Acknowledgement ({arrivalPendingVehicles.length})</span>,
+              children: (
+                <div style={{ marginTop: '12px' }}>
+                  {soLoading ? (
+                    <div style={{ textAlign: 'center', padding: 40 }}>
+                      <Spin tip="Loading transit shipments..." />
+                    </div>
+                  ) : arrivalPendingVehicles.length === 0 ? (
+                    <Empty description="No shipments currently in transit awaiting arrival acknowledgment." />
+                  ) : (
+                    <Table
+                      dataSource={arrivalPendingVehicles}
+                      rowKey="id"
+                      pagination={{ pageSize: 10 }}
+                      columns={[
+                        {
+                          title: 'Service Order #',
+                          dataIndex: 'so_number',
+                          key: 'so_number',
+                          render: (t) => <span style={{ fontFamily: 'monospace', color: '#0f766e', fontWeight: 'bold' }}>{t}</span>
+                        },
+                        { title: 'Vehicle Type', dataIndex: 'vehicle_type', key: 'type' },
+                        {
+                          title: 'Registration No',
+                          dataIndex: 'vehicle_registration_no',
+                          key: 'reg',
+                          render: t => <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{t}</span>
+                        },
+                        { title: 'Driver Name', dataIndex: 'driver_name', key: 'driver' },
+                        { title: 'Driver Mobile', dataIndex: 'driver_mobile', key: 'mobile' },
+                        {
+                          title: 'Vehicle Status',
+                          dataIndex: 'vehicle_status',
+                          key: 'status',
+                          render: s => <Tag color="processing">{s}</Tag>
+                        },
+                        {
+                          title: 'Action',
+                          key: 'action',
+                          render: (_, v) => (
+                            <Button
+                              type="primary"
+                              size="small"
+                              icon={<CheckCircleOutlined />}
+                              style={{ background: '#16a34a', borderColor: '#16a34a' }}
+                              onClick={() => handleReportArrival(v)}
+                            >
+                              Acknowledge Arrival
+                            </Button>
+                          )
+                        }
+                      ]}
+                    />
+                  )}
+                </div>
+              )
+            },
+            {
+              key: '3',
               label: <span style={{ fontWeight: 'bold', fontSize: '14px' }}>Service Orders & Contracts ({sos.length})</span>,
               children: (
                 <div style={{ marginTop: '12px' }}>
@@ -407,10 +496,13 @@ export default function CarrierPortal() {
                           key: 'status',
                           render: (s, row) => {
                             if (s === 'CREATED' && !row.acknowledged_by_vendor) {
-                              return <Tag color="warning">AWAITING ACKNOWLEDGMENT</Tag>;
+                              return <Tag color="warning">AWAITING DECISION</Tag>;
                             }
-                            if (s === 'ACKNOWLEDGED') {
-                              return <Tag color="success">ACKNOWLEDGED</Tag>;
+                            if (s === 'ACCEPTED') {
+                              return <Tag color="success">ACCEPTED</Tag>;
+                            }
+                            if (s === 'REJECTED') {
+                              return <Tag color="error">REJECTED</Tag>;
                             }
                             if (s === 'IN_PROGRESS') {
                               return <Tag color="processing">IN TRANSIT / PROGRESS</Tag>;
@@ -427,20 +519,40 @@ export default function CarrierPortal() {
                           render: (_, row) => {
                             if (row.status === 'CREATED' && !row.acknowledged_by_vendor) {
                               return (
-                                <Button
-                                  type="primary"
-                                  size="small"
-                                  icon={<CheckCircleOutlined />}
-                                  style={{ background: '#0f766e', borderColor: '#0f766e' }}
-                                  onClick={() => setAcknowledgingSo(row)}
-                                >
-                                  Acknowledge
-                                </Button>
+                                <Space>
+                                  <Button
+                                    type="primary"
+                                    size="small"
+                                    icon={<CheckCircleOutlined />}
+                                    style={{ background: '#0f766e', borderColor: '#0f766e' }}
+                                    onClick={() => {
+                                      setAcknowledgingAction("accept");
+                                      setAcknowledgingSo(row);
+                                    }}
+                                  >
+                                    Accept
+                                  </Button>
+                                  <Button
+                                    danger
+                                    type="primary"
+                                    size="small"
+                                    icon={<StopOutlined />}
+                                    onClick={() => {
+                                      setAcknowledgingAction("reject");
+                                      setAcknowledgingSo(row);
+                                    }}
+                                  >
+                                    Reject
+                                  </Button>
+                                </Space>
                               );
+                            }
+                            if (row.status === 'REJECTED') {
+                              return <span style={{ color: '#ef4444', fontSize: '12px' }}>Rejected</span>;
                             }
                             return (
                               <Space style={{ color: '#16a34a', fontSize: '12px' }}>
-                                <CheckCircleOutlined /> Acknowledged
+                                <CheckCircleOutlined /> Accepted
                               </Space>
                             );
                           }
@@ -475,7 +587,23 @@ export default function CarrierPortal() {
                                 { title: 'Registration No', dataIndex: 'vehicle_registration_no', render: t => <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{t}</span> },
                                 { title: 'Driver Name', dataIndex: 'driver_name' },
                                 { title: 'Driver Mobile', dataIndex: 'driver_mobile' },
-                                { title: 'Vehicle Status', dataIndex: 'vehicle_status', render: s => <Tag color={s === 'DELIVERED' ? 'default' : s === 'SCHEDULED' ? 'warning' : 'processing'}>{s}</Tag> },
+                                {
+                                  title: 'Vehicle Status',
+                                  dataIndex: 'vehicle_status',
+                                  render: s => {
+                                    const colors = {
+                                      'SCHEDULED': 'default',
+                                      'GATE_IN': 'cyan',
+                                      'LOADING': 'warning',
+                                      'GATE_OUT': 'purple',
+                                      'IN_TRANSIT': 'processing',
+                                      'TRANSPORTER_ACKNOWLEDGED': 'blue',
+                                      'DELIVERY_ACKNOWLEDGED': 'success',
+                                      'CANCELLED': 'error'
+                                    };
+                                    return <Tag color={colors[s] || 'default'}>{s}</Tag>;
+                                  }
+                                },
                                 {
                                   title: 'Alert Status',
                                   key: 'alert_status',
@@ -491,19 +619,33 @@ export default function CarrierPortal() {
                                   title: 'Action',
                                   key: 'alert_action',
                                   render: (_, v) => {
-                                    const canRaise = so.acknowledged_by_vendor && v.vehicle_status !== 'DELIVERED' && v.vehicle_status !== 'CANCELLED';
+                                    const canRaise = so.acknowledged_by_vendor && v.vehicle_status !== 'DELIVERY_ACKNOWLEDGED' && v.vehicle_status !== 'DELIVERED' && v.vehicle_status !== 'CANCELLED';
+                                    const canArrive = v.vehicle_status === 'IN_TRANSIT';
                                     return (
-                                      <Button
-                                        danger
-                                        type="primary"
-                                        ghost
-                                        size="small"
-                                        icon={<WarningOutlined />}
-                                        disabled={!canRaise}
-                                        onClick={() => setReportingVehicle(v)}
-                                      >
-                                        Report Issue
-                                      </Button>
+                                      <Space>
+                                        <Button
+                                          danger
+                                          type="primary"
+                                          ghost
+                                          size="small"
+                                          icon={<WarningOutlined />}
+                                          disabled={!canRaise}
+                                          onClick={() => setReportingVehicle(v)}
+                                        >
+                                          Report Issue
+                                        </Button>
+                                        {canArrive && (
+                                          <Button
+                                            type="primary"
+                                            size="small"
+                                            icon={<CheckCircleOutlined />}
+                                            style={{ background: '#16a34a', borderColor: '#16a34a' }}
+                                            onClick={() => handleReportArrival(v)}
+                                          >
+                                            Report Arrival
+                                          </Button>
+                                        )}
+                                      </Space>
                                     );
                                   }
                                 }
@@ -518,7 +660,7 @@ export default function CarrierPortal() {
               )
             },
             {
-              key: '3',
+              key: '4',
               label: <span style={{ fontWeight: 'bold', fontSize: '14px' }}>Transit Alerts</span>,
               children: (
                 <div style={{ marginTop: '12px' }}>
@@ -572,7 +714,19 @@ export default function CarrierPortal() {
                             title: 'Vehicle Status',
                             dataIndex: 'vehicle_status',
                             key: 'status',
-                            render: s => <Tag color={s === 'DELIVERED' ? 'default' : s === 'SCHEDULED' ? 'warning' : 'processing'}>{s}</Tag>
+                            render: s => {
+                              const colors = {
+                                'SCHEDULED': 'default',
+                                'GATE_IN': 'cyan',
+                                'LOADING': 'warning',
+                                'GATE_OUT': 'purple',
+                                'IN_TRANSIT': 'processing',
+                                'TRANSPORTER_ACKNOWLEDGED': 'blue',
+                                'DELIVERY_ACKNOWLEDGED': 'success',
+                                'CANCELLED': 'error'
+                              };
+                              return <Tag color={colors[s] || 'default'}>{s}</Tag>;
+                            }
                           },
                           {
                             title: 'Alert Status',
@@ -589,19 +743,33 @@ export default function CarrierPortal() {
                             title: 'Action',
                             key: 'alert_action',
                             render: (_, v) => {
-                              const canRaise = v.acknowledged_by_vendor && v.vehicle_status !== 'DELIVERED' && v.vehicle_status !== 'CANCELLED';
+                              const canRaise = v.acknowledged_by_vendor && v.vehicle_status !== 'DELIVERY_ACKNOWLEDGED' && v.vehicle_status !== 'DELIVERED' && v.vehicle_status !== 'CANCELLED';
+                              const canArrive = v.vehicle_status === 'IN_TRANSIT';
                               return (
-                                <Button
-                                  danger
-                                  type="primary"
-                                  ghost
-                                  size="small"
-                                  icon={<WarningOutlined />}
-                                  disabled={!canRaise}
-                                  onClick={() => setReportingVehicle(v)}
-                                >
-                                  Report Issue
-                                </Button>
+                                <Space>
+                                  <Button
+                                    danger
+                                    type="primary"
+                                    ghost
+                                    size="small"
+                                    icon={<WarningOutlined />}
+                                    disabled={!canRaise}
+                                    onClick={() => setReportingVehicle(v)}
+                                  >
+                                    Report Issue
+                                  </Button>
+                                  {canArrive && (
+                                    <Button
+                                      type="primary"
+                                      size="small"
+                                      icon={<CheckCircleOutlined />}
+                                      style={{ background: '#16a34a', borderColor: '#16a34a' }}
+                                      onClick={() => handleReportArrival(v)}
+                                    >
+                                      Report Arrival
+                                    </Button>
+                                  )}
+                                </Space>
                               );
                             }
                           }
@@ -763,79 +931,91 @@ export default function CarrierPortal() {
 
       {/* SO Acknowledgment Modal */}
       <Modal
-        title={`Acknowledge Service Order Contract — ${acknowledgingSo?.so_number}`}
+        title={acknowledgingAction === 'accept' ? `Accept Service Order Contract — ${acknowledgingSo?.so_number}` : `Reject Service Order Contract — ${acknowledgingSo?.so_number}`}
         open={!!acknowledgingSo}
         onCancel={() => setAcknowledgingSo(null)}
         onOk={() => ackForm.submit()}
-        okText="Acknowledge Contract"
+        okText={acknowledgingAction === 'accept' ? "Accept Contract" : "Reject Contract"}
+        okButtonProps={acknowledgingAction === 'reject' ? { danger: true } : undefined}
         width={500}
       >
         <Alert
-          message="Contract Acknowledgement Commitment"
-          description="By acknowledging this Service Order, you commit to providing the scheduled vehicle(s) and driver(s) for gating, loading, and transit delivery operations."
-          type="info"
+          message={acknowledgingAction === 'accept' ? "Contract Acceptance Commitment" : "Contract Rejection Notice"}
+          description={acknowledgingAction === 'accept'
+            ? "By accepting this Service Order, you commit to providing the scheduled vehicle(s) and driver(s) for gating, loading, and transit delivery operations."
+            : "By rejecting this Service Order, you decline the awarded contract. Please provide a brief reason below."
+          }
+          type={acknowledgingAction === 'accept' ? "info" : "warning"}
           showIcon
           style={{ marginBottom: '16px' }}
         />
         <Form form={ackForm} layout="vertical" onFinish={submitAcknowledgement}>
-          <Form.Item
-            name="arrival_date"
-            label="Expected Arrival Date"
-            rules={[
-              { required: true, message: 'Please select expected arrival date!' },
-              () => ({
-                validator(_, value) {
-                  if (!value) return Promise.resolve();
-                  const deliveryDate = acknowledgingSo?.expected_delivery_date;
-                  if (deliveryDate) {
-                    const deadline = dayjs(deliveryDate).endOf('day');
-                    if (!value.isBefore(deadline, 'day')) {
-                      return Promise.reject(
-                        new Error(
-                          `Expected arrival date must be before the delivery deadline (${dayjs(deliveryDate).format('DD/MM/YYYY')})`
-                        )
-                      );
+          {acknowledgingAction === 'accept' && (
+            <>
+              <Form.Item
+                name="arrival_date"
+                label="Expected Arrival Date"
+                rules={[
+                  { required: true, message: 'Please select expected arrival date!' },
+                  () => ({
+                    validator(_, value) {
+                      if (!value) return Promise.resolve();
+                      const deliveryDate = acknowledgingSo?.expected_delivery_date;
+                      if (deliveryDate) {
+                        const deadline = dayjs(deliveryDate).endOf('day');
+                        if (!value.isBefore(deadline, 'day')) {
+                          return Promise.reject(
+                            new Error(
+                              `Expected arrival date must be before the delivery deadline (${dayjs(deliveryDate).format('DD/MM/YYYY')})`
+                            )
+                          );
+                        }
+                      }
+                      return Promise.resolve();
+                    },
+                  }),
+                ]}
+              >
+                <DatePicker
+                  style={{ width: '100%' }}
+                  disabledDate={(d) => {
+                    const deliveryDate = acknowledgingSo?.expected_delivery_date;
+                    if (deliveryDate) {
+                      return d && !d.isBefore(dayjs(deliveryDate), 'day');
                     }
-                  }
-                  return Promise.resolve();
-                },
-              }),
-            ]}
-          >
-            <DatePicker
-              style={{ width: '100%' }}
-              disabledDate={(d) => {
-                const deliveryDate = acknowledgingSo?.expected_delivery_date;
-                if (deliveryDate) {
-                  return d && !d.isBefore(dayjs(deliveryDate), 'day');
-                }
-                return false;
-              }}
-              placeholder="Select your expected arrival date"
-              format="DD/MM/YYYY"
-            />
-          </Form.Item>
-          {acknowledgingSo?.expected_delivery_date && (
-            <div
-              style={{
-                marginBottom: 16,
-                padding: '8px 12px',
-                background: '#fef3c7',
-                border: '1px solid #fde68a',
-                borderRadius: 6,
-                fontSize: 12,
-                color: '#92400e',
-              }}
-            >
-              <strong>⏰ Expected Delivery Deadline:</strong>{' '}
-              <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-                {dayjs(acknowledgingSo.expected_delivery_date).format('DD/MM/YYYY')}
-              </span>
-              {' '}— Your arrival date must be <strong>before</strong> this date.
-            </div>
+                    return false;
+                  }}
+                  placeholder="Select your expected arrival date"
+                  format="DD/MM/YYYY"
+                />
+              </Form.Item>
+              {acknowledgingSo?.expected_delivery_date && (
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: '8px 12px',
+                    background: '#fef3c7',
+                    border: '1px solid #fde68a',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    color: '#92400e',
+                  }}
+                >
+                  <strong>⏰ Expected Delivery Deadline:</strong>{' '}
+                  <span style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+                    {dayjs(acknowledgingSo.expected_delivery_date).format('DD/MM/YYYY')}
+                  </span>
+                  {' '}— Your arrival date must be <strong>before</strong> this date.
+                </div>
+              )}
+            </>
           )}
-          <Form.Item name="remarks" label="Transporter Confirmation Remarks">
-            <Input.TextArea rows={3} placeholder="Add confirmation remarks, e.g. 'Driver notified and ready for gate-entry.'" />
+          <Form.Item 
+            name="remarks" 
+            label={acknowledgingAction === 'accept' ? "Transporter Confirmation Remarks" : "Reason for Rejection"}
+            rules={acknowledgingAction === 'reject' ? [{ required: true, message: 'Please enter reason for rejection!' }] : []}
+          >
+            <Input.TextArea rows={3} placeholder={acknowledgingAction === 'accept' ? "Add confirmation remarks, e.g. 'Driver notified and ready for gate-entry.'" : "Please explain why you are rejecting this contract..."} />
           </Form.Item>
         </Form>
       </Modal>

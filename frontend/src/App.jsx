@@ -57,16 +57,20 @@ const AppLauncher = lazy(() => import('./pages/AppLauncher'));
 /* Masters */
 const Items = lazy(() => import('./pages/masters/Items'));
 const ItemForm = lazy(() => import('./pages/masters/ItemForm'));
+const ItemDetail = lazy(() => import('./pages/masters/ItemDetail'));
 const Categories = lazy(() => import('./pages/masters/Categories'));
 const Vendors = lazy(() => import('./pages/masters/Vendors'));
 const VendorMaterialMapping = lazy(() => import('./pages/masters/VendorMaterialMapping'));
 const UserMaterialMapping = lazy(() => import('./pages/masters/UserMaterialMapping'));
 const VendorForm = lazy(() => import('./pages/masters/VendorForm'));
+const VendorDetail = lazy(() => import('./pages/masters/VendorDetail'));
 const Warehouses = lazy(() => import('./pages/masters/Warehouses'));
 const WarehouseForm = lazy(() => import('./pages/masters/WarehouseForm'));
+const WarehouseDetail = lazy(() => import('./pages/masters/WarehouseDetail'));
 const UOM = lazy(() => import('./pages/masters/UOM'));
 const PackagingHierarchy = lazy(() => import('./pages/masters/PackagingHierarchy'));
 const PriceLists = lazy(() => import('./pages/masters/PriceLists'));
+const PriceListForm = lazy(() => import('./pages/masters/PriceListForm'));
 const Brands = lazy(() => import('./pages/masters/Brands'));
 const Features = lazy(() => import('./pages/masters/Features'));
 const ItemTypes = lazy(() => import('./pages/masters/ItemTypes'));
@@ -76,6 +80,7 @@ const Specs = lazy(() => import('./pages/masters/Specs'));
 const UserGroups = lazy(() => import('./pages/masters/UserGroups'));
 const OrganizationStructure = lazy(() => import('./pages/masters/OrganizationStructure'));
 const BOMs = lazy(() => import('./pages/masters/BOMs'));
+const BOMForm = lazy(() => import('./pages/masters/BOMForm'));
 const Lms = lazy(() => import('./pages/lms/Lms'));
 
 /* Procurement */
@@ -87,6 +92,7 @@ const Quotations = lazy(() => import('./pages/procurement/Quotations'));
 const QuotationForm = lazy(() => import('./pages/procurement/QuotationForm'));
 const PurchaseOrders = lazy(() => import('./pages/procurement/PurchaseOrders'));
 const PurchaseOrderForm = lazy(() => import('./pages/procurement/PurchaseOrderForm'));
+const PurchaseOrderDetail = lazy(() => import('./pages/procurement/PurchaseOrderDetail'));
 const QuotationComparison = lazy(() => import('./pages/procurement/QuotationComparison'));
 
 /* Warehouse */
@@ -95,6 +101,7 @@ const GRNForm = lazy(() => import('./pages/warehouse/GRNForm'));
 const QualityInspection = lazy(() => import('./pages/warehouse/QualityInspection'));
 const QualityInspectionForm = lazy(() => import('./pages/warehouse/QualityInspectionForm'));
 const QCOutward = lazy(() => import('./pages/warehouse/QCOutward'));
+const QCOutwardForm = lazy(() => import('./pages/warehouse/QCOutwardForm'));
 const Putaway = lazy(() => import('./pages/warehouse/Putaway'));
 const FloorPlan = lazy(() => import('./pages/warehouse/FloorPlan'));
 const FloorPlan3D = lazy(() => import('./pages/warehouse/FloorPlan3D'));
@@ -106,9 +113,11 @@ const PurchaseReturnForm = lazy(() => import('./pages/warehouse/PurchaseReturnFo
 const MaterialIssues = lazy(() => import('./pages/warehouse/MaterialIssues'));
 const MaterialIssueForm = lazy(() => import('./pages/warehouse/MaterialIssueForm'));
 const Picklist = lazy(() => import('./pages/warehouse/Picklist'));
+const PicklistForm = lazy(() => import('./pages/warehouse/PicklistForm'));
 const OutwardLabelling = lazy(() => import('./pages/warehouse/OutwardLabelling'));
 const StockSegregation = lazy(() => import('./pages/warehouse/StockSegregation'));
 const MaterialInward = lazy(() => import('./pages/warehouse/MaterialInward'));
+const MaterialInwardForm = lazy(() => import('./pages/warehouse/MaterialInwardForm'));
 const Dispatch = lazy(() => import('./pages/warehouse/Dispatch'));
 const DispatchForm = lazy(() => import('./pages/warehouse/DispatchForm'));
 const AcknowledgeDelivery = lazy(() => import('./pages/warehouse/AcknowledgeDelivery'));
@@ -133,6 +142,7 @@ const Indents = lazy(() => import('./pages/indent/Indents'));
 const IndentsKanban = lazy(() => import('./pages/indent/IndentsKanban'));
 const IndentForm = lazy(() => import('./pages/indent/IndentForm'));
 const IndentAcknowledgement = lazy(() => import('./pages/indent/Acknowledgement'));
+const AcknowledgementForm = lazy(() => import('./pages/indent/AcknowledgementForm'));
 
 /* Consumption */
 const ConsumptionEntry = lazy(() => import('./pages/consumption/ConsumptionEntry'));
@@ -142,6 +152,7 @@ const ConsumptionReports = lazy(() => import('./pages/consumption/ConsumptionRep
 /* Approvals */
 const PendingApprovals = lazy(() => import('./pages/approvals/PendingApprovals'));
 const WorkflowConfig = lazy(() => import('./pages/approvals/WorkflowConfig'));
+const WorkflowConfigForm = lazy(() => import('./pages/approvals/WorkflowConfigForm'));
 const SlaBreaches = lazy(() => import('./pages/approvals/SlaBreaches'));
 const BusinessRules = lazy(() => import('./pages/automation/BusinessRules'));
 
@@ -416,19 +427,24 @@ const App = () => {
             <Route path="/masters" element={<ModuleIndexRedirect moduleId="masters" fallback="/masters/items" />} />
             <Route path="/masters/items" element={<KeyRoute requiredKey="masters-items"><Items /></KeyRoute>} />
             <Route path="/masters/items/new" element={<KeyRoute requiredKey="masters-items"><ItemForm /></KeyRoute>} />
-            <Route path="/masters/items/:id" element={<KeyRoute requiredKey="masters-items"><ItemForm /></KeyRoute>} />
+            <Route path="/masters/items/:id" element={<KeyRoute requiredKey="masters-items"><ItemDetail /></KeyRoute>} />
+            <Route path="/masters/items/:id/edit" element={<KeyRoute requiredKey="masters-items"><ItemForm /></KeyRoute>} />
             <Route path="/masters/categories" element={<KeyRoute requiredKey="masters-categories"><Categories /></KeyRoute>} />
             <Route path="/masters/vendors" element={<KeyRoute requiredKey="masters-vendors"><Vendors /></KeyRoute>} />
             <Route path="/masters/vendor-material-mapping" element={<KeyRoute requiredKey="masters-vendor-material-mapping"><VendorMaterialMapping /></KeyRoute>} />
             <Route path="/masters/user-material-mapping" element={<KeyRoute requiredKey="masters-user-material-mapping"><UserMaterialMapping /></KeyRoute>} />
             <Route path="/masters/vendors/new" element={<KeyRoute requiredKey="masters-vendors"><VendorForm /></KeyRoute>} />
-            <Route path="/masters/vendors/:id" element={<KeyRoute requiredKey="masters-vendors"><VendorForm /></KeyRoute>} />
+            <Route path="/masters/vendors/:id" element={<KeyRoute requiredKey="masters-vendors"><VendorDetail /></KeyRoute>} />
+            <Route path="/masters/vendors/:id/edit" element={<KeyRoute requiredKey="masters-vendors"><VendorForm /></KeyRoute>} />
             <Route path="/masters/warehouses" element={<KeyRoute requiredKey="masters-warehouses"><Warehouses /></KeyRoute>} />
             <Route path="/masters/warehouses/new" element={<KeyRoute requiredKey="masters-warehouses"><WarehouseForm /></KeyRoute>} />
-            <Route path="/masters/warehouses/:id" element={<KeyRoute requiredKey="masters-warehouses"><WarehouseForm /></KeyRoute>} />
+            <Route path="/masters/warehouses/:id" element={<KeyRoute requiredKey="masters-warehouses"><WarehouseDetail /></KeyRoute>} />
+            <Route path="/masters/warehouses/:id/edit" element={<KeyRoute requiredKey="masters-warehouses"><WarehouseForm /></KeyRoute>} />
             <Route path="/masters/uom" element={<KeyRoute requiredKey="masters-uom"><UOM /></KeyRoute>} />
             <Route path="/masters/packaging" element={<KeyRoute requiredKey="masters-packaging"><PackagingHierarchy /></KeyRoute>} />
             <Route path="/masters/price-lists" element={<KeyRoute requiredKey="masters-price-lists"><PriceLists /></KeyRoute>} />
+            <Route path="/masters/price-lists/new" element={<KeyRoute requiredKey="masters-price-lists"><PriceListForm /></KeyRoute>} />
+            <Route path="/masters/price-lists/:id/edit" element={<KeyRoute requiredKey="masters-price-lists"><PriceListForm /></KeyRoute>} />
             <Route path="/masters/brands" element={<KeyRoute requiredKey="masters-brands"><Brands /></KeyRoute>} />
             <Route path="/masters/features" element={<KeyRoute requiredKey="masters-features"><Features /></KeyRoute>} />
             <Route path="/masters/item-types" element={<KeyRoute requiredKey="masters-item-types"><ItemTypes /></KeyRoute>} />
@@ -439,6 +455,8 @@ const App = () => {
             <Route path="/masters/user-groups" element={<KeyRoute requiredKey="masters-user-groups"><UserGroups /></KeyRoute>} />
             <Route path="/masters/organization-structure" element={<KeyRoute requiredKey="masters-organization-structure"><OrganizationStructure /></KeyRoute>} />
             <Route path="/masters/boms" element={<KeyRoute requiredKey="masters-boms"><BOMs /></KeyRoute>} />
+            <Route path="/masters/boms/new" element={<KeyRoute requiredKey="masters-boms"><BOMForm /></KeyRoute>} />
+            <Route path="/masters/boms/:id/edit" element={<KeyRoute requiredKey="masters-boms"><BOMForm /></KeyRoute>} />
 
             {/* Procurement — guarded by 'procurement' permission */}
             <Route path="/procurement" element={<Navigate to="/procurement/material-requests" replace />} />
@@ -454,7 +472,8 @@ const App = () => {
             <Route path="/procurement/purchase-orders" element={<KeyRoute requiredKey="procurement-purchase-orders"><PurchaseOrders /></KeyRoute>} />
             <Route path="/procurement/purchase-orders/new" element={<KeyRoute requiredKey="procurement-purchase-orders"><PurchaseOrderForm /></KeyRoute>} />
             <Route path="/procurement/purchase-orders/create" element={<Navigate to="/procurement/purchase-orders/new" replace />} />
-            <Route path="/procurement/purchase-orders/:id" element={<KeyRoute requiredKey="procurement-purchase-orders"><PurchaseOrderForm /></KeyRoute>} />
+            <Route path="/procurement/purchase-orders/:id" element={<KeyRoute requiredKey="procurement-purchase-orders"><PurchaseOrderDetail /></KeyRoute>} />
+            <Route path="/procurement/purchase-orders/:id/edit" element={<KeyRoute requiredKey="procurement-purchase-orders"><PurchaseOrderForm /></KeyRoute>} />
             <Route path="/procurement/quotation-comparison" element={<KeyRoute requiredKey="procurement-quotation-comparison"><QuotationComparison /></KeyRoute>} />
 
             {/* Warehouse — guarded by 'warehouse' permission */}
@@ -478,10 +497,15 @@ const App = () => {
             <Route path="/warehouse/material-issues/new" element={<PermissionRoute module="warehouse"><MaterialIssueForm /></PermissionRoute>} />
             <Route path="/warehouse/material-issues/:id" element={<PermissionRoute module="warehouse"><MaterialIssueForm /></PermissionRoute>} />
             <Route path="/warehouse/picklist" element={<KeyRoute requiredKey="warehouse-picklist"><Picklist /></KeyRoute>} />
+            <Route path="/warehouse/picklist/new" element={<KeyRoute requiredKey="warehouse-picklist"><PicklistForm /></KeyRoute>} />
             <Route path="/warehouse/qc-outward" element={<KeyRoute requiredKey="warehouse-qc-outward"><QCOutward /></KeyRoute>} />
+            <Route path="/warehouse/qc-outward/new" element={<PermissionRoute module="warehouse"><QCOutwardForm /></PermissionRoute>} />
+            <Route path="/warehouse/qc-outward/:id" element={<PermissionRoute module="warehouse"><QCOutwardForm /></PermissionRoute>} />
             <Route path="/warehouse/outward-labelling" element={<KeyRoute requiredKey="warehouse-outward-labelling"><OutwardLabelling /></KeyRoute>} />
             <Route path="/warehouse/stock-segregation" element={<KeyRoute requiredKey="warehouse-stock-segregation"><StockSegregation /></KeyRoute>} />
             <Route path="/warehouse/material-inward" element={<KeyRoute requiredKey="warehouse-material-inward"><MaterialInward /></KeyRoute>} />
+            <Route path="/warehouse/material-inward/new" element={<PermissionRoute module="warehouse"><MaterialInwardForm /></PermissionRoute>} />
+            <Route path="/warehouse/material-inward/:id" element={<PermissionRoute module="warehouse"><MaterialInwardForm /></PermissionRoute>} />
             
             {/* Outward Dispatch - Unified under Logistics */}
             <Route path="/logistics/dispatch-orders" element={<KeyRoute requiredKey="warehouse-dispatch"><Dispatch /></KeyRoute>} />
@@ -518,6 +542,7 @@ const App = () => {
             <Route path="/indent/indents/create" element={<Navigate to="/indent/indents/new" replace />} />
             <Route path="/indent/indents/:id" element={<PermissionRoute module="indent"><IndentForm /></PermissionRoute>} />
             <Route path="/indent/acknowledgement" element={<KeyRoute requiredKey="indent-acknowledgement"><IndentAcknowledgement /></KeyRoute>} />
+            <Route path="/indent/acknowledgement/new" element={<KeyRoute requiredKey="indent-acknowledgement"><AcknowledgementForm /></KeyRoute>} />
 
             {/* Consumption — guarded by 'consumption' permission */}
             <Route path="/consumption/entry" element={<KeyRoute requiredKey="consumption-entry"><ConsumptionEntry /></KeyRoute>} />
@@ -529,6 +554,8 @@ const App = () => {
             <Route path="/approvals" element={<Navigate to="/approvals/pending" replace />} />
             <Route path="/approvals/pending" element={<KeyRoute requiredKey="approvals-pending"><PendingApprovals /></KeyRoute>} />
             <Route path="/approvals/workflow-config" element={<KeyRoute requiredKey="approvals-workflow-config"><WorkflowConfig /></KeyRoute>} />
+            <Route path="/approvals/workflow-config/new" element={<KeyRoute requiredKey="approvals-workflow-config"><WorkflowConfigForm /></KeyRoute>} />
+            <Route path="/approvals/workflow-config/:id/edit" element={<KeyRoute requiredKey="approvals-workflow-config"><WorkflowConfigForm /></KeyRoute>} />
             <Route path="/approvals/sla-breaches" element={<PermissionRoute module="approvals"><SlaBreaches /></PermissionRoute>} />
             <Route path="/approvals/business-rules" element={<PermissionRoute module="approvals"><BusinessRules /></PermissionRoute>} />
 

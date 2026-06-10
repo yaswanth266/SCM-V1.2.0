@@ -427,23 +427,29 @@ async def carrier_acknowledge_so(
     if not so:
         raise HTTPException(404, "Service Order not found")
 
-    if so.acknowledged_by_vendor:
-        raise HTTPException(400, "Service Order is already acknowledged")
+    action = (payload.action or "accept").lower()
+    if action == "reject":
+        so.status = "REJECTED"
+        so.acknowledged_by_vendor = False
+        action_desc = "rejected"
+    else:
+        if so.acknowledged_by_vendor:
+            raise HTTPException(400, "Service Order is already acknowledged")
+        so.status = "ACCEPTED"
+        so.acknowledged_by_vendor = True
+        so.acknowledged_at = datetime.now(timezone.utc)
+        so.arrival_date = payload.arrival_date
+        action_desc = "accepted"
 
-    so.acknowledged_by_vendor = True
-    so.acknowledged_at = datetime.now(timezone.utc)
-    so.arrival_date = payload.arrival_date
     so.vendor_remarks = payload.remarks
-    so.status = "ACKNOWLEDGED"
-    
     db.add(so)
     
     # Notify creator / admin
     db.add(Notification(
         user_id=so.created_by,
-        title="SO Acknowledged by Carrier",
-        message=f"Carrier {current_carrier.vendor.name if current_carrier.vendor else 'Carrier'} acknowledged B2B contract {so.so_number}. Vehicles are scheduled for gating.",
-        type="success",
+        title=f"SO Contract {action_desc.capitalize()} by Carrier",
+        message=f"Carrier {current_carrier.vendor.name if current_carrier.vendor else 'Carrier'} {action_desc} B2B contract {so.so_number}. Remarks: {payload.remarks or 'None'}",
+        type="success" if action == "accept" else "warning",
         module="logistics",
         reference_type="SO",
         reference_id=so.id,
@@ -456,11 +462,74 @@ async def carrier_acknowledge_so(
         action="carrier_acknowledge_so",
         entity_type="so",
         entity_id=so.id,
-        description=f"Carrier user {current_carrier.username} acknowledged contract Service Order {so.so_number}.",
+        description=f"Carrier user {current_carrier.username} {action_desc} contract Service Order {so.so_number}.",
     ))
     
     await db.commit()
-    return {"success": True, "message": "Service Order acknowledged successfully"}
+    return {"success": True, "message": f"Service Order contract {action_desc} successfully"}
+
+
+@router.post("/so/vehicle/{vehicle_id}/arrive")
+async def carrier_report_arrival(
+    vehicle_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_carrier: CarrierUser = Depends(get_current_carrier_user)
+):
+    """Carrier-side report vehicle arrival at destination."""
+    res = await db.execute(
+        select(LogisticsServiceOrderVehicle)
+        .where(LogisticsServiceOrderVehicle.id == vehicle_id)
+    )
+    v = res.scalar_one_or_none()
+    if not v:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+
+    # Fetch SO and verify ownership
+    res_so = await db.execute(
+        select(LogisticsServiceOrder)
+        .where(LogisticsServiceOrder.id == v.so_id)
+    )
+    so = res_so.scalar_one_or_none()
+    if not so or so.vendor_id != current_carrier.vendor_id:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to update status for this vehicle"
+        )
+
+    veh_status = v.vehicle_status.name if hasattr(v.vehicle_status, "name") else v.vehicle_status
+    if veh_status != "IN_TRANSIT":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Vehicle must be IN_TRANSIT to report arrival (current status: {veh_status})"
+        )
+
+    v.vehicle_status = "TRANSPORTER_ACKNOWLEDGED"
+    v.actual_delivery_datetime = datetime.now(timezone.utc)
+    db.add(v)
+
+    # Log activity
+    db.add(ActivityLog(
+        user_id=None,
+        module="logistics",
+        action="carrier_report_arrival",
+        entity_type="so_vehicle",
+        entity_id=v.id,
+        description=f"Carrier reported arrival for vehicle {v.vehicle_registration_no}.",
+    ))
+
+    # Notify creator / admin
+    db.add(Notification(
+        user_id=so.created_by,
+        title="Vehicle Arrived at Destination",
+        message=f"Carrier reported arrival at destination for vehicle {v.vehicle_registration_no} of contract {so.so_number}.",
+        type="info",
+        module="logistics",
+        reference_type="SO",
+        reference_id=so.id,
+    ))
+
+    await db.commit()
+    return {"success": True, "message": "Destination arrival reported successfully"}
 
 
 @router.post("/so/vehicle/{vehicle_id}/issue")

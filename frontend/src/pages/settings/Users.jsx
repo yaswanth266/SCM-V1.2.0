@@ -1,12 +1,13 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  Button, Drawer, Form, Input, Select, Space, Row, Col, Tag,
-  Popconfirm, message, Modal, Divider, Tabs, Card, Typography, Table,
+  Button, Select, Space, Tag,
+  Popconfirm, message, Modal, Form, Input, Typography,
 } from 'antd';
 import {
-  PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined,
+  PlusOutlined, EditOutlined,
   DownloadOutlined, LockOutlined, StopOutlined, CheckCircleOutlined,
-  UserOutlined, SyncOutlined, SafetyCertificateOutlined,
+  SyncOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons';
 import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
@@ -23,25 +24,20 @@ const USER_TYPES = [
   { label: 'Warehouse User', value: 'warehouse_user' },
   { label: 'Field Staff', value: 'field_staff' },
 ];
+// USER_TYPES kept here for the user-type filter dropdown in the toolbar
 
 const Users = () => {
   const { Text } = Typography;
+  const navigate = useNavigate();
 
-  // BUG-AUTH-069 fix: read the logged-in user so the drawer can disable
-  // privileged toggles when editing yourself (the backend already refuses
-  // these changes, but the UI used to let admins try and then surface a
-  // confusing 403).
+  // BUG-AUTH-069 fix: read the logged-in user
   const currentUser = useAuthStore((s) => s.user);
   const rolesList = currentUser?.roles || [];
   const isAdmin = rolesList.some(r => {
     const code = typeof r === 'object' ? r.code : r;
     return code === 'admin' || code === 'super_admin';
   });
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editingUser, setEditingUser] = useState(null);
-  const [form] = Form.useForm();
   const [resetForm] = Form.useForm();
-  const [submitting, setSubmitting] = useState(false);
   const [resetModal, setResetModal] = useState(false);
   const [resetUserId, setResetUserId] = useState(null);
   const [filterType, setFilterType] = useState(undefined);
@@ -50,9 +46,6 @@ const Users = () => {
   const [filterStatus, setFilterStatus] = useState(undefined);
   const [refreshKey, setRefreshKey] = useState(0);
   const [roles, setRoles] = useState([]);
-  const [warehouses, setWarehouses] = useState([]);
-  const [projects, setProjects] = useState([]);
-  const [departments, setDepartments] = useState([]);
 
   // New sub-tab mapping states
   const [activeSubTab, setActiveSubTab] = useState('list');
@@ -127,26 +120,12 @@ const Users = () => {
 
   const fetchLookups = async () => {
     try {
-      const [roleRes, whRes, projRes] = await Promise.allSettled([
+      const [roleRes] = await Promise.allSettled([
         api.get('/settings/roles', { params: { page_size: 200 } }),
-        // Admin form needs the FULL warehouse + project list (not the
-        // calling admin's scope) so they can assign anyone anywhere. Pass
-        // a flag the backend will recognise; if not, super_admin already
-        // bypasses the scope gate via user_is_managerial.
-        api.get('/masters/warehouses', { params: { page_size: 500 } }),
-        api.get('/masters/projects', { params: { page_size: 500 } }),
       ]);
       if (roleRes.status === 'fulfilled') {
         const d = roleRes.value.data;
         setRoles((d.items || d.data || d || []).map((r) => ({ label: `${r.code || r.name} - ${r.name}`, value: r.id })));
-      }
-      if (whRes.status === 'fulfilled') {
-        const d = whRes.value.data;
-        setWarehouses((d.items || d.data || d || []).map((w) => ({ label: w.name, value: w.id })));
-      }
-      if (projRes.status === 'fulfilled') {
-        const d = projRes.value.data;
-        setProjects((d.items || d.data || d || []).map((p) => ({ label: p.name, value: p.id })));
       }
     } catch { /* silent */ }
   };
@@ -165,24 +144,11 @@ const Users = () => {
   );
 
   const handleAdd = () => {
-    setEditingUser(null);
-    form.resetFields();
-    form.setFieldsValue({ is_active: true, user_type: 'staff' });
-    setDrawerOpen(true);
+    navigate('/settings/users/new');
   };
 
   const handleEdit = (record) => {
-    setEditingUser(record);
-    form.setFieldsValue({
-      ...record,
-      role_ids: record.roles?.map((r) => typeof r === 'object' ? r.id : r) || record.role_ids || [],
-      warehouse_ids: record.warehouses?.map((w) => typeof w === 'object' ? w.id : w) || record.warehouse_ids || [],
-      // Project assignments were never being loaded into the form; the
-      // dropdown showed blank even on edit, making it look like the user
-      // had no projects when in fact they did.
-      project_ids: record.projects?.map((p) => typeof p === 'object' ? p.id : p) || record.project_ids || [],
-    });
-    setDrawerOpen(true);
+    navigate(`/settings/users/${record.auth_user_id || record.id}`);
   };
 
   const handleDelete = async (id) => {
@@ -258,30 +224,7 @@ const Users = () => {
     }
   };
 
-  const handleSubmit = async () => {
-    try {
-      const values = await form.validateFields();
-      setSubmitting(true);
-      if (editingUser) {
-        const payload = { ...values };
-        if (!payload.password) delete payload.password;
-        await api.put(`/settings/users/${editingUser.auth_user_id || editingUser.id}`, payload);
-        message.success('User updated successfully');
-      } else {
-        await api.post('/settings/users', values);
-        message.success('User created successfully');
-      }
-      setDrawerOpen(false);
-      form.resetFields();
-      setEditingUser(null);
-      setRefreshKey((k) => k + 1);
-    } catch (err) {
-      if (err.errorFields) return;
-      message.error(getErrorMessage(err));
-    } finally {
-      setSubmitting(false);
-    }
-  };
+
 
   const handleExport = async () => {
     try {
@@ -425,7 +368,7 @@ const Users = () => {
             type="link"
             size="small"
             icon={<EditOutlined />}
-            onClick={() => handleEdit(record)}
+            onClick={() => navigate(`/settings/users/${record.auth_user_id || record.id}`)}
             title="Edit User"
           />
           {record.has_login && record.role_id && (
@@ -514,176 +457,10 @@ const Users = () => {
         scroll={{ x: 1500 }}
       />
 
-      {/* Add/Edit Drawer */}
-      <Drawer
-        title={editingUser ? 'Edit User' : 'Add User'}
-        width={640}
-        open={drawerOpen}
-        onClose={() => { setDrawerOpen(false); setEditingUser(null); form.resetFields(); }}
-        destroyOnHidden
-        extra={
-          <Space>
-            <Button onClick={() => { setDrawerOpen(false); setEditingUser(null); form.resetFields(); }}>Cancel</Button>
-            <Button type="primary" onClick={handleSubmit} loading={submitting}>
-              {editingUser ? 'Update' : 'Create'}
-            </Button>
-          </Space>
-        }
-      >
-        <Form form={form} layout="vertical">
-          <Divider orientation="left" plain>Account Information</Divider>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="employee_code" label="Employee Code">
-                <Input placeholder="e.g. EMP-001" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="username" label="Username" rules={[{ required: true, message: 'Username is required' }, { pattern: /^[a-zA-Z0-9_]{3,50}$/, message: 'Only letters, numbers, underscore (3-50 chars)' }]}>
-                <Input placeholder="Enter username" disabled={!!editingUser} maxLength={50} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="first_name" label="First Name" rules={[{ required: true, message: 'First name is required' }, { max: 100, message: 'Max 100 characters' }]}>
-                <Input placeholder="Enter first name" maxLength={100} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="last_name" label="Last Name">
-                <Input placeholder="Enter last name" />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="email" label="Email" rules={[{ required: true, message: 'Email is required' }, { type: 'email', message: 'Enter a valid email' }]}>
-                <Input placeholder="Enter email" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="designation" label="Designation">
-                <Input placeholder="Enter designation" />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="phone" label="Phone" rules={[{ pattern: /^[0-9+\-\s()]{6,20}$/, message: 'Enter a valid phone number (6-20 digits)' }]}>
-                <Input placeholder="Enter phone number" maxLength={20} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              {!editingUser && (
-                <Form.Item
-                  name="password"
-                  label="Password"
-                  rules={[
-                    { required: true, message: 'Password is required' },
-                    { min: 8, message: 'Password must be at least 8 characters' },
-                    {
-                      validator: (_, value) => {
-                        if (!value) return Promise.resolve();
-                        if (!/[A-Z]/.test(value)) return Promise.reject(new Error('Must include an uppercase letter'));
-                        if (!/[a-z]/.test(value)) return Promise.reject(new Error('Must include a lowercase letter'));
-                        if (!/\d/.test(value)) return Promise.reject(new Error('Must include a digit'));
-                        if (!/[!@#$%^&*(),.?":{}|<>]/.test(value)) return Promise.reject(new Error('Must include a special character'));
-                        return Promise.resolve();
-                      },
-                    },
-                  ]}
-                >
-                  <Input.Password placeholder="Enter password" />
-                </Form.Item>
-              )}
-              {editingUser && (
-                <Form.Item
-                  name="password"
-                  label="New Password (leave blank to keep)"
-                  rules={[
-                    { min: 8, message: 'Password must be at least 8 characters' },
-                    {
-                      validator: (_, value) => {
-                        if (!value) return Promise.resolve();
-                        if (!/[A-Z]/.test(value)) return Promise.reject(new Error('Must include an uppercase letter'));
-                        if (!/[a-z]/.test(value)) return Promise.reject(new Error('Must include a lowercase letter'));
-                        if (!/\d/.test(value)) return Promise.reject(new Error('Must include a digit'));
-                        if (!/[!@#$%^&*(),.?":{}|<>]/.test(value)) return Promise.reject(new Error('Must include a special character'));
-                        return Promise.resolve();
-                      },
-                    },
-                  ]}
-                >
-                  <Input.Password placeholder="Leave blank to keep current" />
-                </Form.Item>
-              )}
-            </Col>
-          </Row>
-
-          <Divider orientation="left" plain>Role & Access</Divider>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="user_type" label="User Type" rules={[{ required: true }]}>
-                <Select placeholder="Select user type" options={USER_TYPES} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="department" label="Department">
-                <Input placeholder="Enter department" />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="role_ids" label="Roles">
-            <Select
-              mode="multiple"
-              placeholder="Select roles"
-              options={roles}
-              showSearch
-              optionFilterProp="label"
-              allowClear
-              // BUG-AUTH-069 fix: prevent self-demotion via UI. Backend
-              // also enforces but disabling here gives an immediate signal.
-              disabled={!!editingUser && currentUser && editingUser.id === currentUser.id}
-            />
-          </Form.Item>
-          <Form.Item name="warehouse_ids" label="Assigned Warehouses">
-            <Select
-              mode="multiple"
-              placeholder="Select warehouses"
-              options={warehouses}
-              showSearch
-              optionFilterProp="label"
-              allowClear
-            />
-          </Form.Item>
-          <Form.Item name="project_ids" label="Assigned Projects">
-            <Select
-              mode="multiple"
-              placeholder="Select projects"
-              options={projects}
-              showSearch
-              optionFilterProp="label"
-              allowClear
-            />
-          </Form.Item>
-
-          <Divider orientation="left" plain>Status</Divider>
-          <Form.Item name="is_active" label="Status" rules={[{ required: true }]}>
-            <Select
-              // BUG-AUTH-069 fix: do not let admins disable themselves.
-              disabled={!!editingUser && currentUser && editingUser.id === currentUser.id}
-              options={[
-                { label: 'Active', value: true },
-                { label: 'Inactive', value: false },
-              ]}
-            />
-          </Form.Item>
-        </Form>
-      </Drawer>
 
       {/* Reset Password Modal */}
       <Modal
+
         title="Reset Password"
         open={resetModal}
         onCancel={() => { setResetModal(false); resetForm.resetFields(); setResetUserId(null); }}

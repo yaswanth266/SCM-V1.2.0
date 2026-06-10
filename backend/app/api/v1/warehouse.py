@@ -376,9 +376,7 @@ async def create_grn(
                 meta = item_meta.get(it.item_id)
                 if not meta:
                     continue
-                requires_batch = meta.has_batch or (
-                    meta.item_type and str(meta.item_type).lower() in BATCH_REQUIRED_TYPES
-                )
+                requires_batch = True
                 requires_expiry = meta.has_expiry or (
                     meta.item_type and str(meta.item_type).lower() in BATCH_REQUIRED_TYPES
                 )
@@ -2580,6 +2578,8 @@ async def list_material_issues(
                 "batch_id": item.batch_id,
                 "batch_number": b.batch_number if b else None,
                 "expiry_date": b.expiry_date.isoformat() if (b and b.expiry_date) else None,
+                "has_batch": bool(item.item.has_batch) if item.item else False,
+                "has_serial": bool(item.item.has_serial) if item.item else False,
             })
         items_list.append(mi_dict)
 
@@ -2887,6 +2887,7 @@ async def get_material_issue(
         response["items"][i]["batch_number"] = item.batch.batch_number if item.batch else None
         response["items"][i]["serial_numbers"] = item.serial_numbers
         response["items"][i]["has_serial"] = bool(item.item.has_serial) if item.item else False
+        response["items"][i]["has_batch"] = bool(item.item.has_batch) if item.item else False
     return response
 
 
@@ -2930,6 +2931,31 @@ async def update_material_issue(
 
     # Replace items if provided
     if payload.items is not None:
+        from app.models.master import Item as _MIItem
+        item_ids_for_mi = list({i.item_id for i in payload.items if i.item_id})
+        if item_ids_for_mi:
+            rows = await db.execute(
+                select(_MIItem.id, _MIItem.item_code, _MIItem.has_batch, _MIItem.has_expiry, _MIItem.item_type)
+                .where(_MIItem.id.in_(item_ids_for_mi))
+            )
+            mi_item_meta = {r.id: r for r in rows.all()}
+            BATCH_REQUIRED_TYPES_MI = {"medicine", "pharma", "drug", "consumable_medicine"}
+            for it in payload.items:
+                m = mi_item_meta.get(it.item_id)
+                if not m:
+                    continue
+                requires_batch = m.has_batch or (
+                    m.item_type and str(m.item_type).lower() in BATCH_REQUIRED_TYPES_MI
+                )
+                if requires_batch and it.batch_id is None:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"{m.item_code}: batch_id is required for batch-tracked items "
+                            "(expiry must be verified before issue)."
+                        ),
+                    )
+
         # BUG-INV-052: do a single bulk DELETE rather than N per-row deletes,
         # and explicitly refresh the cached relationship. The previous per-row
         # loop produced O(N) round-trips and the in-memory `mi.items` was a
@@ -3107,6 +3133,16 @@ async def issue_material(
         bin_to_wh = {r[0]: r[1] for r in wh_rows.all()}
 
     for item in mi.items:
+        # Validate that batch-tracked items have a batch assigned before issuing
+        BATCH_REQUIRED_TYPES_MI = {"medicine", "pharma", "drug", "consumable_medicine"}
+        requires_batch = (item.item.has_batch) or (
+            item.item.item_type and str(item.item.item_type).lower() in BATCH_REQUIRED_TYPES_MI
+        )
+        if requires_batch and item.batch_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{item.item.item_code}: batch_id is required for batch-tracked items (expiry must be verified before issue)."
+            )
         if item.bin_id is not None:
             wh_for_bin = bin_to_wh.get(item.bin_id)
             if wh_for_bin is None:
@@ -3303,15 +3339,9 @@ async def issue_material(
             # "partially_fulfilled" so it stays visible in the demand pool until
             # the raiser confirms receipt. The demand pool uses acknowledged_qty
             # (from IndentAcknowledgementItem) to decide when to remove a line.
-            any_issued = False
-            for ind_item in indent.items:
-                if (ind_item.issued_qty or 0) > 0:
-                    any_issued = True
-                    break
-            if any_issued:
-                # Always partially_fulfilled at issue time — full "fulfilled" set
-                # only by the acknowledge endpoint once ACK qty >= approved qty.
-                indent.status = "partially_fulfilled"
+            # At issue time, we keep the indent status as 'approved' (instead of pre-emptively setting it to 'partially_fulfilled')
+            # so that it remains 'approved' until the destination warehouse physically acknowledges receipt.
+            pass
 
     await db.flush()
     return {"id": mi.id, "issue_number": mi.issue_number, "message": "Material issued successfully, stock reserved"}

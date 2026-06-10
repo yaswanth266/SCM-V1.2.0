@@ -224,6 +224,7 @@ class QuotationResponse(BaseModel):
     with_vehicle: Optional[bool] = False
     status: str
     remarks: Optional[str] = None
+    terms_url: Optional[str] = None
     created_at: Optional[datetime] = None
     items: List[QuotationItemResponse] = []
     model_config = {"from_attributes": True}
@@ -244,6 +245,7 @@ class RFQCreate(BaseModel):
     payment_terms: Optional[str] = None
     with_vehicle: Optional[bool] = False
     remarks: Optional[str] = None
+    terms_url: Optional[str] = None
     items: List[RFQItemCreate]
 
     @field_validator("vendor_ids")

@@ -41,6 +41,93 @@ export const parseInstructions = (inst) => {
   return { desc: inst || '', weight: '', volume: '' };
 };
 
+export const groupDescription = (desc) => {
+  if (!desc) return '';
+  const items = desc.split(', ');
+  const grouped = {};
+  items.forEach(item => {
+    const match = item.match(/^(.*?)\s*\((\d+(?:\.\d+)?)\s*(.*?)\)$/);
+    if (match) {
+      const name = match[1].trim();
+      const qty = parseFloat(match[2]);
+      const uom = match[3].trim();
+      const key = `${name}_${uom}`;
+      if (!grouped[key]) {
+        grouped[key] = { name, qty: 0, uom };
+      }
+      grouped[key].qty += qty;
+    } else {
+      if (!grouped[item]) {
+        grouped[item] = { name: item, qty: null, uom: '' };
+      }
+    }
+  });
+  return Object.values(grouped).map(g => {
+    if (g.qty !== null) {
+      const formattedQty = Number(g.qty.toFixed(3));
+      return `${g.name} (${formattedQty} ${g.uom})`;
+    }
+    return g.name;
+  }).join(', ');
+};
+
+export const groupMaterials = (materials) => {
+  if (!materials) return [];
+  const grouped = {};
+  materials.forEach(m => {
+    const key = m.material_id || m.material_code;
+    if (!grouped[key]) {
+      grouped[key] = {
+        ...m,
+        quantity: 0,
+        number_of_packages: 0,
+        batches: new Set(),
+        package_types: new Set()
+      };
+    }
+    grouped[key].quantity += Number(m.quantity || 0);
+    grouped[key].number_of_packages += Number(m.number_of_packages || 0);
+    if (m.batch_number) grouped[key].batches.add(m.batch_number);
+    if (m.package_type) grouped[key].package_types.add(m.package_type);
+  });
+  
+  return Object.values(grouped).map((m, idx) => ({
+    ...m,
+    key: m.material_code || idx,
+    batch_number: Array.from(m.batches).join(', ') || m.batch_number,
+    package_type: Array.from(m.package_types).join(', ') || m.package_type
+  }));
+};
+
+export const groupIssueItems = (items) => {
+  if (!items) return [];
+  const grouped = {};
+  items.forEach(item => {
+    const key = item.item_id || item.material_id;
+    if (!grouped[key]) {
+      grouped[key] = {
+        ...item,
+        qty: 0,
+        dispatched_quantity: 0,
+        batches: new Set(),
+        serial_numbers: []
+      };
+    }
+    grouped[key].qty += Number(item.qty || item.quantity || 0);
+    grouped[key].dispatched_quantity += Number(item.dispatched_quantity || item.qty || item.quantity || 0);
+    if (item.batch_number) grouped[key].batches.add(item.batch_number);
+    if (item.serial_numbers) {
+      grouped[key].serial_numbers = [...grouped[key].serial_numbers, ...item.serial_numbers];
+    }
+  });
+  
+  return Object.values(grouped).map((item, idx) => ({
+    ...item,
+    key: item.item_id || idx,
+    batch_number: Array.from(item.batches).join(', ') || item.batch_number
+  }));
+};
+
 const FormUpload = ({ value, ...props }) => <Upload {...props} />;
 
 export default function LogisticsDispatch() {
@@ -602,7 +689,7 @@ export default function LogisticsDispatch() {
             <Row gutter={[16, 16]} style={{ marginBottom: '16px', borderBottom: '1px solid #cbd5e1', paddingBottom: '14px' }}>
               <Col xs={24} md={12}>
                 <span style={{ fontSize: '10px', fontFamily: 'monospace', color: '#64748b', display: 'block', textTransform: 'uppercase', marginBottom: '4px' }}>Items Description</span>
-                <span style={{ fontSize: '13px', color: '#475569', fontWeight: 500 }}>{inst.desc || 'SCM Materials'}</span>
+                <span style={{ fontSize: '13px', color: '#475569', fontWeight: 500 }}>{groupDescription(inst.desc) || 'SCM Materials'}</span>
               </Col>
               <Col xs={12} md={6}>
                 <span style={{ fontSize: '10px', fontFamily: 'monospace', color: '#64748b', display: 'block', textTransform: 'uppercase', marginBottom: '4px' }}>Logistics Weight</span>
@@ -776,10 +863,10 @@ export default function LogisticsDispatch() {
                 >
                   {/* BOM list table */}
                   <Table
-                    dataSource={sdo.materials}
+                    dataSource={groupMaterials(sdo.materials)}
                     size="small"
                     pagination={false}
-                    rowKey="id"
+                    rowKey="key"
                     className="logistics-dark-subtable"
                     columns={[
                       { title: 'Code', dataIndex: 'material_code', key: 'code', render: t => <span style={{ fontFamily: 'monospace', color: '#334155' }}>{t}</span> },
@@ -993,7 +1080,7 @@ export default function LogisticsDispatch() {
                   </div>
                 )}
                 <Table
-                  dataSource={selectedIssueItems}
+                  dataSource={groupIssueItems(selectedIssueItems)}
                   size="small"
                   pagination={false}
                   loading={loadingIssue}

@@ -1,4 +1,4 @@
-﻿from datetime import datetime, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 import re
 import asyncio
@@ -975,12 +975,40 @@ async def _category_readable_chain(db: AsyncSession, category_id: int | None) ->
         seen.add(int(current.id))
         chain.append(_category_readable_code(current.name, current.code))
         current = by_id.get(int(current.parent_id)) if current.parent_id else None
-    return list(reversed(chain)) or ["GEN"]
+    
+    # chain is leaf-to-root, reverse it to get root-to-leaf order
+    ordered = list(reversed(chain))
+    
+    # Deduplicate redundant parent prefixes
+    resolved = []
+    prev_code = ""
+    for code in ordered:
+        if prev_code:
+            prefix = f"{prev_code}-"
+            if code.startswith(prefix):
+                relative = code[len(prefix):]
+            elif code == prev_code:
+                relative = ""
+            else:
+                relative = code
+        else:
+            relative = code
+        if relative:
+            resolved.append(relative)
+        prev_code = code
+    return resolved or ["GEN"]
 
 
 async def _item_readable_code(db: AsyncSession, category_id: int | None, item_name: str | None) -> str:
     chain = await _category_readable_chain(db, category_id)
-    return "-".join([*chain, _readable_token(item_name)])
+    raw = (item_name or "").strip()
+    if not raw:
+        item_token = "GEN"
+    else:
+        import unicodedata
+        ascii_value = unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
+        item_token = re.sub(r"[^A-Z0-9 ]+", "", ascii_value.upper()).strip() or "GEN"
+    return "-".join([*chain, item_token])
 
 
 # ==================== ITEM CATEGORIES ====================
@@ -1528,6 +1556,7 @@ async def create_item(
     await ensure_item_uom_category_schema(db)
     data = payload.model_dump()
     kit_components = data.pop("kit_components", None)
+    initial_quantity = data.pop("initial_quantity", None)
     requested_feature_ids = data.pop("feature_ids", None)
     if requested_feature_ids is None:
         requested_feature_ids = [data.get("feature_id")] if data.get("feature_id") is not None else []
@@ -1580,6 +1609,24 @@ async def create_item(
         await db.flush()
         await _replace_item_features(db, int(item.id), validated_feature_ids)
         await _replace_item_kit_components(db, int(item.id), bool(item.is_kit), kit_components, item.item_code)
+        if initial_quantity is not None and Decimal(str(initial_quantity)) > 0:
+            wh_result = await db.execute(select(Warehouse).where(func.lower(Warehouse.name) == "central"))
+            warehouse = wh_result.scalar_one_or_none()
+            if not warehouse:
+                fallback_result = await db.execute(select(Warehouse).where(Warehouse.is_active == True).limit(1))
+                warehouse = fallback_result.scalar_one_or_none()
+            if warehouse:
+                from app.services.stock_service import post_stock_ledger
+                await post_stock_ledger(
+                    db=db,
+                    item_id=item.id,
+                    warehouse_id=warehouse.id,
+                    transaction_type="opening",
+                    qty_in=Decimal(str(initial_quantity)),
+                    rate=item.purchase_price or Decimal("0"),
+                    uom_id=item.primary_uom_id,
+                    created_by=current_user.id
+                )
     except IntegrityError as exc:
         await db.rollback()
         raw = str(getattr(exc, "orig", exc))
@@ -2788,6 +2835,66 @@ async def _role_id_from_external(db: AsyncSession, row: dict) -> int | None:
     return None
 
 
+async def _resolve_parent_position_id(db: AsyncSession, row: dict, stats: dict[str, int]) -> int | None:
+    pos_data = row.get("position")
+    if not pos_data:
+        return None
+    reporting_to = pos_data.get("reporting_to")
+    if not reporting_to or not isinstance(reporting_to, list):
+        return None
+    
+    parent_item = reporting_to[0]
+    if not isinstance(parent_item, dict):
+        return None
+        
+    parent_name = parent_item.get("position_name") or parent_item.get("name")
+    if not parent_name:
+        return None
+        
+    parent_code = parent_item.get("code") or parent_item.get("position_code") or _external_code(parent_name, 100)
+    if not parent_code:
+        return None
+        
+    # Find or create parent position shell
+    parent_pos = (await db.execute(select(Position).where(func.lower(Position.code) == parent_code.lower()))).scalar_one_or_none()
+    
+    parent_role_id = None
+    role_name = parent_item.get("role_name")
+    role_code = parent_item.get("role_code")
+    if role_code:
+        role = (await db.execute(select(Role).where(func.lower(Role.code) == role_code.lower(), Role.is_active == True))).scalar_one_or_none()
+        if role:
+            parent_role_id = role.id
+    if not parent_role_id and role_name:
+        role = (await db.execute(select(Role).where(func.lower(Role.name) == role_name.lower(), Role.is_active == True))).scalar_one_or_none()
+        if role:
+            parent_role_id = role.id
+
+    if not parent_pos:
+        parent_pos = Position(
+            code=parent_code,
+            name=parent_name,
+            role_name=role_name,
+            role_id=parent_role_id,
+            level_name=parent_item.get("level_name"),
+            level_rank=parent_item.get("level_rank"),
+            department=parent_item.get("department"),
+            section=parent_item.get("section"),
+        )
+        db.add(parent_pos)
+        await db.flush()
+        stats["positions_created"] += 1
+    else:
+        if not parent_pos.role_id and parent_role_id:
+            parent_pos.role_id = parent_role_id
+        if not parent_pos.level_name:
+            parent_pos.level_name = parent_item.get("level_name")
+        if not parent_pos.level_rank:
+            parent_pos.level_rank = parent_item.get("level_rank")
+
+    return parent_pos.id
+
+
 async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None):
     position_id = row.get("position_id")
     if position_id:
@@ -2807,6 +2914,7 @@ async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[st
     project_id = await _project_id_from_external(db, row, stats, organization_id)
     office_id = await _office_id_from_external(db, row, stats)
     role_id = await _role_id_from_external(db, row)
+    parent_position_id = await _resolve_parent_position_id(db, row, stats)
     if not position:
         position = Position(
             code=position_code,
@@ -2818,6 +2926,7 @@ async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[st
             section=_external_text(row, "position.section", "section", "section_name", "sectionName", max_len=100),
             project_id=project_id,
             office_id=office_id,
+            parent_position_id=parent_position_id,
         )
         db.add(position)
         await db.flush()
@@ -2831,6 +2940,7 @@ async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[st
         position.section = _external_text(row, "position.section", "section", "section_name", "sectionName") or position.section
         position.project_id = project_id or position.project_id
         position.office_id = office_id or position.office_id
+        position.parent_position_id = parent_position_id or position.parent_position_id
     return position.id
 
 
@@ -2932,13 +3042,18 @@ async def sync_employees_from_external_api(
     skipped = 0
     org_stats = {"projects_created": 0, "offices_created": 0, "positions_created": 0}
     for row in rows:
-        processed, was_created = await _upsert_external_employee(db, row, org_stats, current_user.organization_id)
-        if not processed:
+        try:
+            async with db.begin_nested():
+                processed, was_created = await _upsert_external_employee(db, row, org_stats, current_user.organization_id)
+                if not processed:
+                    skipped += 1
+                elif was_created:
+                    created += 1
+                else:
+                    updated += 1
+        except Exception as exc:
             skipped += 1
-        elif was_created:
-            created += 1
-        else:
-            updated += 1
+            print(f"Transient error syncing row: {exc}")
     await db.flush()
     linked_users = await _link_users_to_employees(db)
     role_links_applied = await _apply_position_roles_to_linked_users(db)
@@ -3631,7 +3746,7 @@ async def bulk_map_vendor_items(
 @router.get("/user-material-mapping/tree")
 async def get_user_material_mapping_tree(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("masters", "view", "users")),
+    current_user: User = Depends(require_permission("masters-user-material-mapping", "view", "masters-user-material-mapping")),
 ):
     await ensure_organization_structure_schema(db)
     await ensure_user_item_permission_schema(db)
@@ -3677,7 +3792,7 @@ async def list_user_material_mappings(
     page_size: int = Query(200, ge=1, le=1000),
     search: str = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("masters", "view", "users")),
+    current_user: User = Depends(require_permission("masters-user-material-mapping", "view", "masters-user-material-mapping")),
 ):
     await ensure_organization_structure_schema(db)
     await ensure_user_item_permission_schema(db)
@@ -3742,7 +3857,7 @@ async def list_user_material_mappings(
 async def bulk_map_user_materials(
     payload: UserItemBulkMapCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("masters", "update", "users")),
+    current_user: User = Depends(require_permission("masters-user-material-mapping", "update", "masters-user-material-mapping")),
 ):
     await ensure_organization_structure_schema(db)
     await ensure_user_item_permission_schema(db)

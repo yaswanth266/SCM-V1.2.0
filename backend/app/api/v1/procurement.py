@@ -403,6 +403,7 @@ async def get_rfq(
         "payment_terms": rfq_row.payment_terms,
         "with_vehicle": rfq_row.with_vehicle,
         "remarks": rfq_row.remarks,
+        "terms_url": rfq_row.terms_url,
         "items": [
             {
                 "id": line.id,
@@ -444,6 +445,7 @@ async def create_rfq(
         payment_terms=payload.payment_terms,
         with_vehicle=payload.with_vehicle,
         remarks=payload.remarks,
+        terms_url=payload.terms_url,
         status="draft",
         created_by=current_user.id,
     )
@@ -485,6 +487,7 @@ async def create_rfq(
             payment_terms=payload.payment_terms,
             with_vehicle=payload.with_vehicle,
             remarks=payload.remarks,
+            terms_url=payload.terms_url,
             status="draft",
             submitted_by=None,
         )

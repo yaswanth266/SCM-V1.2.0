@@ -8,7 +8,9 @@ import {
   InfoCircleOutlined,
   PlayCircleOutlined,
   FileDoneOutlined,
-  EnvironmentOutlined
+  EnvironmentOutlined,
+  EyeOutlined,
+  SendOutlined
 } from '@ant-design/icons';
 import api from '../../config/api';
 import dayjs from 'dayjs';
@@ -178,19 +180,20 @@ export default function LogisticsSO() {
     navigate({ search: searchParams.toString() }, { replace: true });
   };
 
-  const handleAcknowledgeSo = async (values) => {
+  const handleAcknowledgeSo = async (action, values) => {
     try {
       setLoading(true);
       await api.post(`/logistics/so/${selectedSo.id}/acknowledge`, {
-        remarks: values.remarks || 'Acknowledged B2B freight dispatch terms. Vehicles active.',
-        arrival_date: values.arrival_date ? values.arrival_date.format('YYYY-MM-DD') : null
+        action: action,
+        remarks: values.remarks || (action === 'accept' ? 'Accepted B2B freight dispatch terms. Vehicles active.' : 'Rejected B2B freight dispatch terms.'),
+        arrival_date: action === 'accept' && values.arrival_date ? values.arrival_date.format('YYYY-MM-DD') : null
       });
-      message.success("Service Order contract successfully acknowledged!");
+      message.success(`Service Order contract successfully ${action === 'accept' ? 'accepted' : 'rejected'}!`);
       ackForm.resetFields();
       await fetchData();
     } catch (err) {
       console.error(err);
-      message.error("Failed to acknowledge Service Order.");
+      message.error(`Failed to ${action} Service Order.`);
       setLoading(false);
     }
   };
@@ -239,17 +242,20 @@ export default function LogisticsSO() {
   };
 
   const getVehicleStatusIndex = (status) => {
-    if (['SCHEDULED', 'ARRIVED', 'LOADING'].includes(status)) return 0;
-    if (status === 'DISPATCHED') return 1;
-    if (status === 'IN_TRANSIT') return 2;
-    if (status === 'DELIVERED' || status === 'COMPLETED') return 3;
+    if (['SCHEDULED'].includes(status)) return 0;
+    if (['GATE_IN', 'LOADING'].includes(status)) return 1;
+    if (status === 'GATE_OUT') return 2;
+    if (status === 'IN_TRANSIT') return 3;
+    if (status === 'TRANSPORTER_ACKNOWLEDGED') return 4;
+    if (status === 'DELIVERY_ACKNOWLEDGED' || status === 'DELIVERED' || status === 'COMPLETED') return 5;
     return 0;
   };
 
   const getStatusTag = (status) => {
     const colors = {
       'CREATED': 'blue',
-      'ACKNOWLEDGED': 'purple',
+      'ACCEPTED': 'success',
+      'REJECTED': 'error',
       'IN_PROGRESS': 'cyan',
       'COMPLETED': 'success',
       'CANCELLED': 'error'
@@ -260,11 +266,12 @@ export default function LogisticsSO() {
   const getVehicleStatusTag = (status) => {
     const colors = {
       'SCHEDULED': 'default',
-      'ARRIVED': 'cyan',
+      'GATE_IN': 'cyan',
       'LOADING': 'warning',
-      'DISPATCHED': 'purple',
+      'GATE_OUT': 'purple',
       'IN_TRANSIT': 'processing',
-      'DELIVERED': 'success',
+      'TRANSPORTER_ACKNOWLEDGED': 'blue',
+      'DELIVERY_ACKNOWLEDGED': 'success',
       'CANCELLED': 'error'
     };
     return <Tag color={colors[status] || 'default'}>{status}</Tag>;
@@ -297,40 +304,118 @@ export default function LogisticsSO() {
 
       </div>
 
-      <Row gutter={[16, 16]}>
-        {/* Left Column: Service Orders Table */}
-        <Col xs={24} lg={12}>
-          <Card 
-            title={<span style={{ color: '#0f172a', fontSize: '13px', fontWeight: 'bold', fontFamily: 'monospace' }}>B2B FREIGHT CONTRACTS ({visibleSos.length})</span>}
-            style={{ background: '#ffffff', borderColor: '#e2e8f0', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}
-          >
-            <Table
-              dataSource={visibleSos}
-              rowKey="id"
-              className="logistics-dark-table"
-              pagination={{ pageSize: 6 }}
-              onRow={(record) => ({
-                onClick: () => handleSelectSo(record)
-              })}
-              rowClassName={(record) => selectedSo?.id === record.id ? 'logistics-selected-row' : ''}
-              columns={[
-                { title: 'SO Number', dataIndex: 'so_number', key: 'soNum', render: t => <span style={{ fontFamily: 'monospace', color: '#0284c7', fontWeight: 'bold' }}>{t}</span> },
-                { title: 'Carrier Name', dataIndex: 'vendor_name', key: 'carrier', render: t => <span style={{ fontWeight: 'semibold', color: '#0f172a' }}>{t}</span> },
-                { title: 'Order Value', dataIndex: 'total_order_value', key: 'val', render: v => <span style={{ fontFamily: 'monospace' }}>₹{v.toLocaleString()}</span> },
-                { title: 'Status', dataIndex: 'status', key: 'st', render: s => getStatusTag(s) }
-              ]}
-              locale={{ emptyText: <span style={{ color: '#64748b', fontSize: '12px', fontFamily: 'monospace' }}>No service order contracts generated. Ensure an RFQ is awarded.</span> }}
-            />
-          </Card>
-        </Col>
+      {/* Top Control Bar: Service Order Dropdown Selector */}
+      <Card 
+        style={{ 
+          marginBottom: '20px', 
+          background: '#ffffff', 
+          borderColor: '#e2e8f0', 
+          borderRadius: '12px', 
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' 
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+          <span style={{ fontWeight: 600, color: '#0f172a', fontSize: '13px', fontFamily: 'monospace', textTransform: 'uppercase' }}>Select Service Order Contract:</span>
+          <Select
+            showSearch
+            placeholder="Search & select a service order contract..."
+            style={{ width: '100%', maxWidth: '450px' }}
+            value={selectedSo?.id}
+            onChange={(val) => {
+              const matchedSo = sos.find(s => s.id === val);
+              if (matchedSo) {
+                handleSelectSo(matchedSo);
+              } else {
+                setSelectedSo(null);
+                setSelectedVehicle(null);
+              }
+            }}
+            optionFilterProp="label"
+            options={visibleSos.map(s => ({
+              label: `${s.so_number} · ${s.vendor_name} (₹${(s.total_order_value || 0).toLocaleString()})`,
+              value: s.id
+            }))}
+            allowClear
+          />
+        </div>
+      </Card>
 
-        {/* Right Column: Dynamic Tab View */}
-        <Col xs={24} lg={12}>
-          {selectedSo ? (
+      {selectedSo ? (
+        <Row gutter={[16, 16]}>
+          {/* Left Column: Contract Deed Context */}
+          <Col xs={24} lg={10}>
+            <Card
+              style={{ background: '#ffffff', borderColor: '#e2e8f0', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}
+              title={<span style={{ color: '#0f172a', fontSize: '13px', fontWeight: 'bold', fontFamily: 'monospace' }}>CONTRACT DEED: {selectedSo.so_number}</span>}
+            >
+              <Row gutter={[16, 12]} style={{ fontSize: '12px', color: '#334155' }}>
+                <Col span={12}>
+                  <div style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace' }}>Freight Vendor</div>
+                  <strong style={{ color: '#0f172a' }}>{selectedSo.vendor_name}</strong>
+                </Col>
+                <Col span={12}>
+                  <div style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace' }}>Total PO Value</div>
+                  <strong style={{ color: '#059669', fontFamily: 'monospace' }}>₹{(selectedSo.total_order_value || 0).toLocaleString()}</strong>
+                </Col>
+                <Col span={12}>
+                  <div style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace' }}>Advance Terms</div>
+                  <span>{selectedSo.advance_payment_percentage}% Advance ({selectedSo.advance_paid ? 'PAID' : 'PENDING'})</span>
+                </Col>
+                <Col span={12}>
+                  <div style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace' }}>Payment Terms</div>
+                  <span>{selectedSo.payment_terms || '30 days net credit'}</span>
+                </Col>
+                {selectedSo.expected_delivery_date && (
+                  <Col span={24}>
+                    <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '6px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px' }}>
+                      <span style={{ fontSize: '18px' }}>📦</span>
+                      <div>
+                        <div style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace', fontWeight: 600 }}>Expected Delivery Date</div>
+                        <strong style={{ color: '#0f766e', fontSize: '14px', fontFamily: 'monospace' }}>
+                          {dayjs(selectedSo.expected_delivery_date).format('DD MMM YYYY')}
+                        </strong>
+                        <span style={{ color: '#64748b', fontSize: '11px', marginLeft: '8px' }}>
+                          ({dayjs(selectedSo.expected_delivery_date).diff(dayjs(), 'day')} days remaining)
+                        </span>
+                      </div>
+                    </div>
+                  </Col>
+                )}
+                <Col span={24}>
+                  <Divider style={{ borderTop: '1px solid #e2e8f0', margin: '8px 0' }} />
+                  <div style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace', marginBottom: '4px' }}>Acknowledge status</div>
+                  {selectedSo.status === 'ACCEPTED' ? (
+                    <Space direction="vertical" size={4}>
+                      <Tag color="success">✓ Accepted by Transporter ({dayjs(selectedSo.acknowledged_at).format('DD/MM/YYYY HH:mm')})</Tag>
+                      {selectedSo.arrival_date && (
+                        <div style={{ color: '#0f172a', fontWeight: 'semibold', fontSize: '11px', marginTop: '4px' }}>
+                          📅 Expected Arrival: <strong>{dayjs(selectedSo.arrival_date).format('DD/MM/YYYY')}</strong>
+                        </div>
+                      )}
+                    </Space>
+                  ) : selectedSo.status === 'REJECTED' ? (
+                    <Tag color="error">✗ Rejected by Transporter</Tag>
+                  ) : selectedSo.status === 'IN_PROGRESS' || selectedSo.status === 'COMPLETED' ? (
+                    <Space direction="vertical" size={4}>
+                      <Tag color="success">✓ Accepted & Active</Tag>
+                      {selectedSo.arrival_date && (
+                        <div style={{ color: '#0f172a', fontWeight: 'semibold', fontSize: '11px', marginTop: '4px' }}>
+                          📅 Expected Arrival: <strong>{dayjs(selectedSo.arrival_date).format('DD/MM/YYYY')}</strong>
+                        </div>
+                      )}
+                    </Space>
+                  ) : (
+                    <Tag color="warning">⚠️ Awaiting Transporter Decision</Tag>
+                  )}
+                </Col>
+              </Row>
+            </Card>
+          </Col>
+
+          {/* Right Column: Tab-Specific Details / Timelines */}
+          <Col xs={24} lg={14}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               
-
-
               {/* Tab: Gating Checkpoints */}
               {isGatingTab && (
                 <>
@@ -371,12 +456,14 @@ export default function LogisticsSO() {
                           <Steps 
                             size="small" 
                             current={getVehicleStatusIndex(selectedVehicle.vehicle_status)}
-                            style={{ minWidth: '450px' }}
+                            style={{ minWidth: '550px' }}
                           >
-                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Gate Entry</span>} description={<span style={{ fontSize: '9px', color: '#64748b' }}>Check-In</span>} />
-                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Dispatched</span>} description={<span style={{ fontSize: '9px', color: '#64748b' }}>LR/Eway</span>} />
+                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Gate Entry</span>} description={<span style={{ fontSize: '9px', color: '#64748b' }}>GATE_IN</span>} />
+                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Loading</span>} description={<span style={{ fontSize: '9px', color: '#64748b' }}>BAY</span>} />
+                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Gate Out</span>} description={<span style={{ fontSize: '9px', color: '#64748b' }}>GATE_OUT</span>} />
                             <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>In Transit</span>} description={<span style={{ fontSize: '9px', color: '#64748b' }}>Live GPS</span>} />
-                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Acknowledged</span>} description={<span style={{ fontSize: '9px', color: '#64748b' }}>POD Sign</span>} />
+                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Arrived</span>} description={<span style={{ fontSize: '9px', color: '#64748b' }}>Carrier Ack</span>} />
+                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Delivered</span>} description={<span style={{ fontSize: '9px', color: '#64748b' }}>POD Sign</span>} />
                           </Steps>
                         </div>
 
@@ -415,100 +502,180 @@ export default function LogisticsSO() {
                         />
                       ) : (
                         <>
-                          {selectedVehicle.vehicle_status === 'SCHEDULED' && (
-                            <div>
-                              <Form form={checkInForm} layout="vertical" onFinish={async (values) => {
-                                try {
-                                  setLoading(true);
-                                  await api.post(`/logistics/so/vehicle/${selectedVehicle.id}/status`, {
-                                    nextStatus: 'ARRIVED',
-                                    gatePassNumber: values.gatePassNumber || null,
-                                  });
-                                  message.success(`Vehicle checked-in successfully! Status → ARRIVED`);
-                                  checkInForm.resetFields();
-                                  await fetchData();
-                                } catch (err) {
-                                  console.error(err);
-                                  message.error('Failed to check-in vehicle.');
-                                  setLoading(false);
-                                }
-                              }}>
-                                <Form.Item name="gatePassNumber" label="Gate Pass Number" rules={[{ required: true, message: 'Please enter Gate Pass Number!' }]}>
-                                  <Input placeholder={`e.g. GP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`} style={{ fontFamily: 'monospace' }} />
-                                </Form.Item>
-                                <Alert message="This will mark the vehicle as ARRIVED and log the gate entry timestamp." type="info" showIcon style={{ marginBottom: '16px' }} />
-                                <Button type="primary" htmlType="submit" icon={<CheckCircleOutlined />} block loading={loading}>
-                                  Confirm Check-In (Mark as ARRIVED)
-                                </Button>
-                              </Form>
-                            </div>
-                          )}
+                           {selectedVehicle.vehicle_status === 'SCHEDULED' && (
+                             <div>
+                               <Form form={checkInForm} layout="vertical" onFinish={async (values) => {
+                                 try {
+                                   setLoading(true);
+                                   await api.post(`/logistics/so/vehicle/${selectedVehicle.id}/status`, {
+                                     nextStatus: 'GATE_IN',
+                                     gatePassNumber: values.gatePassNumber || null,
+                                   });
+                                   message.success(`Vehicle checked-in successfully! Status → GATE_IN`);
+                                   checkInForm.resetFields();
+                                   await fetchData();
+                                 } catch (err) {
+                                   console.error(err);
+                                   message.error('Failed to check-in vehicle.');
+                                   setLoading(false);
+                                 }
+                               }}>
+                                 <Form.Item name="gatePassNumber" label="Gate Pass Number" rules={[{ required: true, message: 'Please enter Gate Pass Number!' }]}>
+                                   <Input placeholder={`e.g. GP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`} style={{ fontFamily: 'monospace' }} />
+                                 </Form.Item>
+                                 <Alert message="This will mark the vehicle as GATE_IN and log the gate entry timestamp." type="info" showIcon style={{ marginBottom: '16px' }} />
+                                 <Button type="primary" htmlType="submit" icon={<CheckCircleOutlined />} block loading={loading}>
+                                   Confirm Check-In (Mark as GATE_IN)
+                                 </Button>
+                               </Form>
+                             </div>
+                           )}
 
-                          {selectedVehicle.vehicle_status === 'ARRIVED' && (
-                            <div>
-                              <Form form={gatingForm} layout="vertical" onFinish={async (values) => {
-                                await handleGatingSubmit({ ...values, nextStatus: 'DISPATCHED' });
-                              }} initialValues={{
-                                lrNumber: `LR-MUM-${Math.floor(10000 + Math.random() * 90000)}`,
-                                ewayBillNumber: `EW-2026-${Math.floor(100000 + Math.random() * 900000)}`
-                              }}>
-                                <Form.Item name="lrNumber" label="Lorry Receipt (LR) Number" rules={[{ required: true }]}>
-                                  <Input placeholder="E.g. LR-2026-9812" />
-                                </Form.Item>
-                                <Form.Item name="ewayBillNumber" label="E-Way Bill Number" rules={[{ required: true }]}>
-                                  <Input placeholder="E.g. EW-2026-928122" />
-                                </Form.Item>
-                                <Button type="primary" htmlType="submit" icon={<AuditOutlined />} block loading={loading}>
-                                  Complete Loading & Dispatch
-                                </Button>
-                              </Form>
-                            </div>
-                          )}
+                           {selectedVehicle.vehicle_status === 'GATE_IN' && (
+                             <div>
+                               <Form form={gatingForm} layout="vertical" onFinish={async (values) => {
+                                 await handleGatingSubmit({ ...values, nextStatus: 'LOADING' });
+                               }} initialValues={{ loadingBayNumber: 'BAY-M-01' }}>
+                                 <Form.Item name="loadingBayNumber" label="Assign Loading Bay" rules={[{ required: true }]}>
+                                   <Input placeholder="E.g. BAY-M-01" />
+                                 </Form.Item>
+                                 <Button type="primary" htmlType="submit" icon={<AuditOutlined />} block loading={loading}>
+                                   Assign Bay & Start Loading
+                                 </Button>
+                               </Form>
+                             </div>
+                           )}
 
-                          {selectedVehicle.vehicle_status === 'DISPATCHED' && (
-                            <div>
-                              <Alert 
-                                message="Vehicle Dispatched & In Transit" 
-                                description="The vehicle has been successfully loaded and dispatched. Live GPS transit tracking is active."
-                                type="info" 
-                                showIcon 
-                              />
-                            </div>
-                          )}
+                           {selectedVehicle.vehicle_status === 'LOADING' && (
+                             <div>
+                               <Form form={gatingForm} layout="vertical" onFinish={async (values) => {
+                                 await handleGatingSubmit({ ...values, nextStatus: 'GATE_OUT' });
+                               }} initialValues={{
+                                 lrNumber: `LR-MUM-${Math.floor(10000 + Math.random() * 90000)}`,
+                                 ewayBillNumber: `EW-2026-${Math.floor(100000 + Math.random() * 900000)}`
+                               }}>
+                                 <Form.Item name="lrNumber" label="Lorry Receipt (LR) Number" rules={[{ required: true }]}>
+                                   <Input placeholder="E.g. LR-2026-9812" />
+                                 </Form.Item>
+                                 <Form.Item name="ewayBillNumber" label="E-Way Bill Number" rules={[{ required: true }]}>
+                                   <Input placeholder="E.g. EW-2026-928122" />
+                                 </Form.Item>
+                                 <Button type="primary" htmlType="submit" icon={<AuditOutlined />} block loading={loading}>
+                                   Complete Loading & Gate-Out (Generates Outward GP)
+                                 </Button>
+                               </Form>
+                             </div>
+                           )}
 
-                          {selectedVehicle.vehicle_status === 'IN_TRANSIT' && (
-                            <div>
-                              <Alert 
-                                message="Awaiting Delivery Acknowledgment" 
-                                description={
-                                  <div>
-                                    <p>Vehicle is currently in transit. To finalize delivery, verify the consignee receipt, and sign the POD, please go to the Acknowledge Delivery tab.</p>
-                                    <Button type="primary" size="small" style={{ marginTop: '8px' }} onClick={() => navigate(`/logistics/so-acknowledge?soId=${selectedSo.id}&vehicleId=${selectedVehicle.id}`)}>
-                                      Go to Acknowledge Delivery & Sign POD
-                                    </Button>
-                                  </div>
-                                }
-                                type="info" 
-                                showIcon 
-                                style={{ marginBottom: '16px' }}
-                              />
-                            </div>
-                          )}
+                           {selectedVehicle.vehicle_status === 'GATE_OUT' && (
+                             <div>
+                               <Form 
+                                 key={`${selectedVehicle.id}-gateout`}
+                                 layout="vertical" 
+                                 onFinish={async (values) => {
+                                   await handleGatingSubmit({ ...values, nextStatus: 'IN_TRANSIT' });
+                                 }}
+                                 initialValues={{
+                                   gatePassNumber: selectedVehicle.gate_pass_number
+                                 }}
+                               >
+                                 <Form.Item 
+                                   name="gatePassNumber" 
+                                   label={<span style={{ fontWeight: 600, color: '#334155' }}>Gate Pass Out Number</span>}
+                                   tooltip="The Gate Pass associated with this vehicle dispatch. Completing transit simulation transitions the Gate Pass to Gate Pass Out status."
+                                 >
+                                   <Input 
+                                     prefix={<AuditOutlined style={{ color: '#64748b' }} />} 
+                                     disabled 
+                                     style={{ 
+                                       fontFamily: 'monospace', 
+                                       background: '#f8fafc', 
+                                       color: '#0f172a', 
+                                       fontWeight: 600,
+                                       borderColor: '#cbd5e1'
+                                     }} 
+                                   />
+                                 </Form.Item>
 
-                          {(selectedVehicle.vehicle_status === 'DELIVERED' || selectedVehicle.vehicle_status === 'COMPLETED') && (
-                            <Alert
-                              message="✓ Consignment Acknowledged"
-                              description={
-                                <div style={{ fontSize: '12px' }}>
-                                  <p style={{ margin: '4px 0' }}>Vehicle has completed the gating loop and reached the destination successfully.</p>
-                                  {selectedVehicle.pod_received_by && <p style={{ margin: '4px 0' }}>POD Signed By: <strong>{selectedVehicle.pod_received_by}</strong></p>}
-                                  {selectedVehicle.rating_value && <p style={{ margin: '4px 0' }}>Feedback: <Rate disabled defaultValue={selectedVehicle.rating_value} style={{ fontSize: '12px' }} /></p>}
-                                </div>
-                              }
-                              type="success"
-                              showIcon
-                            />
-                          )}
+                                 <Alert 
+                                   message="Ready for Dispatch Transit" 
+                                   description="Loading complete and vehicle cleared to leave the gate. Transition to Transit simulation."
+                                   type="info" 
+                                   showIcon 
+                                   style={{ marginBottom: '16px' }}
+                                 />
+                                 <Button 
+                                   type="primary" 
+                                   htmlType="submit"
+                                   icon={<SendOutlined />} 
+                                   block 
+                                   loading={loading}
+                                   style={{
+                                     background: 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)',
+                                     borderColor: '#4f46e5',
+                                     height: '40px',
+                                     fontWeight: 600,
+                                     borderRadius: '6px',
+                                     boxShadow: '0 4px 6px -1px rgba(79, 70, 229, 0.2)'
+                                   }}
+                                 >
+                                   Start Transit Journey (IN_TRANSIT)
+                                 </Button>
+                               </Form>
+                             </div>
+                           )}
+
+                           {selectedVehicle.vehicle_status === 'IN_TRANSIT' && (
+                             <div>
+                               <Alert 
+                                 message="Awaiting Transporter Arrival" 
+                                 description={
+                                   <div>
+                                     <p>Vehicle is currently in transit. The transporter/driver must report arrival in their Carrier Portal first.</p>
+                                     <p style={{ margin: '4px 0' }}>Or as SCM Coordinator, you can override and report arrival directly:</p>
+                                     <Button type="dashed" size="small" onClick={() => handleGatingSubmit({ nextStatus: 'TRANSPORTER_ACKNOWLEDGED' })}>
+                                       Force Destination Arrival (Mark as Arrived)
+                                     </Button>
+                                   </div>
+                                 }
+                                 type="info" 
+                                 showIcon 
+                               />
+                             </div>
+                           )}
+
+                           {selectedVehicle.vehicle_status === 'TRANSPORTER_ACKNOWLEDGED' && (
+                             <div>
+                               <Alert 
+                                 message="Transporter Acknowledged Destination Arrival" 
+                                 description={
+                                   <div>
+                                     <p>Transporter reported arrival. To finalize delivery, verify the consignee receipt, and sign the POD, please go to the Acknowledge Delivery tab.</p>
+                                     <Button type="primary" size="small" style={{ marginTop: '8px' }} onClick={() => navigate(`/logistics/so-acknowledge?soId=${selectedSo.id}&vehicleId=${selectedVehicle.id}`)}>
+                                       Go to Acknowledge Delivery & Sign POD
+                                     </Button>
+                                   </div>
+                                 }
+                                 type="success" 
+                                 showIcon 
+                               />
+                             </div>
+                           )}
+
+                           {(selectedVehicle.vehicle_status === 'DELIVERY_ACKNOWLEDGED' || selectedVehicle.vehicle_status === 'DELIVERED' || selectedVehicle.vehicle_status === 'COMPLETED') && (
+                             <Alert
+                               message="✓ Consignment Fully Delivered & Acknowledged"
+                               description={
+                                 <div style={{ fontSize: '12px' }}>
+                                   <p style={{ margin: '4px 0' }}>Vehicle has completed the gating loop and reached the destination successfully.</p>
+                                   {selectedVehicle.pod_received_by && <p style={{ margin: '4px 0' }}>POD Signed By: <strong>{selectedVehicle.pod_received_by}</strong></p>}
+                                   {selectedVehicle.rating_value && <p style={{ margin: '4px 0' }}>Feedback: <Rate disabled defaultValue={selectedVehicle.rating_value} style={{ fontSize: '12px' }} /></p>}
+                                 </div>
+                               }
+                               type="success"
+                               showIcon
+                             />
+                           )}
                         </>
                       )}
                     </Card>
@@ -556,12 +723,14 @@ export default function LogisticsSO() {
                           <Steps 
                             size="small" 
                             current={getVehicleStatusIndex(selectedVehicle.vehicle_status)}
-                            style={{ minWidth: '450px' }}
+                            style={{ minWidth: '550px' }}
                           >
                             <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Gate Entry</span>} />
-                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Dispatched</span>} />
+                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Loading</span>} />
+                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Gate Out</span>} />
                             <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>In Transit</span>} />
-                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Acknowledged</span>} />
+                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Arrived</span>} />
+                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Delivered</span>} />
                           </Steps>
                         </div>
 
@@ -684,179 +853,119 @@ export default function LogisticsSO() {
                 </>
               )}
 
-
-
               {/* Tab: Default / Overview tab */}
               {isDefaultTab && (
-                <>
-                  <Card
-                    style={{ background: '#ffffff', borderColor: '#e2e8f0', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}
-                    title={<span style={{ color: '#0f172a', fontSize: '13px', fontWeight: 'bold', fontFamily: 'monospace' }}>CONTRACT DEED: {selectedSo.so_number}</span>}
-                  >
-                    <Row gutter={[16, 12]} style={{ fontSize: '12px', color: '#334155' }}>
-                      <Col xs={12}>
-                        <div style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace' }}>Freight Vendor</div>
-                        <strong style={{ color: '#0f172a' }}>{selectedSo.vendor_name}</strong>
-                      </Col>
-                      <Col xs={12}>
-                        <div style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace' }}>Total PO Value</div>
-                        <strong style={{ color: '#059669', fontFamily: 'monospace' }}>₹{selectedSo.total_order_value.toLocaleString()}</strong>
-                      </Col>
-                      <Col xs={12}>
-                        <div style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace' }}>Advance Terms</div>
-                        <span>{selectedSo.advance_payment_percentage}% Advance ({selectedSo.advance_paid ? 'PAID' : 'PENDING'})</span>
-                      </Col>
-                      <Col xs={12}>
-                        <div style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace' }}>Payment Terms</div>
-                        <span>{selectedSo.payment_terms || '30 days net credit'}</span>
-                      </Col>
-                      {selectedSo.expected_delivery_date && (
-                        <Col xs={24}>
-                          <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: '6px', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <span style={{ fontSize: '18px' }}>📦</span>
-                            <div>
-                              <div style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace', fontWeight: 600 }}>Expected Delivery Date</div>
-                              <strong style={{ color: '#0f766e', fontSize: '14px', fontFamily: 'monospace' }}>
-                                {dayjs(selectedSo.expected_delivery_date).format('DD MMM YYYY')}
-                              </strong>
-                              <span style={{ color: '#64748b', fontSize: '11px', marginLeft: '8px' }}>
-                                ({dayjs(selectedSo.expected_delivery_date).diff(dayjs(), 'day')} days remaining)
-                              </span>
-                            </div>
-                          </div>
-                        </Col>
+                <Card
+                  style={{ background: '#ffffff', borderColor: '#e2e8f0', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}
+                  title={<span style={{ color: '#0f172a', fontSize: '13px', fontWeight: 'bold', fontFamily: 'monospace' }}>VEHICLE ASSIGNMENTS & MILITARY TIMELINE</span>}
+                >
+                  <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '16px' }}>
+                    {selectedSo.vehicles?.map(v => (
+                      <div
+                         key={v.id}
+                         onClick={() => handleSelectVehicle(v)}
+                         style={{
+                           padding: '12px',
+                           background: selectedVehicle?.id === v.id ? '#e0f2fe' : '#f8fafc',
+                           border: selectedVehicle?.id === v.id ? '1px solid #0284c7' : '1px solid #cbd5e1',
+                           borderRadius: '6px',
+                           cursor: 'pointer',
+                           minWidth: '180px',
+                           transition: 'all 0.2s'
+                         }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                          <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#0f172a', fontFamily: 'monospace' }}>
+                            <CarOutlined /> {v.vehicle_registration_no || 'TBD'}
+                          </span>
+                          {v.has_issues && <Tag color="error" style={{ margin: 0 }}>ALERT</Tag>}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>Driver: {v.driver_name}</div>
+                        <div>{getVehicleStatusTag(v.vehicle_status)}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {selectedVehicle ? (
+                    <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
+                      <div style={{ overflowX: 'auto', paddingBottom: '12px', marginBottom: '20px' }}>
+                        <Steps size="small" current={getVehicleStatusIndex(selectedVehicle.vehicle_status)}>
+                          <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Gate Entry</span>} />
+                          <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Dispatched</span>} />
+                          <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>In Transit</span>} />
+                          <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Acknowledged</span>} />
+                        </Steps>
+                      </div>
+
+                      {selectedVehicle.has_issues && (
+                        <Alert
+                          message="🚨 Transit Incident Active"
+                          description={selectedVehicle.issue_description || 'Carrier reported delay in transit.'}
+                          type="error"
+                          showIcon
+                          style={{ marginBottom: '16px' }}
+                        />
                       )}
-                      <Col xs={24}>
-                        <Divider style={{ borderTop: '1px solid #e2e8f0', margin: '8px 0' }} />
-                        <div style={{ color: '#64748b', textTransform: 'uppercase', fontSize: '10px', fontFamily: 'monospace', marginBottom: '4px' }}>Acknowledge status</div>
-                        {selectedSo.acknowledged_by_vendor ? (
-                          <Space direction="vertical" size={4}>
-                            <Tag color="success">✓ Acknowledged by Transporter ({dayjs(selectedSo.acknowledged_at).format('DD/MM/YYYY HH:mm')})</Tag>
-                            {selectedSo.arrival_date && (
-                              <div style={{ color: '#0f172a', fontWeight: 'semibold', fontSize: '11px', marginTop: '4px' }}>
-                                📅 Expected Arrival: <strong>{dayjs(selectedSo.arrival_date).format('DD/MM/YYYY')}</strong>
-                              </div>
-                            )}
-                          </Space>
-                        ) : (
-                          <Tag color="warning">⚠️ Awaiting Transporter Acknowledgment</Tag>
-                        )}
-                      </Col>
-                    </Row>
-                  </Card>
 
-                  <Card
-                    style={{ background: '#ffffff', borderColor: '#e2e8f0', borderRadius: '12px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}
-                    title={<span style={{ color: '#0f172a', fontSize: '13px', fontWeight: 'bold', fontFamily: 'monospace' }}>VEHICLE ASSIGNMENTS & MILITARY TIMELINE</span>}
-                  >
-                    <div style={{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '10px', marginBottom: '16px' }}>
-                      {selectedSo.vehicles?.map(v => (
-                        <div
-                           key={v.id}
-                           onClick={() => handleSelectVehicle(v)}
-                           style={{
-                             padding: '12px',
-                             background: selectedVehicle?.id === v.id ? '#e0f2fe' : '#f8fafc',
-                             border: selectedVehicle?.id === v.id ? '1px solid #0284c7' : '1px solid #cbd5e1',
-                             borderRadius: '6px',
-                             cursor: 'pointer',
-                             minWidth: '180px',
-                             transition: 'all 0.2s'
-                           }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                            <span style={{ fontSize: '13px', fontWeight: 'bold', color: '#0f172a', fontFamily: 'monospace' }}>
-                              <CarOutlined /> {v.vehicle_registration_no || 'TBD'}
-                            </span>
-                            {v.has_issues && <Tag color="error" style={{ margin: 0 }}>ALERT</Tag>}
-                          </div>
-                          <div style={{ fontSize: '11px', color: '#64748b', marginBottom: '8px' }}>Driver: {v.driver_name}</div>
-                          <div>{getVehicleStatusTag(v.vehicle_status)}</div>
+                      {!selectedSo.acknowledged_by_vendor ? (
+                        <Alert
+                          message="Workflow Operations Locked"
+                          description="Gating updates and transit incident filing are locked until the Transporter acknowledges the contract deed."
+                          type="warning"
+                          showIcon
+                          style={{ width: '100%' }}
+                        />
+                      ) : (
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <Button type="primary" onClick={() => navigate(`/logistics/so-gating?soId=${selectedSo.id}&vehicleId=${selectedVehicle.id}`)}>
+                            Go to Checkpoint updates
+                          </Button>
+                          {selectedVehicle.vehicle_status === 'IN_TRANSIT' && activeRole === 'TRANSPORTER' && (
+                            <Tooltip title="Simulate satellite update">
+                              <Button type="dashed" icon={<EnvironmentOutlined />} onClick={async () => {
+                                try {
+                                  setLoading(true);
+                                  await api.post(`/logistics/so/vehicle/${selectedVehicle.id}/status`, { nextStatus: 'IN_TRANSIT' });
+                                  message.success("GPS satellite coordinate feed pinged successfully!");
+                                  await fetchData();
+                                } catch (err) {
+                                  console.error(err);
+                                  message.error("Failed to ping satellite coords.");
+                                  setLoading(false);
+                                }
+                              }}>
+                                Ping GPS Loc
+                              </Button>
+                            </Tooltip>
+                          )}
                         </div>
-                      ))}
+                      )}
                     </div>
-
-                    {selectedVehicle ? (
-                      <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '8px', border: '1px solid #cbd5e1' }}>
-                        <div style={{ overflowX: 'auto', paddingBottom: '12px', marginBottom: '20px' }}>
-                          <Steps size="small" current={getVehicleStatusIndex(selectedVehicle.vehicle_status)}>
-                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Gate Entry</span>} />
-                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Dispatched</span>} />
-                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>In Transit</span>} />
-                            <Step title={<span style={{ color: '#334155', fontSize: '11px', fontWeight: 600 }}>Acknowledged</span>} />
-                          </Steps>
-                        </div>
-
-                        {selectedVehicle.has_issues && (
-                          <Alert
-                            message="🚨 Transit Incident Active"
-                            description={selectedVehicle.issue_description || 'Carrier reported delay in transit.'}
-                            type="error"
-                            showIcon
-                            style={{ marginBottom: '16px' }}
-                          />
-                        )}
-
-                        {!selectedSo.acknowledged_by_vendor ? (
-                          <Alert
-                            message="Workflow Operations Locked"
-                            description="Gating updates and transit incident filing are locked until the Transporter acknowledges the contract deed."
-                            type="warning"
-                            showIcon
-                            style={{ width: '100%' }}
-                          />
-                        ) : (
-                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                            <Button type="primary" onClick={() => navigate(`/logistics/so-gating?soId=${selectedSo.id}&vehicleId=${selectedVehicle.id}`)}>
-                              Go to Checkpoint updates
-                            </Button>
-                            {selectedVehicle.vehicle_status === 'IN_TRANSIT' && activeRole === 'TRANSPORTER' && (
-                              <Tooltip title="Simulate satellite update">
-                                <Button type="dashed" icon={<EnvironmentOutlined />} onClick={async () => {
-                                  try {
-                                    setLoading(true);
-                                    await api.post(`/logistics/so/vehicle/${selectedVehicle.id}/status`, { nextStatus: 'IN_TRANSIT' });
-                                    message.success("GPS satellite coordinate feed pinged successfully!");
-                                    await fetchData();
-                                  } catch (err) {
-                                    console.error(err);
-                                    message.error("Failed to ping satellite coords.");
-                                    setLoading(false);
-                                  }
-                                }}>
-                                  Ping GPS Loc
-                                </Button>
-                              </Tooltip>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div style={{ color: '#64748b', fontSize: '12px', textAlign: 'center', padding: '20px' }}>
-                        Select a vehicle above to monitor gating milestones...
-                      </div>
-                    )}
-                  </Card>
-                </>
+                  ) : (
+                    <div style={{ color: '#64748b', fontSize: '12px', textAlign: 'center', padding: '20px' }}>
+                      Select a vehicle above to monitor gating milestones...
+                    </div>
+                  )}
+                </Card>
               )}
 
             </div>
-          ) : (
-            <div style={{
-              background: '#ffffff',
-              border: '1px solid #cbd5e1',
-              borderRadius: '12px',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
-              padding: '40px',
-              textAlign: 'center',
-              color: '#64748b'
-            }}>
-              <InfoCircleOutlined style={{ fontSize: '32px', marginBottom: '12px', color: '#0284c7' }} />
-              <h4>Select a Service Order contract from the ledger desk to load the live gating milestones.</h4>
-            </div>
-          )}
-        </Col>
-      </Row>
+          </Col>
+        </Row>
+      ) : (
+        <div style={{
+          background: '#ffffff',
+          border: '1px solid #cbd5e1',
+          borderRadius: '12px',
+          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)',
+          padding: '40px',
+          textAlign: 'center',
+          color: '#64748b'
+        }}>
+          <InfoCircleOutlined style={{ fontSize: '32px', marginBottom: '12px', color: '#0284c7' }} />
+          <h4>Select a Service Order contract from the dropdown select at the top to load the live gating milestones.</h4>
+        </div>
+      )}
 
       {/* Custom Styles */}
       <style>{`

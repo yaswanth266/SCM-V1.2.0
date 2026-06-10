@@ -403,6 +403,7 @@ class ItemCreate(BaseModel):
     valuation_method: str = "fifo"
     is_active: bool = True
     kit_components: Optional[List[ItemKitComponentCreate]] = None
+    initial_quantity: Optional[Decimal] = None
 
     @field_validator("item_code")
     @classmethod

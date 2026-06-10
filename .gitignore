@@ -75,3 +75,7 @@ pnpm-debug.log*
 
 # Vite runtime/cache config
 frontend/.vite
+
+# Run-time local app data directory
+backend/appDataDir/
+

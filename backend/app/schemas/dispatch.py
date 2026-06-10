@@ -24,6 +24,8 @@ class DispatchItemResponse(DispatchItemBase):
     material_name: Optional[str] = None
     material_code: Optional[str] = None
     serial_numbers: Optional[List[str]] = None
+    acknowledged_qty: Optional[Decimal] = None
+    remarks: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -57,7 +59,17 @@ class DispatchResponse(DispatchHeaderBase):
     delivery_acknowledged: bool = False
     delivery_acknowledged_at: Optional[Any] = None
     delivery_acknowledged_by_name: Optional[str] = None
+    delivery_acknowledged_by_designation: Optional[str] = None
+    delivery_acknowledged_by_phone: Optional[str] = None
+    delivery_acknowledged_by_email: Optional[str] = None
+    delivery_acknowledged_by_department: Optional[str] = None
+    delivery_acknowledged_by_employee_code: Optional[str] = None
     receiver_signature_url: Optional[str] = None
+    receiver_id_proof_type: Optional[str] = None
+    receiver_id_proof_number: Optional[str] = None
+    actual_delivery_location: Optional[str] = None
+    delivery_location_latitude: Optional[Decimal] = None
+    delivery_location_longitude: Optional[Decimal] = None
     delivery_photo_urls: Optional[Any] = None
     goods_condition_on_delivery: Optional[str] = None
     delivery_remarks: Optional[str] = None

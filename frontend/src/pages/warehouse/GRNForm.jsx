@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Button, Form, Input, InputNumber, Select, Space, DatePicker,
-  message, Row, Col, Table, Card, Descriptions, Divider,
-  Typography, Tooltip, Tag, Spin, Popconfirm, Alert, Badge,
+  Row, Col, Table, Card, Descriptions, Divider,
+  Typography, Tooltip, Tag, Spin, Popconfirm, Alert, Badge, App,
 } from 'antd';
 import {
   PlusOutlined, ArrowLeftOutlined, SaveOutlined,
@@ -51,6 +51,8 @@ const GRN_STATUS_FLOW = [
 ];
 
 const GRNForm = () => {
+  const { message } = App.useApp();
+  const [errorAlert, setErrorAlert] = useState(null);
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -62,11 +64,12 @@ const GRNForm = () => {
   const queryParams = new URLSearchParams(location.search);
   const queryPoId = queryParams.get('po_id');
 
+  const isEdit = new URLSearchParams(location.search).get('edit') === 'true';
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(!isNew);
   const [submitting, setSubmitting] = useState(false);
   const [grn, setGrn] = useState(null);
-  const [editMode, setEditMode] = useState(isNew);
+  const [editMode, setEditMode] = useState(isNew || isEdit);
 
   // Items
   const [grnItems, setGrnItems] = useState([]);
@@ -522,6 +525,7 @@ const GRNForm = () => {
   // --- Submit ---
   const handleSubmit = async (submitAction = 'draft') => {
     try {
+      setErrorAlert(null);
       // For non-PO receipt types, clear po_id from form store so it doesn't
       // trigger validation errors (Ant Design can retain hidden field state)
       if (receiptType !== 'inward_based') {
@@ -565,6 +569,45 @@ const GRNForm = () => {
           return;
         }
       }
+      // Validate each item has batch_number (mandatory for every item)
+      const missingBatchItems = validItems.filter((item) => !item.batch_number || !item.batch_number.trim());
+      if (missingBatchItems.length > 0) {
+        const itemNames = missingBatchItems.map((item) => `"${item.item_name || item.item_code || 'Unknown'}"`).join(', ');
+        const errMsg = `Batch number is required for the following item(s): ${itemNames}`;
+        setErrorAlert(errMsg);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+
+      // ─── Client-side date & rate validation (mirrors backend Pydantic validators) ───
+      const today = dayjs().startOf('day');
+      const dateErrors = [];
+      validItems.forEach((item, idx) => {
+        const label = item.item_name || item.item_code || `Row ${idx + 1}`;
+        const mfg = item.manufacturing_date ? dayjs(item.manufacturing_date) : null;
+        const exp = item.expiry_date ? dayjs(item.expiry_date) : null;
+        const rate = item.rate ?? 0;
+
+        if (rate < 0) {
+          dateErrors.push(`"${label}": Rate cannot be negative`);
+        }
+        if (exp && exp.isBefore(today)) {
+          dateErrors.push(`"${label}": Expiry date (${exp.format('DD-MM-YYYY')}) cannot be in the past`);
+        }
+        if (mfg && mfg.isAfter(today.add(1, 'day'))) {
+          dateErrors.push(`"${label}": Manufacturing date (${mfg.format('DD-MM-YYYY')}) cannot be more than 1 day in the future`);
+        }
+        if (mfg && exp && mfg.isAfter(exp)) {
+          dateErrors.push(`"${label}": Manufacturing date must be before expiry date`);
+        }
+      });
+      if (dateErrors.length > 0) {
+        setErrorAlert(dateErrors.join('\n'));
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        return;
+      }
+      // ──────────────────────────────────────────────────────────────────────────────
+
       setSubmitting(true);
 
       const payload = {
@@ -583,21 +626,23 @@ const GRNForm = () => {
         items: validItems.map((item) => ({
           item_id: item.item_id,
           po_item_id: item.po_item_id || null,
-          ordered_qty: item.ordered_qty || 0,
-          received_qty: item.received_qty,
-          accepted_qty: item.accepted_qty || item.received_qty || 0,
-          rejected_qty: item.rejected_qty || 0,
-          damaged_qty: item.damaged_qty || 0,
+          ordered_qty: Number(item.ordered_qty) || 0,
+          received_qty: Number(item.received_qty) || 0,
+          accepted_qty: Number(item.accepted_qty) || Number(item.received_qty) || 0,
+          rejected_qty: Number(item.rejected_qty) || 0,
+          damaged_qty: Number(item.damaged_qty) || 0,
           uom_id: item.uom_id,
-          batch_number: item.batch_number || null,
+          batch_number: item.batch_number && item.batch_number.trim() ? item.batch_number.trim() : null,
           manufacturing_date: item.manufacturing_date ? formatDateForAPI(item.manufacturing_date) : null,
           expiry_date: item.expiry_date ? formatDateForAPI(item.expiry_date) : null,
-          rate: item.rate || 0,
+          rate: Number(item.rate) || 0,
           remarks: item.remarks || null,
         })),
       };
 
       if (isNew) {
+        // Debug: log the payload being sent
+        console.log('[GRNForm] Submitting payload:', JSON.stringify(payload, null, 2));
         const res = await api.post('/warehouse/grn', payload);
         message.success('GRN created successfully');
         const newId = res.data.id || res.data.data?.id;
@@ -607,6 +652,7 @@ const GRNForm = () => {
           navigate('/warehouse/grn');
         }
       } else {
+        console.log('[GRNForm] Updating payload:', JSON.stringify(payload, null, 2));
         await api.put(`/warehouse/grn/${id}`, payload);
         message.success('GRN updated successfully');
         setEditMode(false);
@@ -614,7 +660,13 @@ const GRNForm = () => {
       }
     } catch (err) {
       if (err.errorFields) return;
-      message.error(getErrorMessage(err));
+      // Log full error for debugging
+      if (err?.response) {
+        console.error('[GRNForm] API error:', err.response.status, JSON.stringify(err.response.data, null, 2));
+      }
+      const errMsg = getErrorMessage(err);
+      setErrorAlert(errMsg);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     } finally {
       setSubmitting(false);
     }
@@ -937,7 +989,9 @@ const GRNForm = () => {
       ),
     },
     {
-      title: 'Batch No', dataIndex: 'batch_number', width: 100,
+      title: <span>Batch No <span style={{ color: '#ff4d4f' }}>*</span></span>,
+      dataIndex: 'batch_number',
+      width: 100,
       render: (val, record) => (
         <Input
           value={val}
@@ -1023,6 +1077,36 @@ const GRNForm = () => {
           {!isNew && <Button onClick={() => setEditMode(false)}>Cancel Edit</Button>}
         </Space>
       </PageHeader>
+
+      {errorAlert && (
+        <div style={{
+          position: 'sticky',
+          top: 16,
+          zIndex: 1000,
+          marginBottom: 16,
+          boxShadow: '0 4px 12px rgba(255, 77, 79, 0.15)',
+          borderRadius: '8px'
+        }}>
+          <Alert
+            message="Validation Error — Please fix the following before saving"
+            description={
+              typeof errorAlert === 'string' && errorAlert.includes('\n')
+                ? (
+                  <ul style={{ margin: '4px 0 0 0', paddingLeft: 20 }}>
+                    {errorAlert.split('\n').map((line, i) => (
+                      <li key={i}>{line}</li>
+                    ))}
+                  </ul>
+                )
+                : errorAlert
+            }
+            type="error"
+            showIcon
+            closable
+            onClose={() => setErrorAlert(null)}
+          />
+        </div>
+      )}
 
       <Card>
         <Form form={form} layout="vertical">

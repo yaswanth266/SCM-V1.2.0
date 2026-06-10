@@ -1038,6 +1038,31 @@ async def acknowledge_delivery(
             detail=f"Cannot acknowledge dispatch in '{d.status}' status",
         )
 
+    # Check if the dispatch is synced from an MDO/SO and verify transporter has reported arrival
+    if d.dispatch_number.startswith("MDO-") or d.dispatch_number.startswith("DO-"):
+        from app.models.logistics import LogisticsMainDispatchOrder, LogisticsServiceOrder, LogisticsServiceOrderVehicle
+        res_mdo = await db.execute(
+            select(LogisticsMainDispatchOrder).where(LogisticsMainDispatchOrder.mdo_number == d.dispatch_number)
+        )
+        mdo = res_mdo.scalar_one_or_none()
+        if mdo:
+            res_so = await db.execute(
+                select(LogisticsServiceOrder).where(LogisticsServiceOrder.mdo_id == mdo.id)
+            )
+            so = res_so.scalars().first()
+            if so:
+                res_v = await db.execute(
+                    select(LogisticsServiceOrderVehicle).where(LogisticsServiceOrderVehicle.so_id == so.id)
+                )
+                vehicles = res_v.scalars().all()
+                for veh in vehicles:
+                    veh_status = veh.vehicle_status.name if hasattr(veh.vehicle_status, "name") else veh.vehicle_status
+                    if veh_status not in ("TRANSPORTER_ACKNOWLEDGED", "DELIVERY_ACKNOWLEDGED"):
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Cannot acknowledge delivery: Transporter has not reported arrival at the destination for vehicle {veh.vehicle_registration_no} (current status: {veh_status})"
+                        )
+
     # Generate unique acknowledgement number (e.g., BHSPL/26-27/ACK/00001) race-safely via SCM sequence service
     from app.services.fiscal_numbering import generate_number_v2
     ack_number = await generate_number_v2(db, module="warehouse", document_type="dispatch_acknowledgement")
@@ -1097,6 +1122,45 @@ async def acknowledge_delivery(
     db.add(new_ack)
     await db.flush()
 
+    # Pre-fetch and match DispatchOrderItems with MaterialIssueItems sequentially to preserve split lineage
+    do_to_mi_map = {}  # dispatch_item_id -> (batch_id, bin_id)
+    
+    from app.models.dispatch import DispatchOrderItem
+    doi_res = await db.execute(
+        select(DispatchOrderItem)
+        .where(DispatchOrderItem.dispatch_order_id == dispatch_id)
+        .order_by(DispatchOrderItem.id.asc())
+    )
+    doi_list = doi_res.scalars().all()
+    
+    mi_id = d.material_issue_id
+    mi_items = []
+    if mi_id:
+        from app.models.issue import MaterialIssueItem
+        mi_items_res = await db.execute(
+            select(MaterialIssueItem)
+            .where(MaterialIssueItem.issue_id == mi_id)
+            .order_by(MaterialIssueItem.id.asc())
+        )
+        mi_items = list(mi_items_res.scalars().all())
+
+    # Map them sequentially
+    used_mi_item_ids = set()
+    for doi in doi_list:
+        matched_mi_item = None
+        for mi_item in mi_items:
+            if mi_item.item_id == doi.material_id and mi_item.id not in used_mi_item_ids:
+                matched_mi_item = mi_item
+                used_mi_item_ids.add(mi_item.id)
+                break
+        
+        # Fallback to the first matching one
+        if not matched_mi_item:
+            matched_mi_item = next((mi_item for mi_item in mi_items if mi_item.item_id == doi.material_id), None)
+            
+        if matched_mi_item:
+            do_to_mi_map[doi.id] = (matched_mi_item.batch_id, matched_mi_item.bin_id)
+
     # 3. Create acknowledgement items & post stock balances recursively
     for it in payload.items:
         new_item = DispatchAcknowledgementItem(
@@ -1131,13 +1195,16 @@ async def acknowledge_delivery(
                 batch_id = None
                 bin_id = None
                 
-                # Fetch original batch and bin from linked MaterialIssueItem to preserve SCM lineage
-                mi_id = d.material_issue_id
-                if mi_id:
+                # Fetch mapped batch and bin from our pre-matched map
+                if it.dispatch_item_id in do_to_mi_map:
+                    batch_id, bin_id = do_to_mi_map[it.dispatch_item_id]
+                
+                # Fallback to fetching original batch and bin from linked MaterialIssueItem to preserve SCM lineage
+                if not batch_id and d.material_issue_id:
                     from app.models.issue import MaterialIssueItem
                     mi_item_res = await db.execute(
                         select(MaterialIssueItem).where(
-                            MaterialIssueItem.issue_id == mi_id,
+                            MaterialIssueItem.issue_id == d.material_issue_id,
                             MaterialIssueItem.item_id == it.material_id
                         ).limit(1)
                     )
@@ -1236,7 +1303,7 @@ async def acknowledge_delivery(
     # 7. Update status of LogisticsMainDispatchOrder if this is synced from MDO
     if d.dispatch_number.startswith("MDO-") or d.dispatch_number.startswith("DO-"):
         try:
-            from app.models.logistics import LogisticsMainDispatchOrder
+            from app.models.logistics import LogisticsMainDispatchOrder, LogisticsServiceOrder, LogisticsServiceOrderVehicle
             res_mdo = await db.execute(
                 select(LogisticsMainDispatchOrder).where(LogisticsMainDispatchOrder.mdo_number == d.dispatch_number)
             )
@@ -1244,7 +1311,31 @@ async def acknowledge_delivery(
             if mdo:
                 mdo.status = "ACKNOWLEDGED"
                 db.add(mdo)
-                
+
+                # Update Service Order and vehicles
+                res_so = await db.execute(
+                    select(LogisticsServiceOrder).where(LogisticsServiceOrder.mdo_id == mdo.id)
+                )
+                so = res_so.scalars().first()
+                if so:
+                    so.status = "COMPLETED"
+                    so.completed_at = datetime.now(timezone.utc)
+                    db.add(so)
+
+                    res_v = await db.execute(
+                        select(LogisticsServiceOrderVehicle).where(LogisticsServiceOrderVehicle.so_id == so.id)
+                    )
+                    vehicles = res_v.scalars().all()
+                    for veh in vehicles:
+                        veh.vehicle_status = "DELIVERY_ACKNOWLEDGED"
+                        veh.actual_delivery_datetime = datetime.now(timezone.utc)
+                        veh.pod_received = True
+                        veh.pod_received_at = datetime.now(timezone.utc)
+                        veh.pod_received_by = payload.acknowledged_by_name
+                        veh.pod_document_url = payload.receiver_signature_url
+                        veh.feedback = payload.discrepancy_description or "Delivered and acknowledged successfully."
+                        db.add(veh)
+
                 # Trigger auto acknowledgement merge!
                 from app.services.scm_integration import auto_acknowledge_scm_dispatch
                 await auto_acknowledge_scm_dispatch(db, mdo_id=mdo.id, current_user_id=current_user.id)

@@ -475,6 +475,20 @@ export default function SupplierPortal() {
   /* ── RFQ Table ── */
   const expandedRender = (record) => (
     <div style={{ padding: '0 16px 16px' }}>
+      {record.terms_url && (
+        <div style={{ marginBottom: 16, padding: '12px 16px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Space>
+            <FileTextOutlined style={{ color: '#0284c7', fontSize: '18px' }} />
+            <div>
+              <Text strong style={{ color: '#0369a1', display: 'block' }}>Buyer's Terms &amp; Conditions Document</Text>
+              <Text type="secondary" style={{ fontSize: '12px' }}>Please review the terms and conditions before submitting your quote.</Text>
+            </div>
+          </Space>
+          <Button type="primary" size="small" icon={<FileTextOutlined />} href={record.terms_url} target="_blank" download>
+            Download Document
+          </Button>
+        </div>
+      )}
       <Text strong style={{ color: '#475569', fontSize: '12px' }}>REQUESTED ITEMS</Text>
       <Table
         size="small"
@@ -1268,6 +1282,23 @@ export default function SupplierPortal() {
         styles={{ body: { padding: '16px 24px 8px' } }}
       >
         <Form form={quoteForm} layout="vertical" onFinish={handleSubmitQuote}>
+          {selectedRfq?.terms_url && (
+            <Alert
+              message={
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                  <span>
+                    <Text strong>Terms &amp; Conditions Document:</Text> Review the buyer's terms and specifications.
+                  </span>
+                  <Button type="link" size="small" icon={<FileTextOutlined />} href={selectedRfq.terms_url} target="_blank" download style={{ padding: 0 }}>
+                    Download Document
+                  </Button>
+                </div>
+              }
+              type="info"
+              showIcon
+              style={{ marginBottom: 16 }}
+            />
+          )}
           {/* Item pricing table */}
           {selectedRfq && <QuoteItemsForm rfq={selectedRfq} form={quoteForm} disabled={isQuoteViewOnly} />}
 

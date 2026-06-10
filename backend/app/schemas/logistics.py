@@ -511,6 +511,7 @@ class ServiceOrderResponse(BaseModel):
         from_attributes = True
 
 class SoAcknowledge(BaseModel):
+    action: Optional[str] = "accept"
     remarks: Optional[str] = None
     arrival_date: Optional[str] = None
 

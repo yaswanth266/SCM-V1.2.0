@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
-  Button, Drawer, Form, Input, InputNumber, Select, Switch, Space, Tabs,
+  Button, Form, Input, InputNumber, Select, Switch, Space, Tabs,
   Popconfirm, App as AntApp, Row, Col, Rate, Table, Card, Descriptions, Tag,
   Spin, Empty, Modal, Tooltip, Typography, Alert,
 } from 'antd';
@@ -61,26 +61,8 @@ const filterMaterialSupplierVendors = (items) => items.filter(isMaterialSupplier
 
 const Vendors = () => {
   const { message } = AntApp.useApp();
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editingVendor, setEditingVendor] = useState(null);
-  const [form] = Form.useForm();
-  const [submitting, setSubmitting] = useState(false);
+  const navigate = useNavigate();
   const [refreshKey, setRefreshKey] = useState(0);
-  const [formErrors, setFormErrors] = useState([]);
-
-  const hasTabErrors = (tabKey) => {
-    const tabFields = {
-      basic: ['vendor_code', 'name', 'contact_person', 'email', 'phone', 'alt_phone', 'status'],
-      address: ['address_line1', 'address_line2', 'city', 'state', 'pincode', 'country'],
-      tax_bank: ['gst_number', 'pan_number', 'bank_name', 'bank_account', 'bank_ifsc'],
-      terms: ['payment_terms_days', 'credit_limit', 'vendor_type_ids', 'vendor_category_id', 'is_transport_vendor']
-    };
-    const fieldsWithError = formErrors
-      .filter(f => f.errors && f.errors.length > 0)
-      .map(f => Array.isArray(f.name) ? f.name[0] : f.name);
-    
-    return fieldsWithError.some(fieldName => tabFields[tabKey]?.includes(fieldName));
-  };
   const [filterType, setFilterType] = useState(undefined);
   const [filterCategory, setFilterCategory] = useState(undefined);
   const [filterCity, setFilterCity] = useState(undefined);
@@ -97,16 +79,7 @@ const Vendors = () => {
   const [vendorCategoryForm] = Form.useForm();
   const [vendorCategorySubmitting, setVendorCategorySubmitting] = useState(false);
 
-  // Detail view state
-  const [detailVendor, setDetailVendor] = useState(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailTab, setDetailTab] = useState('info');
-  const [vendorItems, setVendorItems] = useState([]);
-  const [vendorItemHistory, setVendorItemHistory] = useState([]);
-  const [vendorContracts, setVendorContracts] = useState([]);
-  const [vendorRatings, setVendorRatings] = useState([]);
-  const [vendorPOs, setVendorPOs] = useState([]);
-  const [detailDataLoading, setDetailDataLoading] = useState(false);
+
 
   // Supplier login management state
   const [supplierLogins, setSupplierLogins] = useState([]);
@@ -283,23 +256,11 @@ const Vendors = () => {
   );
 
   const handleAdd = () => {
-    setEditingVendor(null);
-    form.resetFields();
-    setFormErrors([]);
-    form.setFieldsValue({ vendor_code: '', status: 'active', is_transport_vendor: false, country: 'India', vendor_type_ids: [], vendor_category_id: undefined });
-    setDrawerOpen(true);
+    navigate('/masters/vendors/new');
   };
 
   const handleEdit = (record) => {
-    setEditingVendor(record);
-    setFormErrors([]);
-    form.setFieldsValue({
-      ...record,
-      vendor_type_ids: record.vendor_type_ids || [],
-      vendor_type_id: record.vendor_type_id || undefined,
-      vendor_category_id: record.vendor_category_id || undefined,
-    });
-    setDrawerOpen(true);
+    navigate(`/masters/vendors/${record.id}/edit`);
   };
 
   const handleDelete = async (id) => {
@@ -309,57 +270,6 @@ const Vendors = () => {
       setRefreshKey((k) => k + 1);
     } catch (err) {
       message.error(getErrorMessage(err));
-    }
-  };
-
-  const handleSubmit = async () => {
-    try {
-      const values = await form.validateFields();
-      const { status, ...rest } = values;
-      const vendorTypeIds = rest.vendor_type_ids || [];
-      const selectedPrimary = vendorTypeIds[0] || rest.vendor_type_id;
-      const selectedType = vendorTypes.find((t) => t.id === selectedPrimary);
-      const cleanText = (value) => {
-        if (typeof value !== 'string') return value ?? null;
-        const trimmed = value.trim();
-        return trimmed ? trimmed : null;
-      };
-      const payload = {
-        vendor_code: cleanText(rest.vendor_code),
-        name: cleanText(rest.name),
-        payment_terms_days: rest.payment_terms_days ?? null,
-        credit_limit: rest.credit_limit ?? null,
-        drug_license_expiry: rest.drug_license_expiry ?? null,
-        vendor_type_id: selectedPrimary,
-        vendor_type_ids: vendorTypeIds,
-        vendor_type: legacyVendorType(selectedType || rest.vendor_type),
-        vendor_category_id: rest.vendor_category_id || null,
-        is_active: status ? status !== 'inactive' : rest.is_active,
-        is_transport_vendor: !!rest.is_transport_vendor,
-      };
-      VENDOR_TEXT_FIELDS.forEach((field) => {
-        payload[field] = cleanText(rest[field]);
-      });
-      setSubmitting(true);
-      if (editingVendor) {
-        await api.put(`/masters/vendors/${editingVendor.id}`, payload);
-        message.success('Vendor updated successfully');
-      } else {
-        await api.post('/masters/vendors', payload);
-        message.success('Vendor created successfully');
-      }
-      setDrawerOpen(false);
-      form.resetFields();
-      setEditingVendor(null);
-      setRefreshKey((k) => k + 1);
-    } catch (err) {
-      if (err.errorFields) {
-        handleFormValidationFailed(err);
-        return;
-      }
-      message.error(getErrorMessage(err));
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -467,52 +377,7 @@ const Vendors = () => {
     }
   };
 
-  const handleViewVendor = async (record) => {
-    setDetailLoading(true);
-    setDetailVendor(null);
-    setDetailTab('info');
-    try {
-      const res = await api.get(`/masters/vendors/${record.id}`);
-      setDetailVendor(res.data);
-    } catch (err) {
-      message.error(getErrorMessage(err));
-    } finally {
-      setDetailLoading(false);
-    }
-  };
 
-  useEffect(() => {
-    if (detailVendor) {
-      fetchDetailData(detailTab);
-    }
-  }, [detailTab, detailVendor]);
-
-  const fetchDetailData = async (tab) => {
-    if (!detailVendor) return;
-    setDetailDataLoading(true);
-    try {
-      if (tab === 'items') {
-        const res = await api.get(`/masters/vendors/${detailVendor.id}/items`, { params: { page_size: 200 } });
-        setVendorItems((res.data.items || res.data.data || res.data || []));
-      } else if (tab === 'item_history') {
-        const res = await api.get(`/masters/vendors/${detailVendor.id}/items/history`, { params: { page_size: 200 } });
-        setVendorItemHistory((res.data.items || res.data.data || res.data || []));
-      } else if (tab === 'contracts') {
-        const res = await api.get(`/masters/vendors/${detailVendor.id}/contracts`, { params: { page_size: 100 } });
-        setVendorContracts((res.data.items || res.data.data || res.data || []));
-      } else if (tab === 'ratings') {
-        const res = await api.get(`/masters/vendors/${detailVendor.id}/ratings`, { params: { page_size: 100 } });
-        setVendorRatings((res.data.items || res.data.data || res.data || []));
-      } else if (tab === 'po_history') {
-        const res = await api.get(`/masters/vendors/${detailVendor.id}/purchase-orders`, { params: { page_size: 100 } });
-        setVendorPOs((res.data.items || res.data.data || res.data || []));
-      }
-    } catch {
-      // silent
-    } finally {
-      setDetailDataLoading(false);
-    }
-  };
 
   const handleExport = async () => {
     try {
@@ -577,7 +442,7 @@ const Vendors = () => {
       sorter: true,
       fixed: 'left',
       render: (text, record) => (
-        <a onClick={() => handleViewVendor(record)}>{text}</a>
+        <a onClick={() => navigate(`/masters/vendors/${record.id}`)}>{text}</a>
       ),
     },
     { title: 'Name', dataIndex: 'name', key: 'name', width: 200, sorter: true, ellipsis: true },
@@ -662,7 +527,7 @@ const Vendors = () => {
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
-          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => handleViewVendor(record)} />
+          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/masters/vendors/${record.id}`)} />
           <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(record)} />
           {isMaterialSupplierVendor(record) && (
             (record.has_login || supplierLoginVendorIds.has(Number(record.id))) ? (
@@ -745,169 +610,7 @@ const Vendors = () => {
     </Space>
   );
 
-  // Vendor detail view
-  if (detailVendor) {
-    return (
-      <div>
-        <PageHeader title={`${detailVendor.vendor_code} - ${detailVendor.name}`} subtitle="Vendor Detail">
-          <Button icon={<ArrowLeftOutlined />} onClick={() => setDetailVendor(null)}>
-            Back to List
-          </Button>
-        </PageHeader>
-        <Card>
-          <Tabs
-            activeKey={detailTab}
-            onChange={setDetailTab}
-            items={[
-              {
-                key: 'info',
-                label: 'Info',
-                children: (
-                  <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
-                    <Descriptions.Item label="Vendor Code">{detailVendor.vendor_code}</Descriptions.Item>
-                    <Descriptions.Item label="Name">{detailVendor.name}</Descriptions.Item>
-                    <Descriptions.Item label="Contact Person">{detailVendor.contact_person || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="Email">{detailVendor.email || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="Phone">{detailVendor.phone || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="Alt Phone">{detailVendor.alt_phone || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="Address" span={2}>{[detailVendor.address_line1, detailVendor.address_line2].filter(Boolean).join(', ') || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="City">{detailVendor.city || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="State">{detailVendor.state || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="Pincode">{detailVendor.pincode || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="Country">{detailVendor.country || 'India'}</Descriptions.Item>
-                    <Descriptions.Item label="GST Number">{detailVendor.gst_number || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="PAN">{detailVendor.pan_number || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="Bank">{detailVendor.bank_name || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="Account No">{detailVendor.bank_account || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="IFSC">{detailVendor.bank_ifsc || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="Vendor Type">
-                      {(detailVendor.vendor_types || []).length
-                        ? <Space size={4} wrap>{detailVendor.vendor_types.map((t) => <Tag key={t.id}>{t.name}</Tag>)}</Space>
-                        : detailVendor.vendor_type_name || detailVendor.vendor_type || '-'}
-                    </Descriptions.Item>
-                    <Descriptions.Item label="Vendor Category">{detailVendor.vendor_category_name || detailVendor.vendor_category?.name || '-'}</Descriptions.Item>
-                    <Descriptions.Item label="Transport Vendor">{detailVendor.is_transport_vendor ? 'Yes' : 'No'}</Descriptions.Item>
-                    <Descriptions.Item label="Payment Terms">{detailVendor.payment_terms_days ? `${detailVendor.payment_terms_days} days` : '-'}</Descriptions.Item>
-                    <Descriptions.Item label="Credit Limit">{formatCurrency(detailVendor.credit_limit)}</Descriptions.Item>
-                    <Descriptions.Item label="Rating"><Rate disabled allowHalf value={detailVendor.rating || 0} /></Descriptions.Item>
-                    <Descriptions.Item label="Status"><StatusTag status={detailVendor.status} /></Descriptions.Item>
-                  </Descriptions>
-                ),
-              },
-              {
-                key: 'items',
-                label: 'Items Supplied',
-                children: (
-                  <Table
-                    dataSource={vendorItems}
-                    loading={detailDataLoading}
-                    rowKey={(r) => r.id || r.item_id}
-                    size="small"
-                    pagination={{ pageSize: 20, showSizeChanger: true }}
-                    scroll={{ x: 'max-content' }}
-                    columns={[
-                      { title: 'Item Code', dataIndex: ['item', 'item_code'], key: 'code', render: (t, r) => t || r.item_code || '-' },
-                      { title: 'Item Name', dataIndex: ['item', 'name'], key: 'name', render: (t, r) => t || r.item_name || '-' },
-                      { title: 'Lead Time', dataIndex: 'lead_time_days', key: 'lt', align: 'right', render: (v) => v ? `${v} days` : '-' },
-                      { title: 'Last Price', dataIndex: 'last_price', key: 'lp', align: 'right', render: (v) => formatCurrency(v) },
-                      { title: 'Preferred', dataIndex: 'is_preferred', key: 'pref', render: (v) => v ? <Tag color="green">Yes</Tag> : <Tag>No</Tag> },
-                    ]}
-                  />
-                ),
-              },
-              {
-                key: 'item_history',
-                label: 'Mapping History',
-                children: (
-                  <Table
-                    dataSource={vendorItemHistory}
-                    loading={detailDataLoading}
-                    rowKey="id"
-                    size="small"
-                    pagination={{ pageSize: 20, showSizeChanger: true }}
-                    scroll={{ x: 'max-content' }}
-                    columns={[
-                      { title: 'Date', dataIndex: 'changed_at', key: 'date', width: 160, render: (v) => formatDate(v) },
-                      { title: 'Action', dataIndex: 'action', key: 'action', width: 100, render: (v) => <Tag color={v === 'delete' ? 'red' : v === 'update' ? 'blue' : 'green'}>{String(v || '').toUpperCase()}</Tag> },
-                      { title: 'Item Code', dataIndex: 'item_code', key: 'code', width: 130, render: (v) => v || '-' },
-                      { title: 'Item Name', dataIndex: 'item_name', key: 'name', width: 220, ellipsis: true, render: (v) => v || '-' },
-                      { title: 'Changes', key: 'changes', render: (_, record) => renderHistoryChange(record) },
-                      { title: 'Changed By', dataIndex: 'changed_by_name', key: 'by', width: 150, render: (v) => v || '-' },
-                    ]}
-                  />
-                ),
-              },
-              {
-                key: 'contracts',
-                label: 'Contracts',
-                children: (
-                  <Table
-                    dataSource={vendorContracts}
-                    loading={detailDataLoading}
-                    rowKey="id"
-                    size="small"
-                    pagination={{ pageSize: 20, showSizeChanger: true }}
-                    scroll={{ x: 'max-content' }}
-                    columns={[
-                      { title: 'Contract No', dataIndex: 'contract_number', key: 'no' },
-                      { title: 'Description', dataIndex: 'description', key: 'desc', ellipsis: true },
-                      { title: 'Start Date', dataIndex: 'start_date', key: 'start', render: (v) => formatDate(v) },
-                      { title: 'End Date', dataIndex: 'end_date', key: 'end', render: (v) => formatDate(v) },
-                      { title: 'Value', dataIndex: 'contract_value', key: 'val', align: 'right', render: (v) => formatCurrency(v) },
-                      { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <StatusTag status={s} /> },
-                    ]}
-                  />
-                ),
-              },
-              {
-                key: 'ratings',
-                label: 'Ratings',
-                children: (
-                  <Table
-                    dataSource={vendorRatings}
-                    loading={detailDataLoading}
-                    rowKey="id"
-                    size="small"
-                    pagination={{ pageSize: 20, showSizeChanger: true }}
-                    scroll={{ x: 'max-content' }}
-                    columns={[
-                      { title: 'Date', dataIndex: 'rating_date', key: 'date', render: (v) => formatDate(v) },
-                      { title: 'Criteria', dataIndex: 'criteria', key: 'criteria' },
-                      { title: 'Score', dataIndex: 'score', key: 'score', render: (v) => <Rate disabled allowHalf value={v || 0} style={{ fontSize: 14 }} /> },
-                      { title: 'Remarks', dataIndex: 'remarks', key: 'remarks', ellipsis: true },
-                      { title: 'Rated By', dataIndex: 'rated_by_name', key: 'by', render: (t, r) => t || r.rated_by || '-' },
-                    ]}
-                  />
-                ),
-              },
-              {
-                key: 'po_history',
-                label: 'PO History',
-                children: (
-                  <Table
-                    dataSource={vendorPOs}
-                    loading={detailDataLoading}
-                    rowKey="id"
-                    size="small"
-                    pagination={{ pageSize: 20, showSizeChanger: true }}
-                    scroll={{ x: 'max-content' }}
-                    columns={[
-                      { title: 'PO Number', dataIndex: 'po_number', key: 'po' },
-                      { title: 'Date', dataIndex: 'po_date', key: 'date', render: (v) => formatDate(v) },
-                      { title: 'Total Amount', dataIndex: 'total_amount', key: 'amt', align: 'right', render: (v) => formatCurrency(v) },
-                      { title: 'Items', dataIndex: 'item_count', key: 'items', align: 'right' },
-                      { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <StatusTag status={s} /> },
-                      { title: 'Delivery Date', dataIndex: 'expected_delivery_date', key: 'del', render: (v) => formatDate(v) },
-                    ]}
-                  />
-                ),
-              },
-            ]}
-          />
-        </Card>
-      </div>
-    );
-  }
+
 
   return (
     <div>
@@ -1012,280 +715,6 @@ const Vendors = () => {
           </Card>
         </Col>
       </Row>
-
-      <Drawer
-        title={editingVendor ? 'Edit Vendor' : 'Add Vendor'}
-        width={720}
-        open={drawerOpen}
-        onClose={() => { setDrawerOpen(false); setEditingVendor(null); form.resetFields(); setFormErrors([]); }}
-        destroyOnHidden
-        extra={
-          <Space>
-            <Button onClick={() => { setDrawerOpen(false); setEditingVendor(null); form.resetFields(); setFormErrors([]); }}>
-              Cancel
-            </Button>
-            <Button type="primary" onClick={handleSubmit} loading={submitting}>
-              {editingVendor ? 'Update' : 'Create'}
-            </Button>
-          </Space>
-        }
-      >
-        <Form 
-          form={form} 
-          layout="vertical" 
-          scrollToFirstError={true}
-          onFieldsChange={() => {
-            setFormErrors(form.getFieldsError());
-          }}
-        >
-          <Tabs
-            defaultActiveKey="basic"
-            items={[
-              {
-                key: 'basic',
-                label: (
-                  <Space>
-                    <span>Basic</span>
-                    {hasTabErrors('basic') && (
-                      <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 13 }} />
-                    )}
-                  </Space>
-                ),
-                children: (
-                  <>
-                    <Row gutter={16}>
-                      <Col span={12}>
-                        <Form.Item 
-                          name="vendor_code" 
-                          label="Vendor Code" 
-                          rules={[
-                            { required: true, message: 'Vendor Code is required' },
-                            { pattern: /^[A-Za-z0-9-_]+$/, message: 'Vendor Code must be alphanumeric without spaces' }
-                          ]}
-                        >
-                          <Input placeholder="e.g. VND-001" style={{ textTransform: 'uppercase' }} onChange={(e) => form.setFieldsValue({ vendor_code: e.target.value.toUpperCase() })} />
-                        </Form.Item>
-                      </Col>
-                      <Col span={12}>
-                        <Form.Item 
-                          name="name" 
-                          label="Vendor Name" 
-                          rules={[
-                            { required: true, message: 'Vendor Name is required' },
-                            { min: 3, message: 'Name must be at least 3 characters' },
-                            { max: 100, message: 'Name must not exceed 100 characters' }
-                          ]}
-                        >
-                          <Input placeholder="Enter vendor name" />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-                    <Row gutter={16}>
-                      <Col span={12}>
-                        <Form.Item name="contact_person" label="Contact Person">
-                          <Input placeholder="Contact person name" />
-                        </Form.Item>
-                      </Col>
-                      <Col span={12}>
-                        <Form.Item name="email" label="Email" rules={[{ type: 'email', message: 'Please enter a valid email address (e.g. info@vendor.com)' }]}>
-                          <Input placeholder="email@example.com" />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-                    <Row gutter={16}>
-                      <Col span={12}>
-                        <Form.Item name="phone" label="Phone" rules={[{ pattern: /^[0-9+\-\s()]{6,20}$/, message: 'Please enter a valid phone number (6-20 digits)' }]}>
-                          <Input placeholder="Phone number" />
-                        </Form.Item>
-                      </Col>
-                      <Col span={12}>
-                        <Form.Item name="alt_phone" label="Alt Phone" rules={[{ pattern: /^[0-9+\-\s()]{6,20}$/, message: 'Please enter a valid alternate phone number' }]}>
-                          <Input placeholder="Alternate phone" />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-                    <Form.Item name="status" label="Status" initialValue="active">
-                      <Select
-                        options={[
-                          { label: 'Active', value: 'active' },
-                          { label: 'Inactive', value: 'inactive' },
-                        ]}
-                      />
-                    </Form.Item>
-                  </>
-                ),
-              },
-              {
-                key: 'address',
-                label: (
-                  <Space>
-                    <span>Address</span>
-                    {hasTabErrors('address') && (
-                      <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 13 }} />
-                    )}
-                  </Space>
-                ),
-                children: (
-                  <>
-                    <Form.Item name="address_line1" label="Address Line 1">
-                      <Input placeholder="Street address" />
-                    </Form.Item>
-                    <Form.Item name="address_line2" label="Address Line 2">
-                      <Input placeholder="Apartment, suite, etc." />
-                    </Form.Item>
-                    <Row gutter={16}>
-                      <Col span={8}>
-                        <Form.Item name="city" label="City">
-                          <Input placeholder="City" />
-                        </Form.Item>
-                      </Col>
-                      <Col span={8}>
-                        <Form.Item name="state" label="State">
-                          <Select placeholder="Select state" allowClear showSearch options={STATES.map((s) => ({ label: s, value: s }))} />
-                        </Form.Item>
-                      </Col>
-                      <Col span={8}>
-                        <Form.Item name="pincode" label="Pincode" rules={[{ pattern: /^[0-9]{5,10}$/, message: 'Pincode must be between 5 and 10 digits' }]}>
-                          <Input placeholder="Pincode" />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-                    <Form.Item name="country" label="Country" initialValue="India">
-                      <Input placeholder="Country" />
-                    </Form.Item>
-                  </>
-                ),
-              },
-              {
-                key: 'tax_bank',
-                label: (
-                  <Space>
-                    <span>Tax & Bank</span>
-                    {hasTabErrors('tax_bank') && (
-                      <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 13 }} />
-                    )}
-                  </Space>
-                ),
-                children: (
-                  <>
-                    <Row gutter={16}>
-                      <Col span={12}>
-                        <Form.Item 
-                          name="gst_number" 
-                          label="GST Number" 
-                          rules={[{ pattern: /^[0-9]{2}[A-Z0-9]{10}[A-Z0-9]{3}$/, message: 'Enter a valid 15-character GSTIN (e.g. 29ABCDE1234F1Z5)' }]}
-                        >
-                          <Input placeholder="GSTIN" style={{ textTransform: 'uppercase' }} onChange={(e) => form.setFieldsValue({ gst_number: e.target.value.toUpperCase() })} />
-                        </Form.Item>
-                      </Col>
-                      <Col span={12}>
-                        <Form.Item 
-                          name="pan_number" 
-                          label="PAN Number"
-                          rules={[{ pattern: /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/, message: 'Enter a valid 10-character PAN number (e.g. ABCDE1234F)' }]}
-                        >
-                          <Input placeholder="PAN" style={{ textTransform: 'uppercase' }} onChange={(e) => form.setFieldsValue({ pan_number: e.target.value.toUpperCase() })} />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-                    <Row gutter={16}>
-                      <Col span={8}>
-                        <Form.Item name="bank_name" label="Bank Name">
-                          <Input placeholder="Bank name" />
-                        </Form.Item>
-                      </Col>
-                      <Col span={8}>
-                        <Form.Item 
-                          name="bank_account" 
-                          label="Bank Account No"
-                          rules={[{ pattern: /^[0-9]{9,18}$/, message: 'Bank Account Number must be between 9 and 18 numeric digits' }]}
-                        >
-                          <Input placeholder="Account number" />
-                        </Form.Item>
-                      </Col>
-                      <Col span={8}>
-                        <Form.Item 
-                          name="bank_ifsc" 
-                          label="Bank IFSC"
-                          rules={[{ pattern: /^[A-Z]{4}0[A-Z0-9]{6}$/, message: 'Enter a valid 11-character IFSC code (e.g. HDFC0000123)' }]}
-                        >
-                          <Input placeholder="IFSC code" style={{ textTransform: 'uppercase' }} onChange={(e) => form.setFieldsValue({ bank_ifsc: e.target.value.toUpperCase() })} />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-                  </>
-                ),
-              },
-              {
-                key: 'terms',
-                label: (
-                  <Space>
-                    <span>Terms</span>
-                    {hasTabErrors('terms') && (
-                      <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 13 }} />
-                    )}
-                  </Space>
-                ),
-                children: (
-                  <>
-                    <Row gutter={16}>
-                      <Col span={12}>
-                        <Form.Item name="payment_terms_days" label="Payment Terms (days)">
-                          <InputNumber
-                            min={0}
-                            max={365}
-                            step={1}
-                            style={{ width: '100%' }}
-                            placeholder="Net 30 / Net 45 / Net 60 …"
-                          />
-                        </Form.Item>
-                      </Col>
-                      <Col span={12}>
-                        <Form.Item name="credit_limit" label="Credit Limit">
-                          <InputNumber min={0} step={100} style={{ width: '100%' }} placeholder="0.00" />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-                    <Row gutter={16}>
-                      <Col span={12}>
-                        <Form.Item name="vendor_type_ids" label="Vendor Types">
-                          <Select
-                            mode="multiple"
-                            placeholder="Select vendor types"
-                            options={vendorTypeOptions}
-                            allowClear
-                            showSearch
-                            optionFilterProp="label"
-                            maxTagCount="responsive"
-                          />
-                        </Form.Item>
-                      </Col>
-                      <Col span={12}>
-                        <Form.Item name="vendor_category_id" label="Vendor Category">
-                          <Select
-                            placeholder="Select vendor category"
-                            options={vendorCategoryOptions}
-                            allowClear
-                            showSearch
-                            optionFilterProp="label"
-                          />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-                    <Row gutter={16}>
-                      <Col span={12}>
-                        <Form.Item name="is_transport_vendor" label="Transport Vendor" valuePropName="checked">
-                          <Switch />
-                        </Form.Item>
-                      </Col>
-                    </Row>
-                  </>
-                ),
-              },
-            ]}
-          />
-        </Form>
-      </Drawer>
 
       <Modal
         title={editingVendorType ? 'Edit Vendor Type' : 'Add Vendor Type'}

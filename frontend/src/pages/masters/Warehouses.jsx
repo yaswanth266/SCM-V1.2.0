@@ -50,11 +50,6 @@ const Warehouses = () => {
   const [selectedNode, setSelectedNode] = useState(null);
 
   // Modals
-  const [whModalOpen, setWhModalOpen] = useState(false);
-  const [editingWh, setEditingWh] = useState(null);
-  const [whForm] = Form.useForm();
-  const [whSubmitting, setWhSubmitting] = useState(false);
-
   const [nodeModalOpen, setNodeModalOpen] = useState(false);
   const [editingNode, setEditingNode] = useState(null);
   const [nodeLevel, setNodeLevel] = useState(null);
@@ -159,16 +154,11 @@ const Warehouses = () => {
 
   // Warehouse CRUD
   const handleAddWarehouse = () => {
-    setEditingWh(null);
-    whForm.resetFields();
-    whForm.setFieldsValue({ status: 'active', is_active: true });
-    setWhModalOpen(true);
+    navigate('/masters/warehouses/new');
   };
 
   const handleEditWarehouse = (wh) => {
-    setEditingWh(wh);
-    whForm.setFieldsValue(wh);
-    setWhModalOpen(true);
+    navigate(`/masters/warehouses/${wh.id}/edit`);
   };
 
   const handleDeleteWarehouse = async (id) => {
@@ -182,43 +172,6 @@ const Warehouses = () => {
       fetchWarehouses();
     } catch (err) {
       message.error(getErrorMessage(err));
-    }
-  };
-
-  const handleWhSubmit = async () => {
-    try {
-      const values = await whForm.validateFields();
-      // BUG-FE-069: backend ignores `status` and only accepts `is_active`.
-      // Translate the form's status string into the boolean the model uses
-      // so the toggle actually persists.
-      const { status, ...rest } = values;
-      const payload = {
-        ...rest,
-        code: (values.code || '').trim(),
-        name: (values.name || '').trim(),
-        is_active: status ? status !== 'inactive' : (rest.is_active !== false),
-      };
-      if (!payload.code || !payload.name) {
-        message.error('Warehouse code and name are required');
-        return;
-      }
-      setWhSubmitting(true);
-      if (editingWh) {
-        await api.put(`/masters/warehouses/${editingWh.id}`, payload);
-        message.success('Warehouse updated');
-      } else {
-        await api.post('/masters/warehouses', payload);
-        message.success('Warehouse created');
-      }
-      setWhModalOpen(false);
-      whForm.resetFields();
-      setEditingWh(null);
-      fetchWarehouses();
-    } catch (err) {
-      if (err.errorFields) return;
-      message.error(getErrorMessage(err));
-    } finally {
-      setWhSubmitting(false);
     }
   };
 
@@ -436,9 +389,7 @@ const Warehouses = () => {
     );
   };
 
-  const selectableParentOptions = warehouses
-    .filter((w) => !editingWh || w.id !== editingWh.id)
-    .map((w) => ({ label: w.name || w.warehouse_name, value: w.id }));
+
 
   return (
     <div>
@@ -632,113 +583,7 @@ const Warehouses = () => {
         </Col>
       </Row>
 
-      {/* Warehouse Modal */}
-      <Modal
-        title={editingWh ? 'Edit Warehouse' : 'Add Warehouse'}
-        open={whModalOpen}
-        onOk={handleWhSubmit}
-        onCancel={() => { setWhModalOpen(false); setEditingWh(null); whForm.resetFields(); }}
-        confirmLoading={whSubmitting}
-        okText={editingWh ? 'Update' : 'Create'}
-        destroyOnHidden
-        width={600}
-      >
-        <Form form={whForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="name" label="Warehouse Name" rules={[{ required: true, whitespace: true, message: 'Warehouse name is required' }]}>
-                <Input placeholder="Enter name" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="code" label="Warehouse Code" rules={[{ required: true, whitespace: true, message: 'Warehouse code is required' }]}>
-                <Input placeholder="e.g. WH-001" />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="warehouse_type" label="Warehouse Type">
-                <Select placeholder="Select type" options={WAREHOUSE_TYPES} allowClear />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="status" label="Status" initialValue="active">
-                <Select
-                  options={[
-                    { label: 'Active', value: 'active' },
-                    { label: 'Inactive', value: 'inactive' },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={24}>
-              <Form.Item
-                name="parent_id"
-                label="Parent Warehouse"
-                rules={[
-                  ({ getFieldValue }) => ({
-                    validator(_, value) {
-                      if (value && editingWh && value === editingWh.id) {
-                        return Promise.reject(new Error('A warehouse cannot be its own parent'));
-                      }
-                      return Promise.resolve();
-                    },
-                  }),
-                ]}
-              >
-                <Select
-                  placeholder="Select parent warehouse (optional)"
-                  allowClear
-                  showSearch
-                  optionFilterProp="label"
-                  options={[
-                    { label: 'None (Top Level Warehouse)', value: null },
-                    ...selectableParentOptions,
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="address" label="Address">
-            <Input.TextArea rows={2} placeholder="Warehouse address" />
-          </Form.Item>
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="city" label="City">
-                <Input placeholder="City" />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="state" label="State">
-                <Input placeholder="State" />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="pincode" label="Pincode">
-                <Input placeholder="Pincode" />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="contact_person" label="Contact Person">
-                <Input placeholder="Contact person" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="contact_phone" label="Contact Phone">
-                <Input placeholder="Phone" />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="description" label="Description">
-            <Input.TextArea rows={2} placeholder="Description" />
-          </Form.Item>
-        </Form>
-      </Modal>
+
 
       {/* Node Modal */}
       <Modal

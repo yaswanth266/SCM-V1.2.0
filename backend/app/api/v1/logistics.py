@@ -138,6 +138,45 @@ async def ensure_logistics_schema(db: AsyncSession):
     except Exception as e:
         print(f"[SCM Schema Sync] Skipping status alter or already applied: {e}")
 
+    try:
+        # Step 1: Temporarily expand ENUM to union of old & new values
+        await conn.execute(text("""
+            ALTER TABLE logistics_service_orders 
+            MODIFY COLUMN status ENUM('CREATED', 'ACKNOWLEDGED', 'ACCEPTED', 'REJECTED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') 
+            NOT NULL DEFAULT 'CREATED'
+        """))
+        # Step 2: Migrate ACKNOWLEDGED -> ACCEPTED
+        await conn.execute(text("UPDATE logistics_service_orders SET status = 'ACCEPTED' WHERE status = 'ACKNOWLEDGED'"))
+        # Step 3: Restrict to new ENUM values only
+        await conn.execute(text("""
+            ALTER TABLE logistics_service_orders 
+            MODIFY COLUMN status ENUM('CREATED', 'ACCEPTED', 'REJECTED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED') 
+            NOT NULL DEFAULT 'CREATED'
+        """))
+    except Exception as e:
+        print(f"[SCM Schema Sync] Skipping service order status alter or already applied: {e}")
+
+    try:
+        # Step 1: Temporarily expand ENUM to union of old & new values
+        await conn.execute(text("""
+            ALTER TABLE logistics_service_order_vehicles 
+            MODIFY COLUMN vehicle_status ENUM('SCHEDULED', 'ARRIVED', 'GATE_IN', 'LOADING', 'DISPATCHED', 'GATE_OUT', 'IN_TRANSIT', 'TRANSPORTER_ACKNOWLEDGED', 'DELIVERED', 'DELIVERY_ACKNOWLEDGED', 'CANCELLED') 
+            NOT NULL DEFAULT 'SCHEDULED'
+        """))
+        # Step 2: Migrate old values to new equivalents
+        await conn.execute(text("UPDATE logistics_service_order_vehicles SET vehicle_status = 'GATE_IN' WHERE vehicle_status = 'ARRIVED'"))
+        await conn.execute(text("UPDATE logistics_service_order_vehicles SET vehicle_status = 'GATE_OUT' WHERE vehicle_status = 'DISPATCHED'"))
+        await conn.execute(text("UPDATE logistics_service_order_vehicles SET vehicle_status = 'DELIVERY_ACKNOWLEDGED' WHERE vehicle_status = 'DELIVERED'"))
+        # Step 3: Restrict to new ENUM values only
+        await conn.execute(text("""
+            ALTER TABLE logistics_service_order_vehicles 
+            MODIFY COLUMN vehicle_status ENUM('SCHEDULED', 'GATE_IN', 'LOADING', 'GATE_OUT', 'IN_TRANSIT', 'TRANSPORTER_ACKNOWLEDGED', 'DELIVERY_ACKNOWLEDGED', 'CANCELLED') 
+            NOT NULL DEFAULT 'SCHEDULED'
+        """))
+    except Exception as e:
+        print(f"[SCM Schema Sync] Skipping vehicle status alter or already applied: {e}")
+
+
 
 async def bootstrap_logistics_data(db: AsyncSession):
     # Ensure logistics tables are created dynamically
@@ -1382,11 +1421,19 @@ async def acknowledge_so(id: int, payload: SoAcknowledge, db: AsyncSession = Dep
     if not so:
         raise HTTPException(404, "Service Order not found")
 
-    so.acknowledged_by_vendor = True
-    so.acknowledged_at = datetime.now(timezone.utc)
-    so.arrival_date = payload.arrival_date
+    action = (payload.action or "accept").lower()
+    if action == "reject":
+        so.status = "REJECTED"
+        so.acknowledged_by_vendor = False
+        action_desc = "rejected"
+    else:
+        so.status = "ACCEPTED"
+        so.acknowledged_by_vendor = True
+        so.acknowledged_at = datetime.now(timezone.utc)
+        so.arrival_date = payload.arrival_date
+        action_desc = "accepted"
+
     so.vendor_remarks = payload.remarks
-    so.status = "ACKNOWLEDGED"
     db.add(so)
 
     db.add(ActivityLog(
@@ -1395,21 +1442,21 @@ async def acknowledge_so(id: int, payload: SoAcknowledge, db: AsyncSession = Dep
         action="acknowledge_so",
         entity_type="so",
         entity_id=so.id,
-        description=f"Carrier acknowledged contract Service Order {so.so_number}."
+        description=f"Carrier {action_desc} contract Service Order {so.so_number}."
     ))
 
     db.add(Notification(
         user_id=so.created_by,
-        title="SO Acknowledged",
-        message=f"Carrier acknowledged B2B contract {so.so_number}. Vehicles are scheduled for dispatch gating.",
-        type="success",
+        title=f"SO Contract {action_desc.capitalize()}",
+        message=f"Carrier {action_desc} B2B contract {so.so_number}. Remarks: {payload.remarks or 'None'}",
+        type="success" if action == "accept" else "warning",
         module="logistics",
         reference_type="SO",
         reference_id=so.id
     ))
 
     await db.commit()
-    return {"success": True, "message": "Service order acknowledged successfully"}
+    return {"success": True, "message": f"Service order contract {action_desc} successfully"}
 
 @router.post("/so/vehicle/{vehicle_id}/status")
 async def update_so_vehicle_status(vehicle_id: int, payload: VehicleStatusUpdate, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
@@ -1421,21 +1468,28 @@ async def update_so_vehicle_status(vehicle_id: int, payload: VehicleStatusUpdate
     # Update SO status on first movement
     res_so = await db.execute(select(LogisticsServiceOrder).where(LogisticsServiceOrder.id == v.so_id))
     so = res_so.scalar_one_or_none()
-    if so and so.status == "ACKNOWLEDGED":
+    if so and so.status == "ACCEPTED":
         so.status = "IN_PROGRESS"
         db.add(so)
 
     next_status = payload.nextStatus
-    if next_status == "DISPATCHED":
-        v.vehicle_status = "IN_TRANSIT"
-    else:
-        v.vehicle_status = next_status
+    v.vehicle_status = next_status
 
-    if next_status == "ARRIVED":
+    if next_status == "GATE_IN":
         v.gate_pass_number = payload.gatePassNumber
         v.gate_entry_time = datetime.now(timezone.utc)
         v.gate_entry_by = current_user.id
         v.actual_arrival_datetime = datetime.now(timezone.utc)
+
+        # Update associated GatePass status to gate_in
+        if payload.gatePassNumber:
+            from app.models.dispatch import GatePass
+            gp_res = await db.execute(select(GatePass).where(GatePass.gate_pass_number == payload.gatePassNumber.strip()))
+            gp = gp_res.scalar_one_or_none()
+            if gp:
+                gp.status = "gate_in"
+                gp.gate_in_time = datetime.now(timezone.utc)
+                db.add(gp)
 
     elif next_status == "LOADING":
         v.loading_bay_number = payload.loadingBayNumber or "BAY-M-01"
@@ -1449,18 +1503,12 @@ async def update_so_vehicle_status(vehicle_id: int, payload: VehicleStatusUpdate
             .values(current_status="OCCUPIED")
         )
 
-    elif next_status == "DISPATCHED":
+    elif next_status == "GATE_OUT":
         v.loading_end_time = datetime.now(timezone.utc)
         v.actual_departure_datetime = datetime.now(timezone.utc)
         v.lr_number = payload.lrNumber or f"LR-{int(datetime.now().timestamp()) % 100000}"
         v.eway_bill_number = payload.ewayBillNumber or f"EW-{int(datetime.now().timestamp()) % 1000000}"
         v.eway_bill_expiry = datetime.now(timezone.utc) + timedelta(days=3)
-
-        # Initialize geo-tracking simulated coords
-        v.current_location_lat = 19.1234
-        v.current_location_lng = 72.8910
-        v.last_location_update = datetime.now(timezone.utc)
-        v.gps_tracking_url = f"https://maps.google.com/?q={v.current_location_lat},{v.current_location_lng}"
 
         # Free Bay
         if v.loading_bay_number:
@@ -1475,6 +1523,29 @@ async def update_so_vehicle_status(vehicle_id: int, payload: VehicleStatusUpdate
         mappings = res_maps.scalars().all()
         for m in mappings:
             m.status = "LOADED"
+            db.add(m)
+
+    elif next_status == "IN_TRANSIT":
+        # Simply update geo-tracking simulated coords
+        v.current_location_lat = 19.1234
+        v.current_location_lng = 72.8910
+        v.last_location_update = datetime.now(timezone.utc)
+        v.gps_tracking_url = f"https://maps.google.com/?q={v.current_location_lat},{v.current_location_lng}"
+
+        # Update associated GatePass status to gate_out
+        if v.gate_pass_number:
+            from app.models.dispatch import GatePass
+            gp_res = await db.execute(select(GatePass).where(GatePass.gate_pass_number == v.gate_pass_number.strip()))
+            gp = gp_res.scalar_one_or_none()
+            if gp:
+                gp.status = "gate_out"
+                gp.gate_out_time = datetime.now(timezone.utc)
+                db.add(gp)
+
+        res_maps = await db.execute(select(LogisticsServiceOrderSdoMapping).where(LogisticsServiceOrderSdoMapping.so_vehicle_id == v.id))
+        mappings = res_maps.scalars().all()
+        for m in mappings:
+            m.status = "IN_TRANSIT"
             db.add(m)
 
             res_sdo = await db.execute(select(LogisticsSubDispatchOrder).where(LogisticsSubDispatchOrder.id == m.sdo_id))
@@ -1493,20 +1564,10 @@ async def update_so_vehicle_status(vehicle_id: int, payload: VehicleStatusUpdate
             from app.api.v1.dispatch import sync_mdos_to_dispatches
             await sync_mdos_to_dispatches(db)
 
-    elif next_status == "IN_TRANSIT":
-        # Simply update geo-tracking simulated coords
-        v.current_location_lat = 19.1234
-        v.current_location_lng = 72.8910
-        v.last_location_update = datetime.now(timezone.utc)
-        v.gps_tracking_url = f"https://maps.google.com/?q={v.current_location_lat},{v.current_location_lng}"
+    elif next_status == "TRANSPORTER_ACKNOWLEDGED":
+        v.actual_delivery_datetime = datetime.now(timezone.utc)
 
-        res_maps = await db.execute(select(LogisticsServiceOrderSdoMapping).where(LogisticsServiceOrderSdoMapping.so_vehicle_id == v.id))
-        mappings = res_maps.scalars().all()
-        for m in mappings:
-            m.status = "IN_TRANSIT"
-            db.add(m)
-
-    elif next_status == "DELIVERED":
+    elif next_status == "DELIVERY_ACKNOWLEDGED":
         v.actual_delivery_datetime = datetime.now(timezone.utc)
         v.pod_received = True
         v.pod_received_at = datetime.now(timezone.utc)
@@ -1536,7 +1597,7 @@ async def update_so_vehicle_status(vehicle_id: int, payload: VehicleStatusUpdate
         # Check if all vehicles/SDOs in SO are completed
         res_all_v = await db.execute(select(LogisticsServiceOrderVehicle).where(LogisticsServiceOrderVehicle.so_id == v.so_id))
         all_vehs = res_all_v.scalars().all()
-        all_completed = all(vh.id == v.id or vh.vehicle_status == "DELIVERED" for vh in all_vehs)
+        all_completed = all(vh.id == v.id or vh.vehicle_status == "DELIVERY_ACKNOWLEDGED" for vh in all_vehs)
         if all_completed and so:
             so.status = "COMPLETED"
             so.completed_at = datetime.now(timezone.utc)

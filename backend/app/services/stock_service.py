@@ -205,6 +205,14 @@ async def post_stock_ledger(
     balance.total_qty = new_qty
     balance.available_qty = new_qty - (balance.reserved_qty or Decimal("0"))
     balance.stock_value = new_value
+
+    # Auto-update has_batch flag in item master when stock is received under a batch
+    if qty_in > 0 and batch_id is not None:
+        from app.models.master import Item as _ItemModel
+        item_obj = await db.get(_ItemModel, item_id)
+        if item_obj and not item_obj.has_batch:
+            item_obj.has_batch = True
+            await db.flush()
     # BUG-INV-039: quantize valuation_rate to 4 decimal places. Without this,
     # repeated inbound/outbound posts compound floating-point-like precision drift
     # (Decimal division produces 28-digit results) and stock_value slowly diverges

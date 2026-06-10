@@ -101,6 +101,18 @@ async def ensure_rfq_schema(session: AsyncSession) -> None:
     await conn.run_sync(RFQItem.__table__.create, checkfirst=True)
     await conn.run_sync(RFQVendor.__table__.create, checkfirst=True)
 
+    rfq_columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'rfqs'
+        """))).all()
+    }
+    if "terms_url" not in rfq_columns:
+        await conn.execute(text("ALTER TABLE rfqs ADD COLUMN terms_url VARCHAR(500) NULL"))
+
     quotation_columns = {
         row[0]
         for row in (await conn.execute(text("""
@@ -124,6 +136,8 @@ async def ensure_rfq_schema(session: AsyncSession) -> None:
         await conn.execute(text("ALTER TABLE quotations ADD COLUMN subtotal DECIMAL(15, 2) NOT NULL DEFAULT 0"))
     if "vehicle_cost" not in quotation_columns:
         await conn.execute(text("ALTER TABLE quotations ADD COLUMN vehicle_cost DECIMAL(15, 2) NOT NULL DEFAULT 0"))
+    if "terms_url" not in quotation_columns:
+        await conn.execute(text("ALTER TABLE quotations ADD COLUMN terms_url VARCHAR(500) NULL"))
 
     quotation_indexes = {
         row[0]

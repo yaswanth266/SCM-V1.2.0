@@ -48,7 +48,7 @@ export default function LogisticsRfq() {
   const [showPublisher, setShowPublisher] = useState(false);
   const [selectedSdoIds, setSelectedSdoIds] = useState([]);
   const [form] = Form.useForm();
-  
+
   // Award Modal state
   const [awardingRfq, setAwardingRfq] = useState(null);
   const [selectedQuoteId, setSelectedQuoteId] = useState(null);
@@ -69,7 +69,7 @@ export default function LogisticsRfq() {
       const loadedRfqs = rfqRes.data || [];
       setRfqs(loadedRfqs);
       setMasters(masterRes.data);
-      
+
       const loadedMdos = mdoRes.data || [];
       setMdos(loadedMdos);
 
@@ -85,17 +85,17 @@ export default function LogisticsRfq() {
         if (approved.length > 0) {
           approved.sort((a, b) => b.id - a.id);
           const latestMdo = approved[0];
-          
+
           setShowPublisher(true);
           setTimeout(() => {
             form.setFieldsValue({ mdoId: latestMdo.id });
             const ids = latestMdo.sdos.map(s => s.id);
             setSelectedSdoIds(ids);
-            
+
             const addr = parseAddress(latestMdo.delivery_address);
             const inst = parseInstructions(latestMdo.special_instructions);
             const briefDesc = inst.desc ? (inst.desc.length > 30 ? inst.desc.substring(0, 30) + '...' : inst.desc) : 'Outbound Logistics';
-            
+
             form.setFieldsValue({
               title: `Consolidated Bidding: ${briefDesc}`,
               pickup_location: addr.pickup || 'Origin Warehouse',
@@ -126,11 +126,11 @@ export default function LogisticsRfq() {
     if (selectedMdo) {
       const ids = selectedMdo.sdos.map(s => s.id);
       setSelectedSdoIds(ids);
-      
+
       const addr = parseAddress(selectedMdo.delivery_address);
       const inst = parseInstructions(selectedMdo.special_instructions);
       const briefDesc = inst.desc ? (inst.desc.length > 30 ? inst.desc.substring(0, 30) + '...' : inst.desc) : 'Outbound Logistics';
-      
+
       form.setFieldsValue({
         title: `Consolidated Bidding: ${briefDesc}`,
         pickup_location: addr.pickup || 'Origin Warehouse',
@@ -147,7 +147,7 @@ export default function LogisticsRfq() {
   const handlePublishRfq = async (values) => {
     try {
       setLoading(true);
-      
+
       const compiledDescription = `Pick Up Location: ${values.pickup_location || 'Origin Warehouse'}\nDrop Off Location: ${values.dropoff_location || 'Client Drop Site'}\nLogistics Weight: ${values.logistics_weight || 0} KG\nLogistics Volume: ${values.logistics_volume || 0} CFT\nExpected Delivery Date: ${values.expected_delivery_date ? dayjs(values.expected_delivery_date).format('DD/MM/YYYY') : 'Not specified'}\nItems Description: ${values.items_description || 'SCM Materials'}\n\nExtra Scope & Penalties:\n${values.scope_penalties || 'None specified.'}`;
 
       const payload = {
@@ -217,13 +217,13 @@ export default function LogisticsRfq() {
 
   return (
     <div style={{ padding: '24px', minHeight: '100vh' }}>
-      
+
       {/* Main Campaign Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px', flexWrap: 'wrap', gap: '12px' }}>
         <div style={{ flex: 1 }}>
           <h2 style={{ margin: 0, fontWeight: 700, fontSize: '20px' }}>Carrier Freight Bidding Desk</h2>
           <p style={{ color: '#64748b', fontSize: '13px', margin: '4px 0 0 0' }}>
-            Publish B2B freight requests, invite qualified transporters, compare rate sheets with auto-computed score matrices, and award POs.
+            Publish B2B freight requests, invite qualified transporters, compare rate sheets with auto-computed score matrices, and award Service Orders.
           </p>
         </div>
         <div>
@@ -239,10 +239,10 @@ export default function LogisticsRfq() {
       </div>
 
       {/* RFQ Selection Search Card */}
-      <Card 
-        style={{ 
-          marginBottom: '24px', 
-          borderRadius: '8px', 
+      <Card
+        style={{
+          marginBottom: '24px',
+          borderRadius: '8px',
           boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
           background: '#ffffff',
           border: '1px solid #e2e8f0'
@@ -302,9 +302,9 @@ export default function LogisticsRfq() {
         footer={null}
         styles={{ body: { padding: '20px' } }}
       >
-        <Form 
-          form={form} 
-          layout="vertical" 
+        <Form
+          form={form}
+          layout="vertical"
           onFinish={handlePublishRfq}
           initialValues={{
             paymentTerms: '30 days net credit',
@@ -498,10 +498,10 @@ export default function LogisticsRfq() {
             const rfq = rfqs.find(r => r.id === selectedRfqId);
             if (!rfq) return null;
             const quotes = rfq.responses || [];
-            
+
             return (
               <Col xs={24} key={rfq.id}>
-                <Card 
+                <Card
                   style={{ borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}
                   title={
                     <span>
@@ -512,10 +512,10 @@ export default function LogisticsRfq() {
                     <Space>
                       <Tag color={rfq.status === 'CLOSED' ? 'default' : 'success'}>{rfq.status}</Tag>
                       {rfq.status !== 'CLOSED' && quotes.length > 0 && (
-                        <Button 
-                          type="primary" 
-                          size="small" 
-                          icon={<SolutionOutlined />} 
+                        <Button
+                          type="primary"
+                          size="small"
+                          icon={<SolutionOutlined />}
                           onClick={() => setAwardingRfq(rfq)}
                         >
                           Award & Select Quote
@@ -559,7 +559,7 @@ export default function LogisticsRfq() {
         ) : (
           <Col xs={24}>
             <Card style={{ borderRadius: '8px', border: '1px dashed #cbd5e1', background: '#f8fafc', padding: '40px 0', textAlign: 'center' }}>
-              <Empty 
+              <Empty
                 description={
                   <span style={{ color: '#64748b', fontSize: '14px' }}>
                     Select a freight RFQ campaign above to evaluate carrier quotations and award contracts.

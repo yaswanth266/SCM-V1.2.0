@@ -1,5 +1,5 @@
 from pydantic import BaseModel, field_validator, model_validator
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Any
 from datetime import datetime, date
 from decimal import Decimal
 
@@ -87,8 +87,11 @@ class GRNCreate(BaseModel):
     # the backend doesn't unconditionally bump the status to pending_qi.
     # Default False keeps backwards compatibility with existing callers.
     is_draft: bool = False
-    accepted_qty: Decimal = Decimal("0")
-    rejected_qty: Decimal = Decimal("0")
+    # BUG-INV-132: was Decimal which caused 422 if the frontend sent a string
+    # (e.g. "02") produced by JS string-concatenation in reduce. Changed to
+    # Optional[int] since these are header-level summary totals, not fractional.
+    accepted_qty: Optional[int] = 0
+    rejected_qty: Optional[int] = 0
 
     @field_validator("items")
     @classmethod
@@ -379,6 +382,7 @@ class MaterialIssueItemResponse(BaseModel):
     amount: Decimal
     serial_numbers: Optional[List[str]] = None
     has_serial: bool = False
+    has_batch: bool = False
     model_config = {"from_attributes": True}
 
 class MaterialIssueResponse(BaseModel):
@@ -504,7 +508,7 @@ class DispatchResponse(BaseModel):
     receiver_signature_url: Optional[str] = None
     receiver_id_proof_type: Optional[str] = None
     receiver_id_proof_number: Optional[str] = None
-    delivery_photo_urls: Optional[List[str]] = None
+    delivery_photo_urls: Optional[Any] = None
     goods_condition_on_delivery: Optional[str] = None
     delivery_remarks: Optional[str] = None
     material_issue_id: Optional[int] = None

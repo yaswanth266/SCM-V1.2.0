@@ -331,7 +331,7 @@ async def stock_balance_summary_alias(
     from app.models.master import Item as _Item
     from app.models.warehouse import Batch as _Batch
     from app.utils.dependencies import user_is_managerial, user_warehouse_ids
-    q_total = select(func.count(StockBalance.id))
+    q_total_stmt = select(StockBalance.item_id, StockBalance.warehouse_id).distinct()
     q_value = select(func.coalesce(func.sum(StockBalance.stock_value), 0))
     today = _date.today()
     expiring_window = today + _td(days=30)
@@ -360,7 +360,7 @@ async def stock_balance_summary_alias(
     if not is_admin:
         if assigned_whs:
             scoped = await get_warehouse_and_descendants(db, assigned_whs)
-            q_total = q_total.where(StockBalance.warehouse_id.in_(scoped))
+            q_total_stmt = q_total_stmt.where(StockBalance.warehouse_id.in_(scoped))
             q_value = q_value.where(StockBalance.warehouse_id.in_(scoped))
             q_low = q_low.where(StockBalance.warehouse_id.in_(scoped))
             q_exp = q_exp.where(StockBalance.warehouse_id.in_(scoped))
@@ -369,7 +369,7 @@ async def stock_balance_summary_alias(
             if not is_managerial:
                 return {"total_items": 0, "total_value": 0.0, "total_stock_value": 0.0,
                         "low_stock_alerts": 0, "expiring_soon": 0}
-    total = (await db.execute(q_total)).scalar() or 0
+    total = (await db.execute(select(func.count()).select_from(q_total_stmt.subquery()))).scalar() or 0
     value = (await db.execute(q_value)).scalar() or 0
     try:
         low = (await db.execute(q_low)).scalar() or 0

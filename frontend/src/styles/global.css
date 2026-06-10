@@ -51,6 +51,16 @@
   --elev-3: 0 20px 40px rgba(27, 28, 28, 0.06);
 }
 
+/* Custom High-Contrast Selection styling */
+::selection {
+  background: #F09000 !important;
+  color: #2A0E2F !important;
+}
+::-moz-selection {
+  background: #F09000 !important;
+  color: #2A0E2F !important;
+}
+
 /* Reset & Base */
 *,
 *::before,

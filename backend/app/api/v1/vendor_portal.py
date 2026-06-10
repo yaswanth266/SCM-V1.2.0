@@ -134,6 +134,7 @@ async def supplier_list_rfqs(
                 "vehicle_cost": float(q.vehicle_cost or 0),
                 "valid_until": q.valid_until,
                 "remarks": q.remarks,
+                "terms_url": q.terms_url,
                 "items": quote_items,
             } if quote_items else None
 
@@ -153,6 +154,7 @@ async def supplier_list_rfqs(
             "quotation_id": q.id,
             "rfq_number": q.rfq_number or q.quotation_number,
             "quotation_status": q.status,
+            "terms_url": q.terms_url,
             "my_quote": my_quote,
             "can_edit": _can_modify_quotation(q),
         })

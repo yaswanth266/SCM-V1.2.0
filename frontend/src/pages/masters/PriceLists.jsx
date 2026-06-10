@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
-  Card, Button, Drawer, Modal, Form, Input, Select, Switch, Space,
+  Card, Button, Modal, Form, Input, Select, Switch, Space,
   Popconfirm, message, InputNumber, DatePicker, Table, Tag, Row, Col,
   Spin, Empty,
 } from 'antd';
@@ -20,10 +21,7 @@ import {
 import { DATE_FORMAT } from '../../utils/constants';
 
 const PriceLists = () => {
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [editingPL, setEditingPL] = useState(null);
-  const [form] = Form.useForm();
-  const [submitting, setSubmitting] = useState(false);
+  const navigate = useNavigate();
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Price list items
@@ -43,30 +41,11 @@ const PriceLists = () => {
   }, []);
 
   const handleAdd = () => {
-    setEditingPL(null);
-    form.resetFields();
-    form.setFieldsValue({ status: 'active', currency: 'INR', is_default: false, type: 'selling' });
-    setDrawerOpen(true);
+    navigate('/masters/price-lists/new');
   };
 
   const handleEdit = (record) => {
-    setEditingPL(record);
-    // BUG-FE-140 / BUG-FE-176: parse the ISO date as a calendar day rather
-    // than browser-local instant. dayjs() on a YYYY-MM-DD string treats it
-    // as midnight in the local TZ which can shift one day in IST. Use
-    // explicit format and validate before passing to the picker.
-    const parseDay = (v) => {
-      if (!v) return null;
-      const ymd = String(v).slice(0, 10);
-      const d = dayjs(ymd, 'YYYY-MM-DD', true);
-      return d.isValid() ? d : null;
-    };
-    form.setFieldsValue({
-      ...record,
-      valid_from: parseDay(record.valid_from),
-      valid_to: parseDay(record.valid_to),
-    });
-    setDrawerOpen(true);
+    navigate(`/masters/price-lists/${record.id}/edit`);
   };
 
   const handleDelete = async (id) => {
@@ -76,34 +55,6 @@ const PriceLists = () => {
       setRefreshKey((k) => k + 1);
     } catch (err) {
       message.error(getErrorMessage(err));
-    }
-  };
-
-  const handleSubmit = async () => {
-    try {
-      const values = await form.validateFields();
-      const payload = {
-        ...values,
-        valid_from: values.valid_from ? values.valid_from.format('YYYY-MM-DD') : null,
-        valid_to: values.valid_to ? values.valid_to.format('YYYY-MM-DD') : null,
-      };
-      setSubmitting(true);
-      if (editingPL) {
-        await api.put(`/masters/price-lists/${editingPL.id}`, payload);
-        message.success('Price list updated');
-      } else {
-        await api.post('/masters/price-lists', payload);
-        message.success('Price list created');
-      }
-      setDrawerOpen(false);
-      form.resetFields();
-      setEditingPL(null);
-      setRefreshKey((k) => k + 1);
-    } catch (err) {
-      if (err.errorFields) return;
-      message.error(getErrorMessage(err));
-    } finally {
-      setSubmitting(false);
     }
   };
 
@@ -413,86 +364,7 @@ const PriceLists = () => {
         }}
       />
 
-      {/* Price List Drawer */}
-      <Drawer
-        title={editingPL ? 'Edit Price List' : 'Add Price List'}
-        width={520}
-        open={drawerOpen}
-        onClose={() => { setDrawerOpen(false); setEditingPL(null); form.resetFields(); }}
-        destroyOnHidden
-        extra={
-          <Space>
-            <Button onClick={() => { setDrawerOpen(false); setEditingPL(null); form.resetFields(); }}>
-              Cancel
-            </Button>
-            <Button type="primary" onClick={handleSubmit} loading={submitting}>
-              {editingPL ? 'Update' : 'Create'}
-            </Button>
-          </Space>
-        }
-      >
-        <Form form={form} layout="vertical">
-          <Form.Item name="name" label="Price List Name" rules={[{ required: true, message: 'Required' }]}>
-            <Input placeholder="e.g. Standard Selling" />
-          </Form.Item>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="type" label="Type" rules={[{ required: true, message: 'Required' }]}>
-                <Select
-                  options={[
-                    { label: 'Buying', value: 'buying' },
-                    { label: 'Selling', value: 'selling' },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="currency" label="Currency" initialValue="INR">
-                <Select
-                  options={[
-                    { label: 'INR', value: 'INR' },
-                    { label: 'USD', value: 'USD' },
-                    { label: 'EUR', value: 'EUR' },
-                    { label: 'GBP', value: 'GBP' },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="valid_from" label="Valid From">
-                <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="valid_to" label="Valid To">
-                <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="is_default" label="Default Price List" valuePropName="checked">
-                <Switch />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="status" label="Status" initialValue="active">
-                <Select
-                  options={[
-                    { label: 'Active', value: 'active' },
-                    { label: 'Inactive', value: 'inactive' },
-                  ]}
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Form.Item name="description" label="Description">
-            <Input.TextArea rows={3} placeholder="Description" />
-          </Form.Item>
-        </Form>
-      </Drawer>
+
 
       {/* Item Modal */}
       <Modal

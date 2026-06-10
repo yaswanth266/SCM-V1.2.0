@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Button, Drawer, Form, Input, InputNumber, Select, Space,
   Popconfirm, message, Row, Col, Table, Card, Descriptions, Modal,
@@ -35,81 +36,30 @@ const PICK_STRATEGIES = [
 ];
 
 const Picklist = () => {
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  const navigate = useNavigate();
   const [viewDrawerOpen, setViewDrawerOpen] = useState(false);
   const [viewData, setViewData] = useState(null);
   const [viewLoading, setViewLoading] = useState(false);
-  const [form] = Form.useForm();
-  const [submitting, setSubmitting] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Filters
   const [filterStatus, setFilterStatus] = useState(undefined);
   const [filterWarehouse, setFilterWarehouse] = useState(undefined);
 
-  // Drawer state
-  const [pickItems, setPickItems] = useState([]);
+  // Lookups
   const [warehouses, setWarehouses] = useState([]);
-  const [doOptions, setDoOptions] = useState([]);
-  const [waveOptions, setWaveOptions] = useState([]);
-  const [uomOptions, setUomOptions] = useState([]);
-  const [userOptions, setUserOptions] = useState([]);
 
   // --- Lookups ---
   const loadLookups = useCallback(async () => {
     try {
-      const [whRes, uomRes, userRes, doRes, waveRes] = await Promise.allSettled([
-        api.get('/masters/warehouses', { params: { page_size: 200 } }),
-        api.get('/masters/uom', { params: { page_size: 200 } }),
-        api.get('/users/lookup', { params: { page_size: 200 } }),
-        api.get('/outbound/delivery-orders', { params: { page_size: 100 } }),
-        api.get('/outbound/wave-plans', { params: { page_size: 100 } }),
-      ]);
-      if (whRes.status === 'fulfilled') {
-        const w = whRes.value.data;
-        setWarehouses(
-          (w.items || w.data || w || []).map((i) => ({
-            label: i.name || i.warehouse_name,
-            value: i.id,
-          }))
-        );
-      }
-      if (uomRes.status === 'fulfilled') {
-        const u = uomRes.value.data;
-        setUomOptions(
-          (u.items || u.data || u || []).map((i) => ({
-            label: i.code || i.name,
-            value: i.id,
-          }))
-        );
-      }
-      if (userRes.status === 'fulfilled') {
-        const us = userRes.value.data;
-        setUserOptions(
-          (us.items || us.data || us || []).map((i) => ({
-            label: i.full_name || i.username || `${i.first_name || ''} ${i.last_name || ''}`.trim(),
-            value: i.id,
-          }))
-        );
-      }
-      if (doRes.status === 'fulfilled') {
-        const d = doRes.value.data;
-        setDoOptions(
-          (d.items || d.data || d || []).map((i) => ({
-            label: i.do_number || `DO-${i.id}`,
-            value: i.id,
-          }))
-        );
-      }
-      if (waveRes.status === 'fulfilled') {
-        const w = waveRes.value.data;
-        setWaveOptions(
-          (w.items || w.data || w || []).map((i) => ({
-            label: i.wave_number || `WAVE-${i.id}`,
-            value: i.id,
-          }))
-        );
-      }
+      const whRes = await api.get('/masters/warehouses', { params: { page_size: 200 } });
+      const w = whRes.data;
+      setWarehouses(
+        (w.items || w.data || w || []).map((i) => ({
+          label: i.name || i.warehouse_name,
+          value: i.id,
+        }))
+      );
     } catch {
       // silent
     }
@@ -150,77 +100,7 @@ const Picklist = () => {
 
   // --- Generate / Create ---
   const handleAdd = () => {
-    form.resetFields();
-    setPickItems([]);
-    form.setFieldsValue({ pick_strategy: 'fifo' });
-    setDrawerOpen(true);
-  };
-
-  const addPickItem = () => {
-    setPickItems((prev) => [
-      ...prev,
-      {
-        key: Date.now() + Math.random(),
-        item_id: null,
-        item_name: '',
-        item_code: '',
-        batch_id: null,
-        from_bin_id: null,
-        qty_to_pick: 1,
-        uom_id: null,
-      },
-    ]);
-  };
-
-  const removePickItem = (key) => {
-    setPickItems((prev) => prev.filter((i) => i.key !== key));
-  };
-
-  const updatePickItem = (key, patch) => {
-    setPickItems((prev) => prev.map((i) => (i.key === key ? { ...i, ...patch } : i)));
-  };
-
-  const handleSubmit = async () => {
-    try {
-      const values = await form.validateFields();
-      if (!pickItems.length) {
-        message.error('Add at least one item to pick');
-        return;
-      }
-      const invalid = pickItems.find(
-        (i) => !i.item_id || !i.from_bin_id || !i.qty_to_pick || !i.uom_id
-      );
-      if (invalid) {
-        message.error('Each item needs: item, from-bin, qty, UoM');
-        return;
-      }
-      setSubmitting(true);
-      const payload = {
-        warehouse_id: values.warehouse_id,
-        pick_strategy: values.pick_strategy || 'fifo',
-        wave_id: values.wave_id || null,
-        do_id: values.do_id || null,
-        assigned_to: values.assigned_to || null,
-        items: pickItems.map((i) => ({
-          item_id: i.item_id,
-          batch_id: i.batch_id || null,
-          from_bin_id: i.from_bin_id,
-          qty_to_pick: Number(i.qty_to_pick),
-          uom_id: i.uom_id,
-        })),
-      };
-      const res = await api.post('/outbound/picking-orders', payload);
-      message.success(`Pick list ${res.data?.pick_number || ''} generated`);
-      setDrawerOpen(false);
-      form.resetFields();
-      setPickItems([]);
-      setRefreshKey((k) => k + 1);
-    } catch (err) {
-      if (err?.errorFields) return;
-      message.error(getErrorMessage(err));
-    } finally {
-      setSubmitting(false);
-    }
+    navigate('/warehouse/picklist/new');
   };
 
   // --- Print / Download ---
@@ -564,129 +444,6 @@ const Picklist = () => {
         scroll={{ x: 1400 }}
       />
 
-      {/* --- Generate Pick List Drawer --- */}
-      <Drawer
-        title="Generate Pick List"
-        width={1100}
-        open={drawerOpen}
-        onClose={() => {
-          setDrawerOpen(false);
-          form.resetFields();
-          setPickItems([]);
-        }}
-        destroyOnHidden
-        extra={
-          <Space>
-            <Button
-              onClick={() => {
-                setDrawerOpen(false);
-                form.resetFields();
-                setPickItems([]);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="primary"
-              icon={<SendOutlined />}
-              onClick={handleSubmit}
-              loading={submitting}
-            >
-              Generate
-            </Button>
-          </Space>
-        }
-      >
-        <Form form={form} layout="vertical">
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item
-                name="warehouse_id"
-                label="Warehouse"
-                rules={[{ required: true, message: 'Required' }]}
-              >
-                <Select
-                  options={warehouses}
-                  placeholder="Select warehouse"
-                  showSearch
-                  optionFilterProp="label"
-                />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item
-                name="pick_strategy"
-                label="Pick Strategy"
-                rules={[{ required: true, message: 'Required' }]}
-              >
-                <Select options={PICK_STRATEGIES} placeholder="Strategy" />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="assigned_to" label="Assign To (Picker)">
-                <Select
-                  options={userOptions}
-                  placeholder="Select picker"
-                  showSearch
-                  optionFilterProp="label"
-                  allowClear
-                />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="do_id" label="Delivery Order (optional)">
-                <Select
-                  options={doOptions}
-                  placeholder="Select DO"
-                  showSearch
-                  optionFilterProp="label"
-                  allowClear
-                />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="wave_id" label="Wave Plan (optional)">
-                <Select
-                  options={waveOptions}
-                  placeholder="Select Wave"
-                  showSearch
-                  optionFilterProp="label"
-                  allowClear
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Divider orientation="left">
-            <Space>
-              <InboxOutlined />
-              Items to Pick
-              <Badge count={pickItems.length} style={{ backgroundColor: '#eb2f96' }} />
-            </Space>
-          </Divider>
-
-          <Card size="small" style={{ marginBottom: 12 }}>
-            <Button
-              type="dashed"
-              onClick={addPickItem}
-              block
-              icon={<PlusOutlined />}
-            >
-              Add Item
-            </Button>
-          </Card>
-
-          <Table
-            dataSource={pickItems}
-            columns={createItemColumns}
-            rowKey="key"
-            pagination={false}
-            size="small"
-            scroll={{ x: 900 }}
-            locale={{ emptyText: 'No items added yet — click "Add Item"' }}
-          />
-        </Form>
-      </Drawer>
 
       {/* --- View Pick List Drawer --- */}
       <Drawer
