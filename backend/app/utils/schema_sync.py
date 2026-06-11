@@ -275,6 +275,37 @@ async def ensure_organization_structure_schema(session: AsyncSession) -> None:
             ON DELETE SET NULL
         """))
 
+    position_emp_exists = (await conn.execute(text("""
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'positions'
+          AND column_name = 'employee_id'
+        LIMIT 1
+    """))).scalar_one_or_none()
+    if position_emp_exists is None:
+        await conn.execute(text("ALTER TABLE positions ADD COLUMN employee_id BIGINT NULL"))
+
+    position_emp_fk_exists = (await conn.execute(text("""
+        SELECT 1
+        FROM information_schema.key_column_usage
+        WHERE table_schema = DATABASE()
+          AND table_name = 'positions'
+          AND column_name = 'employee_id'
+          AND referenced_table_name = 'employees'
+        LIMIT 1
+    """))).scalar_one_or_none()
+    if position_emp_fk_exists is None:
+        try:
+            await conn.execute(text("""
+                ALTER TABLE positions
+                ADD CONSTRAINT fk_positions_employee_id
+                FOREIGN KEY (employee_id) REFERENCES employees (id)
+                ON DELETE SET NULL
+            """))
+        except Exception as exc:
+            print(f"Ignored index/fk error: {exc}")
+
     employee_link_exists = (await conn.execute(text("""
         SELECT 1
         FROM information_schema.columns

@@ -1,3 +1,4 @@
+from typing import List, Optional
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy import select, func
@@ -11,7 +12,7 @@ from app.models.user import User, UserRole, Role, UserProject, UserWarehouse, To
 from app.models.warehouse import Warehouse
 from app.schemas.auth import (
     LoginRequest, TokenResponse, UserCreate, UserResponse,
-    ChangePassword, RefreshTokenRequest, RoleInfo,
+    ChangePassword, RefreshTokenRequest, RoleInfo, UserPositionInfo,
 )
 from app.services.auth_service import (
     hash_password, verify_password, create_access_token,
@@ -22,6 +23,34 @@ from app.utils.position_role_sync import sync_user_position_role
 from app.config import settings
 
 router = APIRouter()
+
+
+async def get_user_positions(db: AsyncSession, employee_id: Optional[int], employee_position_id: Optional[int]) -> List[UserPositionInfo]:
+    if not employee_id:
+        return []
+    from app.models.master import Position
+    pos_result = await db.execute(
+        select(Position)
+        .options(selectinload(Position.role))
+        .where((Position.employee_id == employee_id) | (Position.id == employee_position_id))
+    )
+    positions_list = []
+    seen_ids = set()
+    for pos in pos_result.scalars().all():
+        if pos.id in seen_ids:
+            continue
+        seen_ids.add(pos.id)
+        positions_list.append(
+            UserPositionInfo(
+                id=pos.id,
+                name=pos.name,
+                code=pos.code,
+                role_id=pos.role.id if pos.role else None,
+                role_name=pos.role.name if pos.role else None,
+                role_code=pos.role.code if pos.role else None,
+            )
+        )
+    return positions_list
 
 
 def _client_ip(request: Request) -> str:
@@ -234,12 +263,17 @@ async def login(
     user = (
         await db.execute(
             select(User)
-            .options(selectinload(User.roles).selectinload(UserRole.role))
+            .options(
+                selectinload(User.roles).selectinload(UserRole.role),
+                selectinload(User.employee)
+            )
             .where(User.id == user.id)
         )
     ).scalar_one()
 
     role_list = [RoleInfo(id=ur.role.id, code=ur.role.code, name=ur.role.name) for ur in user.roles if ur.role] if user.roles else []
+    employee_position_id = user.employee.position_id if user.employee else None
+    positions_list = await get_user_positions(db, user.employee_id, employee_position_id)
     # BUG-AUTH-010 fix: previously the login response included every
     # individual "module.action.resource" permission string, leaking the
     # full RBAC inventory (a recon target). De-duplicate to the canonical
@@ -273,6 +307,8 @@ async def login(
             id=user.id,
             organization_id=user.organization_id,
             employee_code=user.employee_code,
+            employee_id=user.employee_id,
+            position_id=employee_position_id,
             username=user.username,
             email=user.email,
             first_name=user.first_name,
@@ -290,6 +326,7 @@ async def login(
             last_login=user.last_login,
             created_at=user.created_at,
             roles=role_list,
+            positions=positions_list,
             permissions=permissions,
         ),
     )
@@ -325,12 +362,17 @@ async def get_me(
     current_user = (
         await db.execute(
             select(User)
-            .options(selectinload(User.roles).selectinload(UserRole.role))
+            .options(
+                selectinload(User.roles).selectinload(UserRole.role),
+                selectinload(User.employee)
+            )
             .where(User.id == current_user.id)
         )
     ).scalar_one()
 
     role_list = [RoleInfo(id=ur.role.id, code=ur.role.code, name=ur.role.name) for ur in current_user.roles if ur.role] if current_user.roles else []
+    employee_position_id = current_user.employee.position_id if current_user.employee else None
+    positions_list = await get_user_positions(db, current_user.employee_id, employee_position_id)
     # BUG-AUTH-010 fix: dedupe to module.action so /me matches /login output.
     raw_permissions = await get_user_permissions(db, current_user.id)
     permissions = sorted({
@@ -356,6 +398,8 @@ async def get_me(
         id=current_user.id,
         organization_id=current_user.organization_id,
         employee_code=current_user.employee_code,
+        employee_id=current_user.employee_id,
+        position_id=employee_position_id,
         username=current_user.username,
         email=current_user.email,
         first_name=current_user.first_name,
@@ -373,6 +417,7 @@ async def get_me(
         last_login=current_user.last_login,
         created_at=current_user.created_at,
         roles=role_list,
+        positions=positions_list,
         permissions=permissions,
     )
 

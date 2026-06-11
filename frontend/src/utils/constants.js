@@ -234,6 +234,7 @@ export const MENU_CONFIG = [
       { key: 'masters-users', label: 'Users', path: '/masters/users' },
       { key: 'masters-user-groups', label: 'User Groups', path: '/masters/user-groups' },
       { key: 'masters-organization-structure', label: 'Org Structure', path: '/masters/organization-structure' },
+      { key: 'masters-hr-sync', label: 'HR Sync', path: '/masters/organization-structure/hr-sync' },
     ],
   },
   {

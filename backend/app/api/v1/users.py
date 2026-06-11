@@ -123,7 +123,7 @@ class StatusPayload(BaseModel):
     status: str
 
 
-def _build_user_response(u, roles_loaded=True):
+async def _build_user_response(db: AsyncSession, u, roles_loaded=True):
     """Build a UserResponse from a User model instance."""
     full_name = u.first_name
     if u.last_name:
@@ -135,14 +135,33 @@ def _build_user_response(u, roles_loaded=True):
             if ur.role:
                 role_list.append(RoleInfo(id=ur.role.id, code=ur.role.code, name=ur.role.name))
 
+    # Ensure employee is loaded/resolved
+    employee_position_id = None
+    if u.employee_id:
+        try:
+            employee = u.employee
+        except Exception:
+            employee = None
+        if employee is None:
+            employee = (await db.execute(
+                select(Employee).where(Employee.id == u.employee_id)
+            )).scalar_one_or_none()
+        if employee:
+            employee_position_id = employee.position_id
+
+    # Fetch positions list
+    from app.api.v1.auth import get_user_positions
+    positions_list = await get_user_positions(db, u.employee_id, employee_position_id)
+
     return UserResponse(
         id=u.id, organization_id=u.organization_id, employee_id=u.employee_id, employee_code=u.employee_code,
+        position_id=employee_position_id,
         username=u.username, email=u.email, first_name=u.first_name, last_name=u.last_name,
         full_name=full_name, phone=u.phone, user_type=u.user_type, department=u.department,
         designation=u.designation, is_active=u.is_active,
         status="active" if u.is_active else "inactive",
         last_login=u.last_login, created_at=u.created_at,
-        roles=role_list, permissions=[],
+        roles=role_list, positions=positions_list, permissions=[],
     )
 
 
@@ -335,11 +354,14 @@ async def create_user(
 
     # Reload with roles
     result = await db.execute(
-        select(User).options(selectinload(User.roles).selectinload(UserRole.role))
+        select(User).options(
+            selectinload(User.roles).selectinload(UserRole.role),
+            selectinload(User.employee)
+        )
         .where(User.id == user.id)
     )
     user = result.scalar_one()
-    return _build_user_response(user)
+    return await _build_user_response(db, user)
 
 
 # BUG-AUTH-072 fix: capture an audit row when an admin exports the user
@@ -593,7 +615,10 @@ async def get_user(
             raise HTTPException(status_code=403, detail="You can only view your own user profile")
 
     result = await db.execute(
-        select(User).options(selectinload(User.roles).selectinload(UserRole.role))
+        select(User).options(
+            selectinload(User.roles).selectinload(UserRole.role),
+            selectinload(User.employee)
+        )
         .where(User.id == user_id)
     )
     user = result.scalar_one_or_none()
@@ -606,7 +631,7 @@ async def get_user(
     if user_id != current_user.id:
         await _guard_cross_tenant(db, current_user, user)
 
-    return _build_user_response(user)
+    return await _build_user_response(db, user)
 
 
 @router.put("/{user_id}", response_model=UserResponse)
@@ -698,11 +723,14 @@ async def update_user(
 
     # Reload with roles
     result = await db.execute(
-        select(User).options(selectinload(User.roles).selectinload(UserRole.role))
+        select(User).options(
+            selectinload(User.roles).selectinload(UserRole.role),
+            selectinload(User.employee)
+        )
         .where(User.id == user_id)
     )
     user = result.scalar_one()
-    return _build_user_response(user)
+    return await _build_user_response(db, user)
 
 
 @router.delete("/{user_id}")

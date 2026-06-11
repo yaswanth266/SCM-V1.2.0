@@ -1288,10 +1288,32 @@ class EmployeeCreate(BaseModel):
         return self
 
 
-class EmployeeResponse(EmployeeCreate):
+class EmployeePositionResponse(BaseModel):
     id: int
+    name: str
+    code: str
+    role_name: Optional[str] = None
+    department: Optional[str] = None
+    level_name: Optional[str] = None
+    model_config = {"from_attributes": True}
+
+
+class EmployeeResponse(BaseModel):
+    id: int
+    employee_code: str
+    name: str
+    photo: Optional[str] = None
+    status: Optional[str] = "Active"
+    dob: Optional[date] = None
+    gender: Optional[str] = None
+    pan_number: Optional[str] = None
+    aadhaar_number: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    position_id: Optional[int] = None
     position_name: Optional[str] = None
     position_code: Optional[str] = None
+    positions: Optional[List[EmployeePositionResponse]] = None
     model_config = {"from_attributes": True}
 
 

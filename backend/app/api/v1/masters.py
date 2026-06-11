@@ -2486,9 +2486,9 @@ async def list_employees(
     await ensure_organization_structure_schema(db)
     offset, limit = paginate_params(page, page_size)
     q = (
-        select(Employee, Position.name, Position.code, User.id, User.username)
-        .join(Position, Employee.position_id == Position.id, isouter=True)
+        select(Employee, User.id, User.username)
         .join(User, User.employee_id == Employee.id, isouter=True)
+        .options(selectinload(Employee.positions), selectinload(Employee.position))
     )
     count_q = select(func.count(Employee.id))
     if search:
@@ -2499,10 +2499,12 @@ async def list_employees(
     total = (await db.execute(count_q)).scalar() or 0
     rows = (await db.execute(q.order_by(Employee.name).offset(offset).limit(limit))).all()
     items = []
-    for employee, position_name, position_code, user_id, username in rows:
+    for employee, user_id, username in rows:
         data = EmployeeResponse.model_validate(employee).model_dump()
-        data["position_name"] = position_name
-        data["position_code"] = position_code
+        primary_pos = employee.positions[0] if employee.positions else employee.position
+        data["position_id"] = primary_pos.id if primary_pos else None
+        data["position_name"] = primary_pos.name if primary_pos else None
+        data["position_code"] = primary_pos.code if primary_pos else None
         data["user_id"] = user_id
         data["username"] = username
         items.append(data)
@@ -2526,6 +2528,11 @@ async def create_employee(
     row = Employee(**payload.model_dump())
     db.add(row)
     await db.flush()
+    if payload.position_id:
+        pos = (await db.execute(select(Position).where(Position.id == payload.position_id))).scalar_one_or_none()
+        if pos:
+            pos.employee_id = row.id
+            await db.flush()
     return {"id": row.id, "message": "Employee created"}
 
 
@@ -2550,6 +2557,11 @@ async def update_employee(
     for key, value in payload.model_dump().items():
         setattr(row, key, value)
     await db.flush()
+    if payload.position_id:
+        pos = (await db.execute(select(Position).where(Position.id == payload.position_id))).scalar_one_or_none()
+        if pos:
+            pos.employee_id = row.id
+            await db.flush()
     return {"id": row.id, "message": "Employee updated"}
 
 
@@ -2622,6 +2634,26 @@ async def create_user_from_employee(
     )
     db.add(user)
     await db.flush()
+
+    # Assign roles from positions mapped to the employee
+    pos_result = await db.execute(
+        select(Position)
+        .options(selectinload(Position.role))
+        .where((Position.employee_id == employee.id) | (Position.id == employee.position_id))
+    )
+    role_ids = set()
+    for pos in pos_result.scalars().all():
+        if pos.role_id and pos.role and pos.role.is_active:
+            role_ids.add(pos.role_id)
+
+    for r_id in role_ids:
+        db.add(UserRole(user_id=user.id, role_id=r_id))
+    
+    await db.flush()
+
+    from app.utils.position_role_sync import sync_user_position_role
+    await sync_user_position_role(db, user)
+
     return {"id": user.id, "username": user.username, "message": "User created from employee"}
 
 
@@ -2702,7 +2734,7 @@ def _external_text(row: dict, *keys: str, max_len: int = 255) -> str | None:
                 value = None
                 break
             value = value.get(part)
-        if value is not None and str(value).strip():
+        if value is not None and not isinstance(value, (dict, list)) and str(value).strip():
             return str(value).strip()[:max_len]
     return None
 
@@ -2769,7 +2801,22 @@ async def _office_id_from_external(db: AsyncSession, row: dict, stats: dict[str,
     office_name = _external_text(row, "office.name", "office_name", "officeName", "office", "branch", "location", max_len=255)
     if not office_name:
         return None
-    office = (await db.execute(select(Office).where(func.lower(Office.name) == office_name.lower()))).scalar_one_or_none()
+
+    office_id = row.get("office_id")
+    if not office_id and isinstance(row.get("office"), dict):
+        office_id = row.get("office").get("id") or row.get("office").get("office_id") or row.get("office").get("officeId")
+        
+    try:
+        office_id = int(office_id) if office_id is not None else None
+    except (TypeError, ValueError):
+        office_id = None
+
+    office = None
+    if office_id:
+        office = (await db.execute(select(Office).where(Office.id == office_id))).scalar_one_or_none()
+        
+    if not office:
+        office = (await db.execute(select(Office).where(func.lower(Office.name) == office_name.lower()))).scalar_one_or_none()
     
     level = _external_text(row, "office.level", "office_level", "officeLevel", "level", max_len=50)
     country = _external_text(row, "office.geo_location.country", "office.geoLocation.country", "office.geo_location", "country", max_len=100)
@@ -2794,6 +2841,8 @@ async def _office_id_from_external(db: AsyncSession, row: dict, stats: dict[str,
             specific_location=specific_location,
             address=address,
         )
+        if office_id is not None:
+            office.id = office_id
         db.add(office)
         await db.flush()
         stats["offices_created"] += 1
@@ -2897,24 +2946,42 @@ async def _resolve_parent_position_id(db: AsyncSession, row: dict, stats: dict[s
 
 async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[str, int], organization_id: int | None):
     position_id = row.get("position_id")
-    if position_id:
-        exists = (await db.execute(select(Position.id).where(Position.id == position_id))).scalar_one_or_none()
-        return exists
+    if not position_id and isinstance(row.get("position"), dict):
+        position_id = row.get("position").get("id") or row.get("position").get("position_id")
+    if not position_id:
+        position_id = row.get("id")
+    try:
+        position_id = int(position_id) if position_id is not None else None
+    except (TypeError, ValueError):
+        position_id = None
+
     position_name = _external_text(
         row,
         "position.name", "position_name", "positionName", "position", "designation", "designation_name", "designationName",
-        "role_name", "roleName", "role",
+        "role_name", "roleName", "role", "name",
         max_len=255,
     )
-    position_code = _external_text(row, "position.code", "position_code", "positionCode", "designation_code", "designationCode", "role_code", "roleCode", max_len=100)
+    position_code = _external_text(row, "position.code", "position_code", "positionCode", "designation_code", "designationCode", "role_code", "roleCode", "code", max_len=100)
     position_code = position_code or _external_code(position_name, 100)
+    
     if not position_code or not position_name:
+        if position_id:
+            exists = (await db.execute(select(Position.id).where(Position.id == position_id))).scalar_one_or_none()
+            return exists
         return None
-    position = (await db.execute(select(Position).where(func.lower(Position.code) == position_code.lower()))).scalar_one_or_none()
+
+    position = None
+    if position_id:
+        position = (await db.execute(select(Position).where(Position.id == position_id))).scalar_one_or_none()
+    
+    if not position:
+        position = (await db.execute(select(Position).where(func.lower(Position.code) == position_code.lower()))).scalar_one_or_none()
+
     project_id = await _project_id_from_external(db, row, stats, organization_id)
     office_id = await _office_id_from_external(db, row, stats)
     role_id = await _role_id_from_external(db, row)
     parent_position_id = await _resolve_parent_position_id(db, row, stats)
+    
     if not position:
         position = Position(
             code=position_code,
@@ -2928,6 +2995,8 @@ async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[st
             office_id=office_id,
             parent_position_id=parent_position_id,
         )
+        if position_id is not None:
+            position.id = position_id
         db.add(position)
         await db.flush()
         stats["positions_created"] += 1
@@ -2953,7 +3022,20 @@ async def _upsert_external_employee(db: AsyncSession, row: dict, stats: dict[str
     ).scalar_one_or_none()
     created = employee is None
     if employee is None:
+        ext_id = None
+        emp_dict = row.get("employee")
+        if emp_dict and isinstance(emp_dict, dict):
+            ext_id = emp_dict.get("id")
+        if not ext_id:
+            ext_id = row.get("id")
+        try:
+            ext_id = int(ext_id) if ext_id is not None else None
+        except (TypeError, ValueError):
+            ext_id = None
+
         employee = Employee(employee_code=employee_code, name="")
+        if ext_id is not None:
+            employee.id = ext_id
         db.add(employee)
         await db.flush()
 
@@ -2978,10 +3060,15 @@ async def _upsert_external_employee(db: AsyncSession, row: dict, stats: dict[str
         12,
     )
     employee.phone = phone or employee.phone
-    employee.email = await _employee_unique_value(db, Employee.email, email, employee.id) if email else employee.email
-    employee.pan_number = await _employee_unique_value(db, Employee.pan_number, pan_number, employee.id) if pan_number else employee.pan_number
-    employee.aadhaar_number = await _employee_unique_value(db, Employee.aadhaar_number, aadhaar_number, employee.id) if aadhaar_number else employee.aadhaar_number
-    employee.position_id = await _position_id_from_external(db, row, stats, organization_id) or employee.position_id
+    employee.email = email or employee.email
+    employee.pan_number = pan_number or employee.pan_number
+    employee.aadhaar_number = aadhaar_number or employee.aadhaar_number
+    pos_id = await _position_id_from_external(db, row, stats, organization_id)
+    employee.position_id = pos_id or employee.position_id
+    if pos_id and employee.id:
+        pos = (await db.execute(select(Position).where(Position.id == pos_id))).scalar_one_or_none()
+        if pos:
+            pos.employee_id = employee.id
     return True, created
 
 
@@ -3026,6 +3113,125 @@ async def _apply_position_roles_to_linked_users(db: AsyncSession) -> int:
     return applied
 
 
+async def _sync_all_positions(
+    db: AsyncSession, stats: dict[str, int], headers: dict[str, str], client: httpx.AsyncClient, organization_id: int | None
+) -> int:
+    base_url = settings.HR_EMPLOYEE_API_URL
+    if "/api/employees" in base_url:
+        pos_url = base_url.replace("/api/employees", "/api/positions")
+    elif "/employees" in base_url:
+        pos_url = base_url.replace("/employees", "/positions")
+    else:
+        pos_url = base_url.replace("employees", "positions")
+
+    next_url = pos_url
+    pages_fetched = 0
+    total_positions_fetched = 0
+    seen_urls = set()
+
+    while next_url:
+        if next_url in seen_urls:
+            break
+        seen_urls.add(next_url)
+
+        try:
+            response = await client.get(next_url, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+            pages_fetched += 1
+        except Exception as exc:
+            print(f"Error fetching position page {pages_fetched + 1}: {exc}")
+            break
+
+        page_rows = _external_rows(payload)
+        if not page_rows:
+            break
+
+        total_positions_fetched += len(page_rows)
+
+        for row in page_rows:
+            try:
+                async with db.begin_nested():
+                    pos_row = dict(row)
+                    pos_row["position"] = {"reporting_to": row.get("reporting_to_details")}
+                    await _position_id_from_external(db, pos_row, stats, organization_id)
+            except Exception as exc:
+                print(f"Transient error syncing position row: {exc}")
+
+        await db.commit()
+        next_url = _external_next_url(payload, str(response.url))
+        await asyncio.sleep(0.05)
+
+    return total_positions_fetched
+
+
+async def _sync_position_employee_mappings(db: AsyncSession, headers: dict[str, str], client: httpx.AsyncClient) -> int:
+    base_url = settings.HR_EMPLOYEE_API_URL
+    if "/api/employees" in base_url:
+        pos_url = base_url.replace("/api/employees", "/api/positions")
+    elif "/employees" in base_url:
+        pos_url = base_url.replace("/employees", "/positions")
+    else:
+        pos_url = base_url.replace("employees", "positions")
+
+    next_url = pos_url
+    pages_fetched = 0
+    mapped_count = 0
+    seen_urls = set()
+
+    while next_url:
+        if next_url in seen_urls:
+            break
+        seen_urls.add(next_url)
+
+        try:
+            response = await client.get(next_url, headers=headers)
+            response.raise_for_status()
+            payload = response.json()
+            pages_fetched += 1
+        except Exception as exc:
+            print(f"Error fetching position page for mapping {pages_fetched + 1}: {exc}")
+            break
+
+        page_rows = _external_rows(payload)
+        if not page_rows:
+            break
+
+        for row in page_rows:
+            pos_id = row.get("id") or row.get("position_id")
+            try:
+                pos_id = int(pos_id) if pos_id is not None else None
+            except (TypeError, ValueError):
+                pos_id = None
+
+            if not pos_id:
+                continue
+
+            assigned_emp = row.get("assigned_employee")
+            assigned_emp_id = None
+            if assigned_emp and isinstance(assigned_emp, dict):
+                assigned_emp_id = assigned_emp.get("id")
+
+            try:
+                assigned_emp_id = int(assigned_emp_id) if assigned_emp_id is not None else None
+            except (TypeError, ValueError):
+                assigned_emp_id = None
+
+            if assigned_emp_id:
+                pos = (await db.execute(select(Position).where(Position.id == pos_id))).scalar_one_or_none()
+                if pos:
+                    emp_exists = (await db.execute(select(Employee.id).where(Employee.id == assigned_emp_id))).scalar_one_or_none()
+                    if emp_exists:
+                        pos.employee_id = assigned_emp_id
+                        mapped_count += 1
+
+        await db.commit()
+        next_url = _external_next_url(payload, str(response.url))
+        await asyncio.sleep(0.05)
+
+    return mapped_count
+
+
 @router.post("/employees/sync-api")
 async def sync_employees_from_external_api(
     max_pages: int = Query(500, ge=1, le=1000),
@@ -3033,34 +3239,113 @@ async def sync_employees_from_external_api(
     current_user: User = Depends(require_permission("masters", "update", "users")),
 ):
     await ensure_organization_structure_schema(db)
-    rows, api_total, pages_fetched = await _fetch_external_employee_rows(max_pages=max_pages)
-    if not rows:
-        raise HTTPException(status_code=422, detail="Employee API response did not contain employee rows")
+    if not settings.HR_EMPLOYEE_API_URL:
+        raise HTTPException(status_code=422, detail="Set HR_EMPLOYEE_API_URL in backend/.env")
+    if not settings.HR_API_KEY:
+        raise HTTPException(status_code=422, detail="Set HR_API_KEY in backend/.env")
 
+    url = httpx.URL(settings.HR_EMPLOYEE_API_URL)
+    page_size = 200
+    if "page_size" not in url.params:
+        url = url.copy_add_param("page_size", str(page_size))
+    else:
+        try:
+            page_size = int(url.params["page_size"])
+        except ValueError:
+            page_size = 200
+
+    headers = {"X-Api-Key": settings.HR_API_KEY, "Accept": "application/json"}
+    
     created = 0
     updated = 0
     skipped = 0
+    fetched_total = 0
+    pages_fetched = 0
+    api_total = None
+    seen_urls = set()
     org_stats = {"projects_created": 0, "offices_created": 0, "positions_created": 0}
-    for row in rows:
-        try:
-            async with db.begin_nested():
-                processed, was_created = await _upsert_external_employee(db, row, org_stats, current_user.organization_id)
-                if not processed:
-                    skipped += 1
-                elif was_created:
-                    created += 1
-                else:
-                    updated += 1
-        except Exception as exc:
-            skipped += 1
-            print(f"Transient error syncing row: {exc}")
-    await db.flush()
-    linked_users = await _link_users_to_employees(db)
-    role_links_applied = await _apply_position_roles_to_linked_users(db)
+    positions_total = 0
+    mapped_positions = 0
+    
+    next_url = str(url)
+    
+    try:
+        async with httpx.AsyncClient(timeout=settings.HR_API_TIMEOUT, follow_redirects=True) as client:
+            # First, sync all positions
+            positions_total = await _sync_all_positions(db, org_stats, headers, client, current_user.organization_id)
+            
+            # Second, sync all employees
+            while next_url and pages_fetched < max_pages:
+                if next_url in seen_urls:
+                    break
+                seen_urls.add(next_url)
+                
+                try:
+                    response = await client.get(next_url, headers=headers)
+                    response.raise_for_status()
+                    payload = response.json()
+                    pages_fetched += 1
+                except Exception as exc:
+                    print(f"Error fetching page {pages_fetched + 1}: {exc}")
+                    if fetched_total > 0:
+                        break
+                    raise HTTPException(status_code=502, detail=f"Employee API fetch error: {exc}")
+                
+                if isinstance(payload, dict) and isinstance(payload.get("count"), int):
+                    api_total = int(payload["count"])
+                
+                page_rows = _external_rows(payload)
+                if not page_rows:
+                    break
+                
+                fetched_total += len(page_rows)
+                
+                for row in page_rows:
+                    try:
+                        async with db.begin_nested():
+                            processed, was_created = await _upsert_external_employee(db, row, org_stats, current_user.organization_id)
+                            if not processed:
+                                skipped += 1
+                            elif was_created:
+                                created += 1
+                            else:
+                                updated += 1
+                    except Exception as exc:
+                        skipped += 1
+                        print(f"Transient error syncing row: {exc}")
+                
+                # Commit this chunk's transaction immediately!
+                await db.commit()
+                
+                next_url = _external_next_url(payload, str(response.url))
+                # Sleep a few milliseconds (e.g. 50ms) to yield execution
+                await asyncio.sleep(0.05)
+            
+            # Third, map positions to employees using active client context
+            mapped_positions = await _sync_position_employee_mappings(db, headers, client)
+                
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text[:500] if exc.response is not None else str(exc)
+        raise HTTPException(status_code=502, detail=f"Employee API returned an error: {detail}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Unable to sync employee API: {exc}")
+
+    linked_users = 0
+    role_links_applied = 0
+    try:
+        linked_users = await _link_users_to_employees(db)
+        role_links_applied = await _apply_position_roles_to_linked_users(db)
+        await db.commit()
+    except Exception as exc:
+        print(f"Error post-processing sync: {exc}")
+
     return {
         "message": "Employee API sync completed",
-        "fetched": len(rows),
+        "fetched": fetched_total,
         "api_total": api_total,
+        "positions_total": positions_total,
         "pages_fetched": pages_fetched,
         "created": created,
         "updated": updated,
@@ -3068,6 +3353,7 @@ async def sync_employees_from_external_api(
         **org_stats,
         "linked_users": linked_users,
         "role_links_applied": role_links_applied,
+        "mapped_positions": mapped_positions,
     }
 
 

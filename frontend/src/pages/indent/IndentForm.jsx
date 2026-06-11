@@ -20,6 +20,7 @@ import {
   handleFormValidationFailed,
 } from '../../utils/helpers';
 import { DATE_FORMAT } from '../../utils/constants';
+import useAuthStore from '../../store/authStore';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -38,6 +39,7 @@ const IndentForm = () => {
   const isNew = !id || id === 'new';
 
   const [form] = Form.useForm();
+  const user = useAuthStore((s) => s.user);
   const [loading, setLoading] = useState(!isNew);
   const [submitting, setSubmitting] = useState(false);
   const [indent, setIndent] = useState(null);
@@ -113,9 +115,10 @@ const IndentForm = () => {
         indent_type: 'regular',
         indent_date: dayjs(),
         required_date: dayjs().add(7, 'day'),
+        department: user?.department || null,
       });
     }
-  }, [id]);
+  }, [id, user]);
 
   const fetchIndent = async () => {
     setLoading(true);
@@ -522,6 +525,7 @@ const IndentForm = () => {
               touch them. Urgent flag is exposed as a single inline checkbox. */}
           <Form.Item name="indent_type" hidden><Input /></Form.Item>
           <Form.Item name="indent_date" hidden><DatePicker /></Form.Item>
+          <Form.Item name="department" hidden><Input /></Form.Item>
           {/* warehouse_id and project_id auto-fill from user_warehouses /
               user_projects when the user has exactly one of each. Keep them
               as hidden Form.Items in that case so validateFields() still
@@ -574,12 +578,22 @@ const IndentForm = () => {
                 />
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Form.Item name="department" label="Department (optional)">
-                <Select options={departments} placeholder="Select department" allowClear optionFilterProp="label" />
-              </Form.Item>
-            </Col>
           </Row>
+
+          <Divider orientation="left">Items</Divider>
+          <Table
+            dataSource={indentItems}
+            columns={itemColumns}
+            rowKey="key"
+            pagination={false}
+            size="small"
+            scroll={{ x: 900 }}
+            footer={() => (
+              <Button type="dashed" onClick={addItemRow} icon={<PlusOutlined />} block>Add Item</Button>
+            )}
+            style={{ marginBottom: 24 }}
+          />
+
           <Row gutter={16}>
             <Col xs={24}>
               <Form.Item name="remarks" label="Remarks (optional)">
@@ -587,7 +601,7 @@ const IndentForm = () => {
               </Form.Item>
             </Col>
           </Row>
-          <Form.Item style={{ marginBottom: 8 }}>
+          <Form.Item style={{ marginBottom: 16 }}>
             <Button
               type={form.getFieldValue('indent_type') === 'urgent' ? 'primary' : 'default'}
               danger={form.getFieldValue('indent_type') === 'urgent'}
@@ -652,19 +666,6 @@ const IndentForm = () => {
             </Upload>
           </Form.Item>
         </Form>
-
-        <Divider orientation="left">Items</Divider>
-        <Table
-          dataSource={indentItems}
-          columns={itemColumns}
-          rowKey="key"
-          pagination={false}
-          size="small"
-          scroll={{ x: 900 }}
-          footer={() => (
-            <Button type="dashed" onClick={addItemRow} icon={<PlusOutlined />} block>Add Item</Button>
-          )}
-        />
 
         <Divider />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>

@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  App as AntApp, Button, DatePicker, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Tabs,
+  App as AntApp, Button, DatePicker, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tabs, Tag,
 } from 'antd';
-import { DeleteOutlined, EditOutlined, PlusOutlined, SyncOutlined, UserAddOutlined } from '@ant-design/icons';
+import { CloudSyncOutlined, DeleteOutlined, EditOutlined, PlusOutlined, SyncOutlined, UserAddOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { useNavigate } from 'react-router-dom';
 import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
 import api from '../../config/api';
@@ -19,6 +20,7 @@ const ENDPOINTS = {
 };
 
 const OrganizationStructure = () => {
+  const navigate = useNavigate();
   const { message } = AntApp.useApp();
   const [activeTab, setActiveTab] = useState('projects');
   const [modalOpen, setModalOpen] = useState(false);
@@ -240,13 +242,13 @@ const OrganizationStructure = () => {
     positions: [
       { title: 'Code', dataIndex: 'code', width: 150 },
       { title: 'Position', dataIndex: 'name', width: 220 },
-      { title: 'Role', dataIndex: 'role_name', width: 170 },
-      { title: 'Role Code', dataIndex: 'role_code', width: 150 },
-      { title: 'Level', dataIndex: 'level_name', width: 120 },
-      { title: 'Department', dataIndex: 'department', width: 150 },
-      { title: 'Project', dataIndex: 'project_name', width: 180 },
-      { title: 'Office', dataIndex: 'office_name', width: 180 },
-      { title: 'Reports To', dataIndex: 'parent_position_name', width: 180 },
+      { title: 'Role', dataIndex: 'role_name', width: 150 },
+      { title: 'Role Code', dataIndex: 'role_code', width: 130 },
+      { title: 'Level', dataIndex: 'level_name', width: 110 },
+      { title: 'Department', dataIndex: 'department', width: 140 },
+      { title: 'Project', dataIndex: 'project_name', width: 160 },
+      { title: 'Office', dataIndex: 'office_name', width: 160 },
+      { title: 'Reports To', dataIndex: 'parent_position_name', width: 160 },
       actionColumn,
     ],
     employees: [
@@ -255,7 +257,37 @@ const OrganizationStructure = () => {
       { title: 'Status', dataIndex: 'status', width: 110 },
       { title: 'Phone', dataIndex: 'phone', width: 140 },
       { title: 'Email', dataIndex: 'email', width: 220 },
-      { title: 'Position', dataIndex: 'position_name', width: 200 },
+      {
+        title: 'Positions',
+        key: 'positions',
+        width: 280,
+        render: (_, record) => {
+          // Handle positions array (future backend support for multiple positions)
+          if (record.positions && Array.isArray(record.positions) && record.positions.length > 0) {
+            return (
+              <Space size={[0, 4]} wrap>
+                {record.positions.map((p, i) => {
+                  const label = typeof p === 'object' ? (p.name || p.position_name || '') : p;
+                  return label ? <Tag key={i} color="blue">{label}</Tag> : null;
+                })}
+              </Space>
+            );
+          }
+          // Handle pipe-separated position_name (fallback for legacy data)
+          if (record.position_name && record.position_name.includes('|')) {
+            const parts = record.position_name.split('|').map((s) => s.trim()).filter(Boolean);
+            if (parts.length > 1) {
+              return (
+                <Space size={[0, 4]} wrap>
+                  {parts.map((p, i) => <Tag key={i} color="blue">{p}</Tag>)}
+                </Space>
+              );
+            }
+          }
+          // Single position (current behavior)
+          return record.position_name || record.designation || '-';
+        },
+      },
       employeeActionColumn,
     ],
   };
@@ -425,6 +457,9 @@ const OrganizationStructure = () => {
         <Space>
           <Button icon={<SyncOutlined />} loading={syncing} onClick={handleSyncEmployees}>
             Sync API
+          </Button>
+          <Button icon={<CloudSyncOutlined />} onClick={() => navigate('/masters/organization-structure/hr-sync')}>
+            HR Sync Dashboard
           </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>Add {titleByTab[activeTab]}</Button>
         </Space>

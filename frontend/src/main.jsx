@@ -197,6 +197,7 @@ if (typeof window !== 'undefined') {
 // any DOM-replace path) duplicated the ribbon. We now mount it idempotently
 // using a fixed id and skip re-appending if it's already there.
 if (IS_UAT && typeof document !== 'undefined') {
+  document.body.classList.add('bavya-uat');
   const RIBBON_ID = 'bavya-uat-ribbon';
   if (!document.getElementById(RIBBON_ID)) {
     const ribbon = document.createElement('div');

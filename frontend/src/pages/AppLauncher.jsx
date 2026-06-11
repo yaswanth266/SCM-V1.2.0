@@ -23,6 +23,7 @@ import {
 } from '@ant-design/icons';
 import useAuthStore from '../store/authStore';
 import api from '../config/api';
+import RoleSwitcher from '../components/RoleSwitcher';
 
 // Bavya design tokens — module tile palette
 const MODULES = [
@@ -243,6 +244,7 @@ const AppLauncher = () => {
   return (
     <div className="bavya-launcher">
       <div className="bavya-launcher-topbar">
+        <RoleSwitcher />
         <Dropdown menu={userMenuItems} trigger={['click']} placement="bottomRight">
           <div
             className="bavya-launcher-profile"

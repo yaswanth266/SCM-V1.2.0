@@ -178,8 +178,7 @@ const Login = () => {
               </>
             ) : (
               <>
-                Here, every supply chain creates a lifeline{' '}
-
+                Here, every supply chain creates a <em>lifeline.</em>
               </>
             )}
           </h1>

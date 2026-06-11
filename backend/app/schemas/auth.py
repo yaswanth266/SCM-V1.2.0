@@ -143,11 +143,21 @@ class RoleInfo(BaseModel):
     name: str
 
 
+class UserPositionInfo(BaseModel):
+    id: int
+    name: str
+    code: str
+    role_id: Optional[int] = None
+    role_name: Optional[str] = None
+    role_code: Optional[str] = None
+
+
 class UserResponse(BaseModel):
     id: int
     organization_id: int
     employee_id: Optional[int] = None
     employee_code: Optional[str] = None
+    position_id: Optional[int] = None
     username: str
     email: str
     first_name: str
@@ -171,6 +181,7 @@ class UserResponse(BaseModel):
     last_login: Optional[datetime] = None
     created_at: Optional[datetime] = None
     roles: List[RoleInfo] = []
+    positions: List[UserPositionInfo] = []
     permissions: List[str] = []
 
     model_config = {"from_attributes": True}

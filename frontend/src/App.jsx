@@ -79,6 +79,7 @@ const CategoryAttributeMapping = lazy(() => import('./pages/masters/CategoryAttr
 const Specs = lazy(() => import('./pages/masters/Specs'));
 const UserGroups = lazy(() => import('./pages/masters/UserGroups'));
 const OrganizationStructure = lazy(() => import('./pages/masters/OrganizationStructure'));
+const HRSyncDashboard = lazy(() => import('./pages/masters/HRSyncDashboard'));
 const BOMs = lazy(() => import('./pages/masters/BOMs'));
 const BOMForm = lazy(() => import('./pages/masters/BOMForm'));
 const Lms = lazy(() => import('./pages/lms/Lms'));
@@ -454,6 +455,7 @@ const App = () => {
             <Route path="/masters/users" element={<KeyRoute requiredKey="masters-users"><Users /></KeyRoute>} />
             <Route path="/masters/user-groups" element={<KeyRoute requiredKey="masters-user-groups"><UserGroups /></KeyRoute>} />
             <Route path="/masters/organization-structure" element={<KeyRoute requiredKey="masters-organization-structure"><OrganizationStructure /></KeyRoute>} />
+            <Route path="/masters/organization-structure/hr-sync" element={<KeyRoute requiredKey="masters-organization-structure"><HRSyncDashboard /></KeyRoute>} />
             <Route path="/masters/boms" element={<KeyRoute requiredKey="masters-boms"><BOMs /></KeyRoute>} />
             <Route path="/masters/boms/new" element={<KeyRoute requiredKey="masters-boms"><BOMForm /></KeyRoute>} />
             <Route path="/masters/boms/:id/edit" element={<KeyRoute requiredKey="masters-boms"><BOMForm /></KeyRoute>} />

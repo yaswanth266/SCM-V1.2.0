@@ -43,7 +43,7 @@ import useAppStore from '../store/appStore';
 import { MENU_CONFIG } from '../utils/constants';
 import { getInitials, formatDateTime } from '../utils/helpers';
 import { fetchSidebar } from '../api/sidebar';
-import RoleSwitcher from '../components/RoleSwitcher';
+
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
@@ -733,7 +733,7 @@ const MainLayout = () => {
             {!isMobile && <Breadcrumb className="erp-breadcrumb" items={breadcrumbItems} />}
           </div>
           <div className="erp-header-right">
-            <RoleSwitcher />
+
             <Popover
               content={notificationContent}
               trigger="click"

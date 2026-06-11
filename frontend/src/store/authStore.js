@@ -167,15 +167,8 @@ const useAuthStore = create((set, get) => ({
 
   hasPermission: (module, action) => {
     const { permissions, user } = get();
-    // BUG-AUTH-122 fix: previously this matched admin via the role NAME
-    // ("Admin", "Super Admin"). That is privesc — anyone could create a
-    // role named "Admin" with no permissions and gain global access. Match
-    // strictly by role.code (the canonical machine identifier).
-    const roles = user?.roles || [];
-    const roleCodes = roles
-      .map((r) => (typeof r === 'string' ? r : r.code))
-      .filter(Boolean);
-    if (roleCodes.includes('super_admin') || roleCodes.includes('admin')) return true;
+    const activeRole = user?.role;
+    if (activeRole === 'super_admin' || activeRole === 'admin') return true;
     if (!permissions || permissions.length === 0) return false;
     // Permissions are strings like "module.action.resource"
     return permissions.some((p) => {
@@ -201,11 +194,8 @@ const useAuthStore = create((set, get) => ({
   // least once after login (or rely on the hydrated localStorage copy).
   hasKey: (key) => {
     const { allowedKeys, user } = get();
-    const roles = user?.roles || [];
-    const roleCodes = roles
-      .map((r) => (typeof r === 'string' ? r : r.code))
-      .filter(Boolean);
-    if (roleCodes.includes('super_admin') || roleCodes.includes('admin')) return true;
+    const activeRole = user?.role;
+    if (activeRole === 'super_admin' || activeRole === 'admin') return true;
     if (!key) return false;
     return Array.isArray(allowedKeys) && allowedKeys.includes(key);
   },
@@ -238,6 +228,23 @@ const useAuthStore = create((set, get) => ({
   updateProfile: (userData) => {
     localStorage.setItem('user', JSON.stringify(userData));
     set({ user: userData });
+  },
+
+  refreshUser: async () => {
+    try {
+      const response = await api.get('/auth/me');
+      const u = response.data;
+      const perms = u.permissions || [];
+      localStorage.setItem('user', JSON.stringify(u));
+      localStorage.setItem('permissions', JSON.stringify(perms));
+      set({
+        user: u,
+        permissions: perms,
+      });
+      return u;
+    } catch (err) {
+      console.error('Failed to refresh user profile:', err);
+    }
   },
 
   // Task 7: write the server-driven sidebar policy back into the store

@@ -237,7 +237,9 @@ const Users = () => {
         'Full Name': u.full_name || '',
         'Email': u.email || '',
         'Phone': u.phone || '',
-        'Position': u.position_name || '',
+        'Position': (u.positions && Array.isArray(u.positions))
+          ? u.positions.map((p) => (typeof p === 'object' ? (p.name || p.position_name || '') : p)).join(' | ')
+          : (u.position_name || ''),
         'Department': u.department || '',
         'Position Role': u.role_name || '',
         'Roles': (u.roles || []).map((r) => typeof r === 'object' ? r.name : r).join(', '),
@@ -312,10 +314,34 @@ const Users = () => {
     },
     {
       title: 'Position',
-      dataIndex: 'position_name',
       key: 'position_name',
-      width: 180,
-      render: (val, record) => val || record.designation || '-',
+      width: 220,
+      render: (_, record) => {
+        // Handle positions array (future backend support for multiple positions)
+        if (record.positions && Array.isArray(record.positions) && record.positions.length > 0) {
+          return (
+            <Space size={[0, 4]} wrap>
+              {record.positions.map((p, i) => {
+                const label = typeof p === 'object' ? (p.name || p.position_name || '') : p;
+                return label ? <Tag key={i} color="blue">{label}</Tag> : null;
+              })}
+            </Space>
+          );
+        }
+        // Handle pipe-separated position_name
+        const val = record.position_name || record.designation || '-';
+        if (val.includes('|')) {
+          const parts = val.split('|').map((s) => s.trim()).filter(Boolean);
+          if (parts.length > 1) {
+            return (
+              <Space size={[0, 4]} wrap>
+                {parts.map((p, i) => <Tag key={i} color="blue">{p}</Tag>)}
+              </Space>
+            );
+          }
+        }
+        return val;
+      },
     },
     {
       title: 'Department',

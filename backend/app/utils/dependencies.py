@@ -144,6 +144,8 @@ async def get_current_user(
 async def get_user_permissions(db: AsyncSession, user_id: int) -> List[str]:
     """Get all permissions for a user based on their roles.
 
+    If User.active_role_id is set, only retrieve permissions for that active role.
+
     BUG-AUTH-079 fix: filter on Role.is_active so deactivated roles do not
     silently keep granting permissions.
 
@@ -153,14 +155,26 @@ async def get_user_permissions(db: AsyncSession, user_id: int) -> List[str]:
     before joining; permission seeds should not contain them in the first
     place but defensive normalisation prevents silent privilege drift.
     """
-    result = await db.execute(
-        select(Permission.module, Permission.action, Permission.resource)
-        .join(RolePermission, RolePermission.permission_id == Permission.id)
-        .join(UserRole, UserRole.role_id == RolePermission.role_id)
-        .join(Role, Role.id == UserRole.role_id)
-        .where(UserRole.user_id == user_id)
-        .where(Role.is_active == True)  # noqa: E712
-    )
+    user_res = await db.execute(select(User.active_role_id).where(User.id == user_id))
+    active_role_id = user_res.scalar_one_or_none()
+
+    if active_role_id is not None:
+        result = await db.execute(
+            select(Permission.module, Permission.action, Permission.resource)
+            .join(RolePermission, RolePermission.permission_id == Permission.id)
+            .join(Role, Role.id == RolePermission.role_id)
+            .where(Role.id == active_role_id)
+            .where(Role.is_active == True)  # noqa: E712
+        )
+    else:
+        result = await db.execute(
+            select(Permission.module, Permission.action, Permission.resource)
+            .join(RolePermission, RolePermission.permission_id == Permission.id)
+            .join(UserRole, UserRole.role_id == RolePermission.role_id)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(UserRole.user_id == user_id)
+            .where(Role.is_active == True)  # noqa: E712
+        )
     permissions = result.all()
 
     def _clean(s):
@@ -174,14 +188,26 @@ async def get_user_permissions(db: AsyncSession, user_id: int) -> List[str]:
 async def get_user_role_codes(db: AsyncSession, user_id: int) -> List[str]:
     """Get role codes for a user.
 
+    If User.active_role_id is set, only return that role's code.
+
     BUG-AUTH-080 fix: filter on Role.is_active.
     """
-    result = await db.execute(
-        select(Role.code)
-        .join(UserRole, UserRole.role_id == Role.id)
-        .where(UserRole.user_id == user_id)
-        .where(Role.is_active == True)  # noqa: E712
-    )
+    user_res = await db.execute(select(User.active_role_id).where(User.id == user_id))
+    active_role_id = user_res.scalar_one_or_none()
+
+    if active_role_id is not None:
+        result = await db.execute(
+            select(Role.code)
+            .where(Role.id == active_role_id)
+            .where(Role.is_active == True)  # noqa: E712
+        )
+    else:
+        result = await db.execute(
+            select(Role.code)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id == user_id)
+            .where(Role.is_active == True)  # noqa: E712
+        )
     return [row[0] for row in result.all()]
 
 

@@ -24,13 +24,15 @@ const BOMForm = () => {
   const [submitting, setSubmitting] = useState(false);
   const [projects, setProjects] = useState([]);
   const [uoms, setUoms] = useState([]);
+  const [departments, setDepartments] = useState([]);
 
   // Fetch Lookups
   const loadLookups = useCallback(async () => {
     try {
-      const [projRes, uomRes] = await Promise.allSettled([
+      const [projRes, uomRes, deptRes] = await Promise.allSettled([
         api.get('/masters/org-projects', { params: { page_size: 500 } }),
         api.get('/masters/uom', { params: { page_size: 500 } }),
+        api.get('/masters/departments'),
       ]);
 
       if (projRes.status === 'fulfilled') {
@@ -41,6 +43,11 @@ const BOMForm = () => {
       if (uomRes.status === 'fulfilled') {
         const data = uomRes.value.data?.items || uomRes.value.data?.data || uomRes.value.data || [];
         setUoms(data.map((u) => ({ label: `${u.name} (${u.abbreviation || ''})`, value: u.id })));
+      }
+
+      if (deptRes.status === 'fulfilled') {
+        const data = deptRes.value.data || [];
+        setDepartments(data.map((d) => ({ label: d.name, value: d.value })));
       }
     } catch (err) {
       console.error('Failed to load lookups', err);
@@ -55,6 +62,7 @@ const BOMForm = () => {
       form.setFieldsValue({
         name: data.name,
         project_id: data.project_id,
+        department: data.department || undefined,
         document_types: data.document_types,
         is_active: data.is_active,
         components: (data.components || []).map((c) => ({
@@ -107,6 +115,7 @@ const BOMForm = () => {
       const payload = {
         name: values.name,
         project_id: values.project_id || null,
+        department: values.department || null,
         document_types: values.document_types || [],
         components: values.components.map((c) => ({
           item_id: c.item_id,
@@ -161,7 +170,7 @@ const BOMForm = () => {
             </Col>
           </Row>
           <Row gutter={16}>
-            <Col span={12}>
+            <Col span={8}>
               <Form.Item name="project_id" label="Project">
                 <Select
                   placeholder="Select project (optional)"
@@ -172,7 +181,18 @@ const BOMForm = () => {
                 />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col span={8}>
+              <Form.Item name="department" label="Department">
+                <Select
+                  placeholder="Select department (optional)"
+                  options={departments}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
               <Form.Item
                 name="document_types"
                 label="Document Types"

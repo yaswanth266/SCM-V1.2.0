@@ -292,3 +292,58 @@ async def switch_active_role(
         active_role_code=role.code,
         allowed_keys=await allowed_keys_for_role(db, role),
     )
+
+
+@router.post('/active-position/{position_id}', response_model=SidebarResponse)
+async def switch_active_position(
+        position_id: int,
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db)) -> SidebarResponse:
+    if not current_user.employee_id:
+        raise HTTPException(400, 'User is not linked to any employee')
+
+    from app.models.master import Employee, Position
+    from sqlalchemy.orm import selectinload
+
+    employee = (await db.execute(
+        select(Employee).where(Employee.id == current_user.employee_id)
+    )).scalar_one_or_none()
+    if not employee:
+        raise HTTPException(404, 'Linked employee profile not found')
+
+    # Verify position belongs to employee (either primary position or one of the multiple positions)
+    pos_res = (await db.execute(
+        select(Position)
+        .options(selectinload(Position.role))
+        .where(Position.id == position_id)
+        .where((Position.employee_id == employee.id) | (Position.id == employee.position_id))
+    )).scalar_one_or_none()
+    if not pos_res:
+        raise HTTPException(403, 'Requested position is not associated with this employee')
+
+    # Update active position
+    employee.position_id = position_id
+    db.add(employee)
+
+    # Sync role and user active_role_id
+    role = await sync_user_position_role(db, current_user)
+    if not role:
+        raise HTTPException(422, 'The selected position does not have an active role')
+
+    # Activity log
+    db.add(ActivityLog(
+        user_id=current_user.id,
+        organization_id=getattr(current_user, 'organization_id', None),
+        module='auth',
+        action='position_switch',
+        entity_type='position',
+        entity_id=position_id,
+        description=f'User switched active position to {pos_res.code} (role {role.code})',
+    ))
+    await db.flush()
+
+    return SidebarResponse(
+        active_role_id=role.id,
+        active_role_code=role.code,
+        allowed_keys=await allowed_keys_for_role(db, role),
+    )

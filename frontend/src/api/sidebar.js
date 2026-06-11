@@ -12,3 +12,8 @@ export async function switchActiveRole(roleId) {
   const { data } = await api.post(`/me/active-role/${roleId}`);
   return data;
 }
+
+export async function switchActivePosition(positionId) {
+  const { data } = await api.post(`/me/active-position/${positionId}`);
+  return data;
+}
