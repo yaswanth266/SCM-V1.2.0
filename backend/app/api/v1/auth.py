@@ -87,15 +87,39 @@ async def _resolve_primary_warehouse(db: AsyncSession, user_id: int):
     """Return (warehouse_id, warehouse_name) of the user's first
     `user_warehouses` assignment, or (None, None) if none.
 
-    Field-staff clients (mobile) need a single warehouse to scope stock and
-    indent submissions to. We pick the lowest-id assignment so it's stable
-    across logins for users with multiple warehouses (rare).
+    Prioritize warehouse mapping linked to the user's current active_role_id.
     """
-    row = (await db.execute(
+    user_res = await db.execute(select(User.active_role_id).where(User.id == user_id))
+    active_role_id = user_res.scalar_one_or_none()
+
+    stmt = (
         select(UserWarehouse.warehouse_id, Warehouse.name)
         .join(Warehouse, Warehouse.id == UserWarehouse.warehouse_id)
         .where(UserWarehouse.user_id == user_id)
-        .order_by(UserWarehouse.id.asc())
+    )
+
+    if active_role_id is not None:
+        # Try to find a warehouse mapped to the active role
+        row = (await db.execute(
+            stmt.where(UserWarehouse.role_id == active_role_id)
+            .order_by(UserWarehouse.id.asc())
+            .limit(1)
+        )).first()
+        if row is not None:
+            return row[0], row[1]
+
+        # Fallback to a warehouse mapped to no specific role (role_id is null)
+        row = (await db.execute(
+            stmt.where(UserWarehouse.role_id.is_(None))
+            .order_by(UserWarehouse.id.asc())
+            .limit(1)
+        )).first()
+        if row is not None:
+            return row[0], row[1]
+
+    # Final fallback: just get the first warehouse mapped to this user
+    row = (await db.execute(
+        stmt.order_by(UserWarehouse.id.asc())
         .limit(1)
     )).first()
     if row is None:

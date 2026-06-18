@@ -33,7 +33,8 @@ from app.schemas.logistics import (
     QuoteSubmit, DeclineRfqInvitation, AwardRfqQuote,
     ServiceOrderResponse, ServiceOrderVehicleResponse, ServiceOrderSdoMappingResponse,
     SoAcknowledge, VehicleStatusUpdate, VehicleIssueLog,
-    DispatchHandoverCreate, DispatchHandoverResponse, DispatchHandoverVerifyOtp
+    DispatchHandoverCreate, DispatchHandoverResponse, DispatchHandoverVerifyOtp,
+    SdoHandoverSchema, SdoReceiveSchema
 )
 
 router = APIRouter()
@@ -128,15 +129,102 @@ async def ensure_logistics_schema(db: AsyncSession):
     # Explicitly register DispatchHandover to prevent setup/creation issues
     await conn.run_sync(DispatchHandover.__table__.create, checkfirst=True)
 
-    # Dynamic SCM enum updates for MySQL
+    async def add_column_if_not_exists(table: str, col: str, definition: str):
+        exists = (await conn.execute(text(f"""
+            SELECT 1 FROM information_schema.columns 
+            WHERE table_schema = DATABASE() 
+              AND table_name = '{table}' 
+              AND column_name = '{col}'
+            LIMIT 1
+        """))).scalar_one_or_none()
+        if not exists:
+            try:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {definition}"))
+            except Exception as ex:
+                print(f"[SCM Schema Sync] Failed to add column {col} to {table}: {ex}")
+
+    # Add columns to logistics_main_dispatch_orders
+    await add_column_if_not_exists("logistics_main_dispatch_orders", "dispatch_mode", "VARCHAR(50) NOT NULL DEFAULT 'direct'")
+    await add_column_if_not_exists("logistics_main_dispatch_orders", "destination_user_id", "BIGINT NULL")
+
+    # Add columns to logistics_sub_dispatch_orders
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "custodian_position_id", "BIGINT NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "sequence_number", "INT NOT NULL DEFAULT 1")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "handover_type", "VARCHAR(50) NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "handed_over_by_id", "BIGINT NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "handover_time", "DATETIME NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "carrier_details", "JSON NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "received_by_id", "BIGINT NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "received_at", "DATETIME NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "seal_intact", "TINYINT(1) NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "packaging_condition", "VARCHAR(50) NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "discrepancy_reported", "TINYINT(1) NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "receiving_remarks", "TEXT NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "handover_photos", "JSON NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "handover_signature", "VARCHAR(500) NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "receipt_photos", "JSON NULL")
+    await add_column_if_not_exists("logistics_sub_dispatch_orders", "receipt_signature", "VARCHAR(500) NULL")
+
+    # Modify logistics_sub_dispatch_orders status column type from Enum to VARCHAR (safe upgrade)
+    # Must handle the case where the column is an ENUM that doesn't include all needed values.
     try:
-        await conn.execute(text("""
-            ALTER TABLE logistics_main_dispatch_orders 
-            MODIFY COLUMN status ENUM('DRAFT', 'APPROVED', 'RFQ_IN_PROGRESS', 'CONFIRMED', 'DISPATCHED', 'IN_TRANSIT', 'COMPLETED', 'ACKNOWLEDGED', 'CANCELLED') 
-            NOT NULL DEFAULT 'DRAFT'
+        # First check if the column is still an ENUM type
+        col_type_res = await conn.execute(text("""
+            SELECT DATA_TYPE, COLUMN_TYPE
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'logistics_sub_dispatch_orders'
+              AND column_name = 'status'
         """))
+        col_info = col_type_res.one_or_none()
+        if col_info and col_info[0] == 'enum':
+            # Column is still ENUM — convert to VARCHAR(50)
+            await conn.execute(text(
+                "ALTER TABLE logistics_sub_dispatch_orders MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'PENDING'"
+            ))
+            print("[SCM Schema Sync] Converted logistics_sub_dispatch_orders.status from ENUM to VARCHAR(50)")
+    except Exception as ex:
+        print(f"[SCM Schema Sync] Failed to alter status type: {ex}")
+        # Fallback: try direct alter anyway
+        try:
+            await conn.execute(text(
+                "ALTER TABLE logistics_sub_dispatch_orders MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'PENDING'"
+            ))
+        except Exception:
+            pass
+
+    # Modify logistics_dispatch_materials sdo_id to nullable
+    try:
+        await conn.execute(text("ALTER TABLE logistics_dispatch_materials MODIFY COLUMN sdo_id BIGINT NULL"))
+    except Exception as ex:
+        print(f"[SCM Schema Sync] Failed to alter sdo_id in logistics_dispatch_materials to nullable: {ex}")
+
+    # Dynamic SCM enum updates for MySQL
+    # Convert MDO status to VARCHAR(50) to support dynamic AT_* statuses
+    # (e.g. AT_REGIONAL_MANAGER, AT_DISTRICT_MANAGER set during custody chain)
+    try:
+        col_type_res = await conn.execute(text("""
+            SELECT DATA_TYPE FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'logistics_main_dispatch_orders'
+              AND column_name = 'status'
+        """))
+        col_info = col_type_res.one_or_none()
+        if col_info and col_info[0] == 'enum':
+            await conn.execute(text(
+                "ALTER TABLE logistics_main_dispatch_orders "
+                "MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'DRAFT'"
+            ))
+            print("[SCM Schema Sync] Converted logistics_main_dispatch_orders.status from ENUM to VARCHAR(50)")
     except Exception as e:
-        print(f"[SCM Schema Sync] Skipping status alter or already applied: {e}")
+        print(f"[SCM Schema Sync] Failed to convert MDO status to VARCHAR: {e}")
+        try:
+            await conn.execute(text(
+                "ALTER TABLE logistics_main_dispatch_orders "
+                "MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'DRAFT'"
+            ))
+        except Exception:
+            pass
 
     try:
         # Step 1: Temporarily expand ENUM to union of old & new values
@@ -457,17 +545,105 @@ async def get_logistics_dashboard(db: AsyncSession = Depends(get_db), current_us
 
 @router.get("/mdo", response_model=List[MdoResponse])
 async def get_mdos(db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):
-    res = await db.execute(
+    # Resolve user's position for SDO-based filtering
+    from app.models.settings_master import Employee as MdoEmployee
+    user_position_id = None
+    if current_user.employee_id:
+        emp_res = await db.execute(select(MdoEmployee).where(MdoEmployee.id == current_user.employee_id))
+        emp = emp_res.scalar_one_or_none()
+        if emp and emp.position_id:
+            user_position_id = emp.position_id
+    
+    # Admin/super_admin bypass position filter
+    from app.utils.dependencies import get_user_role_codes
+    role_codes = set(await get_user_role_codes(db, current_user.id))
+    is_admin = bool({"super_admin", "admin"} & role_codes)
+    
+    query = (
         select(LogisticsMainDispatchOrder)
         .options(
-            selectinload(LogisticsMainDispatchOrder.sdos).selectinload(LogisticsSubDispatchOrder.destinations).joinedload(LogisticsSdoDestination.location),
-            selectinload(LogisticsMainDispatchOrder.sdos).selectinload(LogisticsSubDispatchOrder.materials).joinedload(LogisticsDispatchMaterial.material),
+            selectinload(LogisticsMainDispatchOrder.sdos).joinedload(LogisticsSubDispatchOrder.custodian_position),
+            selectinload(LogisticsMainDispatchOrder.sdos).joinedload(LogisticsSubDispatchOrder.handed_over_by),
+            selectinload(LogisticsMainDispatchOrder.sdos).joinedload(LogisticsSubDispatchOrder.received_by),
+            selectinload(LogisticsMainDispatchOrder.materials).joinedload(LogisticsDispatchMaterial.material),
             selectinload(LogisticsMainDispatchOrder.handover).joinedload(DispatchHandover.transporter),
             joinedload(LogisticsMainDispatchOrder.warehouse),
+            joinedload(LogisticsMainDispatchOrder.destination_user),
             joinedload(LogisticsMainDispatchOrder.creator)
         )
-        .order_by(LogisticsMainDispatchOrder.id.desc())
     )
+    
+    # Filter by user position in SDO custody chain (non-admin users)
+    if user_position_id and not is_admin:
+        from app.services.approval_service import get_position_descendants
+        from app.models.settings_master import Position as MdoPosition
+
+        # Collect ALL positions this employee holds (active + any additional positions
+        # linked via Position.employee_id). A user with multiple roles/positions (e.g.
+        # both DM and OE) must see dispatches assigned to any of their positions,
+        # not just whichever one is currently active.
+        all_employee_positions_res = await db.execute(
+            select(MdoPosition.id).where(MdoPosition.employee_id == current_user.employee_id)
+        )
+        all_pos_ids = set(all_employee_positions_res.scalars().all())
+        # Always include the active position (it may not have employee_id set in all cases)
+        all_pos_ids.add(user_position_id)
+
+        # Expand each position with its descendants so the user can also see dispatches
+        # meant for positions beneath them in the hierarchy.
+        allowed_position_ids = set(all_pos_ids)
+        for pos_id in list(all_pos_ids):
+            descendants = await get_position_descendants(db, pos_id)
+            allowed_position_ids.update(pos.id for pos in descendants)
+
+        from sqlalchemy import or_
+        from app.models.user import UserWarehouse as DbUserWarehouse
+        from app.models.settings_master import Employee as DbEmployee
+        from app.utils.dependencies import user_warehouse_ids as _user_wh_ids
+
+        # Resolve the warehouses the current user is mapped to (for origin-warehouse visibility)
+        user_whs = await _user_wh_ids(db, current_user.id)
+
+        # Condition for SDO-based dispatches (multi-level):
+        cond_sdo = LogisticsMainDispatchOrder.id.in_(
+            select(LogisticsSubDispatchOrder.mdo_id)
+            .where(LogisticsSubDispatchOrder.custodian_position_id.in_(allowed_position_ids))
+        )
+
+        # Condition for direct dispatches via destination user:
+        cond_direct_user = (
+            LogisticsMainDispatchOrder.dispatch_mode.ilike("direct") &
+            LogisticsMainDispatchOrder.destination_user_id.in_(
+                select(User.id)
+                .join(DbEmployee, User.employee_id == DbEmployee.id)
+                .where(DbEmployee.position_id.in_(allowed_position_ids))
+            )
+        )
+
+        # Condition for direct dispatches via destination warehouse:
+        cond_direct_wh = (
+            LogisticsMainDispatchOrder.dispatch_mode.ilike("direct") &
+            LogisticsMainDispatchOrder.destination_warehouse_id.in_(
+                select(DbUserWarehouse.warehouse_id)
+                .join(User, User.id == DbUserWarehouse.user_id)
+                .join(DbEmployee, User.employee_id == DbEmployee.id)
+                .where(DbEmployee.position_id.in_(allowed_position_ids))
+            )
+        )
+
+        # Condition for MDOs originating from the user's own warehouse (creator/storekeeper view):
+        cond_origin = (
+            LogisticsMainDispatchOrder.warehouse_id.in_(user_whs)
+            if user_whs else False
+        )
+
+        # Condition for MDOs created directly by this user:
+        cond_creator = (LogisticsMainDispatchOrder.created_by == current_user.id)
+
+        query = query.where(or_(cond_sdo, cond_direct_user, cond_direct_wh, cond_origin, cond_creator))
+    
+    query = query.order_by(LogisticsMainDispatchOrder.id.desc())
+    res = await db.execute(query)
     mdos = res.scalars().all()
 
     from app.models.dispatch import DispatchOrder
@@ -507,11 +683,14 @@ async def get_mdos(db: AsyncSession = Depends(get_db), current_user: User = Depe
             material_issue_id=m.material_issue_id,
             indent_id=m.indent_id,
             destination_warehouse_id=m.destination_warehouse_id,
+            destination_user_id=m.destination_user_id,
+            destination_user_name=m.destination_user.username if m.destination_user else None,
             delivery_address=m.delivery_address,
             e_challan=m.e_challan,
             waybill=m.waybill,
             dispatch_type=m.dispatch_type,
-            handover=m.handover,  # Pydantic maps relationship dynamically
+            dispatch_mode=m.dispatch_mode,
+            handover=m.handover,
             delivery_acknowledged=d_order.delivery_acknowledged if d_order else False,
             delivery_acknowledged_at=d_order.delivery_acknowledged_at if d_order else None,
             delivery_acknowledged_by_name=d_order.delivery_acknowledged_by_name if d_order else None,
@@ -520,8 +699,32 @@ async def get_mdos(db: AsyncSession = Depends(get_db), current_user: User = Depe
             delivery_photo_urls=d_order.delivery_photo_urls if d_order else None,
             goods_condition_on_delivery=d_order.goods_condition_on_delivery.name if (d_order and hasattr(d_order.goods_condition_on_delivery, "name")) else (str(d_order.goods_condition_on_delivery) if (d_order and d_order.goods_condition_on_delivery) else None),
             delivery_remarks=d_order.delivery_remarks if d_order else None,
-            sdos=[]
+            sdos=[],
+            materials=[]
         )
+
+        for mat in m.materials:
+            m_dict.materials.append(
+                DispatchMaterialResponse(
+                    id=mat.id,
+                    mdo_id=mat.mdo_id,
+                    sdo_id=mat.sdo_id,
+                    material_id=mat.material_id,
+                    material_code=mat.material.item_code if mat.material else None,
+                    material_name=mat.material.name if mat.material else None,
+                    quantity=float(mat.quantity),
+                    unit_of_measure=mat.unit_of_measure,
+                    total_weight_kg=float(mat.total_weight_kg),
+                    total_volume_cft=float(mat.total_volume_cft),
+                    unit_price=float(mat.unit_price),
+                    total_value=float(mat.total_value),
+                    batch_number=mat.batch_number,
+                    serial_numbers=mat.serial_numbers,
+                    number_of_packages=mat.number_of_packages,
+                    package_type=mat.package_type,
+                    handling_instructions=mat.handling_instructions
+                )
+            )
 
         for s in m.sdos:
             s_dict = SdoResponse(
@@ -538,61 +741,220 @@ async def get_mdos(db: AsyncSession = Depends(get_db), current_user: User = Depe
                 unloading_time_minutes=s.unloading_time_minutes,
                 requires_loading_helper=s.requires_loading_helper,
                 special_requirements=s.special_requirements,
-                status=s.status.name if hasattr(s.status, "name") else s.status,
+                status=s.status,
                 created_at=s.created_at,
                 destinations=[],
-                materials=[]
+                materials=[],
+                custodian_position_id=s.custodian_position_id,
+                custodian_position_name=s.custodian_position.name if s.custodian_position else None,
+                sequence_number=s.sequence_number,
+                handover_type=s.handover_type,
+                handed_over_by_id=s.handed_over_by_id,
+                handed_over_by_name=s.handed_over_by.username if s.handed_over_by else None,
+                handover_time=s.handover_time,
+                carrier_details=s.carrier_details,
+                received_by_id=s.received_by_id,
+                received_by_name=s.received_by.username if s.received_by else None,
+                received_at=s.received_at,
+                seal_intact=s.seal_intact,
+                packaging_condition=s.packaging_condition,
+                discrepancy_reported=s.discrepancy_reported,
+                receiving_remarks=s.receiving_remarks,
+                handover_photos=s.handover_photos,
+                handover_signature=s.handover_signature,
+                receipt_photos=s.receipt_photos,
+                receipt_signature=s.receipt_signature
             )
-
-            for d in s.destinations:
-                s_dict.destinations.append(
-                    SdoDestinationResponse(
-                        id=d.id,
-                        sdo_id=d.sdo_id,
-                        location_id=d.location_id,
-                        location_name=d.location.location_name if d.location else None,
-                        location_code=d.location.location_code if d.location else None,
-                        sequence_number=d.sequence_number,
-                        estimated_arrival_datetime=d.estimated_arrival_datetime,
-                        delivery_contact_person=d.delivery_contact_person,
-                        delivery_contact_mobile=d.delivery_contact_mobile,
-                        actual_arrival_datetime=d.actual_arrival_datetime,
-                        actual_departure_datetime=d.actual_departure_datetime,
-                        pod_received=d.pod_received,
-                        pod_received_by=d.pod_received_by,
-                        pod_received_at=d.pod_received_at,
-                        pod_document_url=d.pod_document_url,
-                        status=d.status.name if hasattr(d.status, "name") else d.status
-                    )
-                )
-
-            for mat in s.materials:
-                s_dict.materials.append(
-                    DispatchMaterialResponse(
-                        id=mat.id,
-                        mdo_id=mat.mdo_id,
-                        sdo_id=mat.sdo_id,
-                        material_id=mat.material_id,
-                        material_code=mat.material.item_code if mat.material else None,
-                        material_name=mat.material.name if mat.material else None,
-                        quantity=float(mat.quantity),
-                        unit_of_measure=mat.unit_of_measure,
-                        total_weight_kg=float(mat.total_weight_kg),
-                        total_volume_cft=float(mat.total_volume_cft),
-                        unit_price=float(mat.unit_price),
-                        total_value=float(mat.total_value),
-                        batch_number=mat.batch_number,
-                        serial_numbers=mat.serial_numbers,
-                        number_of_packages=mat.number_of_packages,
-                        package_type=mat.package_type,
-                        handling_instructions=mat.handling_instructions
-                    )
-                )
-
             m_dict.sdos.append(s_dict)
         output.append(m_dict)
 
     return output
+
+
+async def resolve_mdo_project_id(db: AsyncSession, indent_id: Optional[int], material_issue_id: Optional[int]) -> Optional[int]:
+    from app.models.indent import Indent
+    from app.models.issue import MaterialIssue
+    if indent_id:
+        res = await db.execute(select(Indent.project_id).where(Indent.id == indent_id))
+        p_id = res.scalar_one_or_none()
+        if p_id:
+            return p_id
+    if material_issue_id:
+        res = await db.execute(select(MaterialIssue).where(MaterialIssue.id == material_issue_id))
+        mi = res.scalar_one_or_none()
+        if mi and mi.indent_id:
+            res2 = await db.execute(select(Indent.project_id).where(Indent.id == mi.indent_id))
+            return res2.scalar_one_or_none()
+    return None
+
+
+async def resolve_indent_creator_position(db: AsyncSession, indent_id, material_issue_id):
+    """Resolve the indent creator's position for chain building."""
+    from app.models.indent import Indent
+    from app.models.issue import MaterialIssue
+    from app.models.settings_master import Employee
+    from app.models.user import User
+    
+    indent_obj = None
+    if indent_id:
+        res = await db.execute(select(Indent).where(Indent.id == indent_id))
+        indent_obj = res.scalar_one_or_none()
+    if not indent_obj and material_issue_id:
+        res = await db.execute(select(MaterialIssue).where(MaterialIssue.id == material_issue_id))
+        mi = res.scalar_one_or_none()
+        if mi and mi.indent_id:
+            res2 = await db.execute(select(Indent).where(Indent.id == mi.indent_id))
+            indent_obj = res2.scalar_one_or_none()
+    if not indent_obj:
+        return None
+    
+    user_res = await db.execute(select(User).where(User.id == indent_obj.raised_by))
+    user_obj = user_res.scalar_one_or_none()
+    if user_obj and user_obj.employee_id:
+        emp_res = await db.execute(select(Employee).where(Employee.id == user_obj.employee_id))
+        emp = emp_res.scalar_one_or_none()
+        if emp and emp.position_id:
+            return emp.position_id
+    return None
+
+
+async def build_logistics_custody_chain(
+    db: AsyncSession,
+    project_id: int,
+    starting_position_id: int,
+    dest_pos_id = None,
+) -> list:
+    """Build custody chain from starting position walking UP parents.
+
+    Returns a list of entries ordered top-down (highest in hierarchy first):
+      {position, can_approve, can_view, view_only, is_destination}
+
+    IMPORTANT: Only positions with dispatch_approve=True generate actual SDO custody
+    legs. Positions with only dispatch_view=True are 'observers' — they appear in
+    the visual hierarchy display but are SKIPPED during SDO creation so custody
+    never gets stuck at a view-only role (e.g. OE).
+    The destination position is always appended last as is_destination=True.
+    """
+    from app.models.settings_master import Position
+    from app.models.approval import ProjectWorkflowConfig
+    from app.services.approval_service import get_position_ancestors
+
+    ancestors = await get_position_ancestors(db, starting_position_id)
+    chain = []
+    for pos in ancestors:
+        if not pos.role_id:
+            continue
+        cfg_q = await db.execute(
+            select(ProjectWorkflowConfig).where(
+                ProjectWorkflowConfig.project_id == project_id,
+                ProjectWorkflowConfig.role_id == pos.role_id
+            )
+        )
+        cfg = cfg_q.scalar_one_or_none()
+        if cfg and (cfg.dispatch_approve or cfg.dispatch_view):
+            chain.append({
+                "position": pos,
+                "can_approve": bool(cfg.dispatch_approve),
+                "can_view": bool(cfg.dispatch_view),
+                # view_only positions are included for display but skipped for SDO creation
+                "view_only": bool(cfg.dispatch_view) and not bool(cfg.dispatch_approve),
+            })
+
+    chain.reverse()
+
+    if dest_pos_id and (not chain or chain[-1]["position"].id != dest_pos_id):
+        dest_res = await db.execute(select(Position).where(Position.id == dest_pos_id))
+        dest_pos = dest_res.scalar_one_or_none()
+        if dest_pos:
+            chain.append({
+                "position": dest_pos,
+                "can_approve": False,
+                "can_view": False,
+                "view_only": False,
+                "is_destination": True,
+            })
+
+    return chain
+
+
+
+@router.get("/preview-dispatch-chain")
+async def preview_dispatch_chain(
+    material_issue_id: int = Query(...),
+    destination_warehouse_id = Query(None),
+    destination_user_id = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Preview the multi-level dispatch chain before creating MDO."""
+    from app.models.issue import MaterialIssue
+    from app.models.settings_master import Position, Employee
+    from app.models.warehouse import Warehouse
+    from app.api.v1.dispatch import get_destination_position_id
+    
+    mi_res = await db.execute(select(MaterialIssue).where(MaterialIssue.id == material_issue_id))
+    mi = mi_res.scalar_one_or_none()
+    if not mi:
+        raise HTTPException(404, "Material Issue not found")
+    
+    wh_res = await db.execute(select(Warehouse).where(Warehouse.id == mi.warehouse_id))
+    wh = wh_res.scalar_one_or_none()
+    source_warehouse_name = wh.name if wh else "Unknown Warehouse"
+    
+    dest_pos_id = await get_destination_position_id(db, destination_warehouse_id, destination_user_id)
+    project_id = await resolve_mdo_project_id(db, mi.indent_id, material_issue_id)
+    starting_pos_id = await resolve_indent_creator_position(db, mi.indent_id, material_issue_id)
+    
+    if not project_id or not starting_pos_id:
+        return {
+            "source_warehouse": source_warehouse_name,
+            "chain": [],
+            "message": "Could not resolve project or starting position."
+        }
+    
+    chain = await build_logistics_custody_chain(db, project_id, starting_pos_id, dest_pos_id)
+    
+    out = []
+    for entry in chain:
+        pos = entry["position"]
+        emp_name = None
+        emp_code = None
+        if pos.employee_id:
+            emp_res = await db.execute(select(Employee).where(Employee.id == pos.employee_id))
+            emp = emp_res.scalar_one_or_none()
+            if emp:
+                emp_name = emp.name or ""
+                emp_code = emp.employee_code
+        
+        role_name = pos.role_name
+        role_code = ""
+        if pos.role_id:
+            from app.models.user import Role
+            role_q = await db.execute(select(Role).where(Role.id == pos.role_id))
+            role_obj = role_q.scalar_one_or_none()
+            if role_obj:
+                role_name = role_obj.name
+                role_code = role_obj.code
+        
+        out.append({
+            "position_id": pos.id,
+            "position_name": pos.name,
+            "role_name": role_name,
+            "role_code": role_code,
+            "employee_name": emp_name,
+            "employee_code": emp_code,
+            "can_approve": entry.get("can_approve", False),
+            "can_view": entry.get("can_view", False),
+            "view_only": entry.get("view_only", False),
+            "is_destination": entry.get("is_destination", False),
+        })
+    
+    return {
+        "source_warehouse": source_warehouse_name,
+        "starting_position_id": starting_pos_id,
+        "project_id": project_id,
+        "chain": out,
+    }
 
 
 @router.post("/mdo")
@@ -603,21 +965,36 @@ async def create_mdo(payload: MdoCreate, db: AsyncSession = Depends(get_db), cur
         document_type="main_dispatch_order",
     )
 
-    # Calculate MDO summaries
     tot_items = 0
     tot_weight = 0.0
     tot_volume = 0.0
     tot_value = 0.0
 
-    # Auto-approve immediately if NOT third_party dispatch (since Own Vehicle, Courier, In-Person bypass RFQ)
-    initial_status = "APPROVED" if payload.dispatch_type != "THIRD_PARTY" else "DRAFT"
-
+    if payload.dispatch_type != "THIRD_PARTY":
+        if (payload.dispatch_type or "").lower() in ("own vehicle", "courier", "in_person"):
+            initial_status = "IN_TRANSIT"
+        else:
+            initial_status = "DISPATCHED"
+    else:
+        initial_status = "DRAFT"
     first_delivery_date = date.today() + timedelta(days=2)
-    if payload.sdos:
-        try:
-            first_delivery_date = datetime.fromisoformat(payload.sdos[0].deliveryDate.replace("Z", "+00:00")).date()
-        except Exception:
-            pass
+
+    for mat in payload.materials:
+        tot_items += 1
+        wt = mat.qty * 10.0
+        vol = mat.qty * 0.5
+        val = mat.qty * 1200.0
+        tot_weight += wt
+        tot_volume += vol
+        tot_value += val
+
+    dest_user_id = payload.destination_user_id
+    if not dest_user_id and payload.indent_id:
+        from app.models.indent import Indent
+        indent_res = await db.execute(select(Indent).where(Indent.id == payload.indent_id))
+        ind_obj = indent_res.scalar_one_or_none()
+        if ind_obj:
+            dest_user_id = ind_obj.raised_by
 
     new_mdo = LogisticsMainDispatchOrder(
         mdo_number=mdo_num,
@@ -631,101 +1008,129 @@ async def create_mdo(payload: MdoCreate, db: AsyncSession = Depends(get_db), cur
         material_issue_id=payload.material_issue_id,
         indent_id=payload.indent_id,
         destination_warehouse_id=payload.destination_warehouse_id,
+        destination_user_id=dest_user_id,
         delivery_address=payload.delivery_address,
         e_challan=payload.e_challan,
         waybill=payload.waybill,
-        dispatch_type=payload.dispatch_type or "THIRD_PARTY"
+        dispatch_type=payload.dispatch_type or "THIRD_PARTY",
+        dispatch_mode=payload.dispatch_mode or "direct"
     )
     db.add(new_mdo)
     await db.flush()
 
-    for sdo_in in payload.sdos:
-        # Resolve route to get distance & name
-        route_name = "Custom Segment Route"
-        vehicle_req = "Truck"
-        distance = 100.0
-        if sdo_in.routeId:
-            res_r = await db.execute(select(LogisticsRoute).where(LogisticsRoute.id == sdo_in.routeId))
-            route_obj = res_r.scalar_one_or_none()
-            if route_obj:
-                route_name = route_obj.route_name
-                vehicle_req = route_obj.recommended_vehicle_type
-                distance = float(route_obj.estimated_distance_km)
-
-        # Compute SDO totals
-        sdo_weight = 0.0
-        sdo_volume = 0.0
-
-        sdo_num = await generate_logistics_sequence_number(
+    if payload.dispatch_type != "THIRD_PARTY":
+        handover_num = await generate_logistics_sequence_number(
             db,
-            prefix="SDO",
-            document_type="sub_dispatch_order",
+            prefix="HND",
+            document_type="handover",
         )
-        new_sdo = LogisticsSubDispatchOrder(
-            sdo_number=sdo_num,
-            mdo_id=new_mdo.id,
-            route_id=sdo_in.routeId,
-            route_name=route_name,
-            vehicle_type_required=vehicle_req,
-            estimated_distance_km=distance,
-            required_pickup_datetime=datetime.fromisoformat(sdo_in.pickupDate.replace("Z", "+00:00")),
-            required_delivery_datetime=datetime.fromisoformat(sdo_in.deliveryDate.replace("Z", "+00:00")),
-            loading_time_minutes=sdo_in.loadingTime,
-            unloading_time_minutes=sdo_in.unloadingTime,
-            requires_loading_helper=sdo_in.helperRequired,
-            special_requirements=sdo_in.specialReqs,
-            status="PENDING"
+        new_handover = DispatchHandover(
+            dispatch_id=new_mdo.id,
+            handover_no=handover_num,
+            handover_type=payload.dispatch_type,
+            handed_over_by_entity_id=current_user.id,
+            received_by_name=payload.received_by_name or "Carrier Receiver",
+            received_by_phone=payload.received_by_phone,
+            vehicle_no=payload.vehicle_no,
+            driver_name=payload.driver_name,
+            driver_phone=payload.driver_phone,
+            courier_name=payload.courier_name,
+            awb_no=payload.awb_no,
+            remarks=payload.handover_remarks,
+            status="HANDED_OVER",
+            handover_time=datetime.now(timezone.utc)
         )
-        db.add(new_sdo)
+        db.add(new_handover)
         await db.flush()
 
-        # Add destinations
-        for dest in sdo_in.destinations:
-            new_dest = LogisticsSdoDestination(
-                sdo_id=new_sdo.id,
-                location_id=dest.locationId,
-                sequence_number=dest.seq,
-                estimated_arrival_datetime=datetime.fromisoformat(sdo_in.deliveryDate.replace("Z", "+00:00")),
-                delivery_contact_person=dest.contactPerson,
-                delivery_contact_mobile=dest.contactMobile,
-                status="PENDING"
+    for mat in payload.materials:
+        wt = mat.qty * 10.0
+        vol = mat.qty * 0.5
+        val = mat.qty * 1200.0
+        new_mat = LogisticsDispatchMaterial(
+            mdo_id=new_mdo.id,
+            sdo_id=None,
+            material_id=mat.materialId,
+            quantity=mat.qty,
+            unit_of_measure="PCS",
+            total_weight_kg=wt,
+            total_volume_cft=vol,
+            unit_price=1200.0,
+            total_value=val,
+            batch_number=mat.batchNo or "B2026-AUTO",
+            number_of_packages=mat.pkgCount,
+            package_type=mat.pkgType,
+            handling_instructions=mat.instructions
+        )
+        db.add(new_mat)
+    await db.flush()
+
+    dispatch_mode = (payload.dispatch_mode or "direct").lower()
+    from app.api.v1.dispatch import get_destination_position_id
+    dest_pos_id = await get_destination_position_id(db, payload.destination_warehouse_id, dest_user_id)
+
+    chain_data = []
+    if dispatch_mode == "multi-level":
+        project_id = await resolve_mdo_project_id(db, payload.indent_id, payload.material_issue_id)
+        starting_pos_id = await resolve_indent_creator_position(db, payload.indent_id, payload.material_issue_id)
+        if project_id and starting_pos_id:
+            chain_data = await build_logistics_custody_chain(db, project_id, starting_pos_id, dest_pos_id)
+
+    chain = [entry["position"] for entry in chain_data if entry.get("can_approve", False) or entry.get("is_destination", False)]
+
+    if dispatch_mode == "multi-level":
+        if chain:
+            # Only create the first SDO (Leg 1)
+            pos = chain[0]
+            sdo_num = await generate_logistics_sequence_number(
+                db,
+                prefix="SDO",
+                document_type="sub_dispatch_order",
             )
-            db.add(new_dest)
-
-        # Add materials
-        for mat in sdo_in.materials:
-            tot_items += 1
-            wt = mat.qty * 10.0  # Simulated wt per unit
-            vol = mat.qty * 0.5  # Simulated vol per unit
-            val = mat.qty * 1200.0  # Simulated price
-            sdo_weight += wt
-            sdo_volume += vol
-
-            tot_weight += wt
-            tot_volume += vol
-            tot_value += val
-
-            new_mat = LogisticsDispatchMaterial(
+            new_sdo = LogisticsSubDispatchOrder(
+                sdo_number=sdo_num,
                 mdo_id=new_mdo.id,
-                sdo_id=new_sdo.id,
-                material_id=mat.materialId,
-                quantity=mat.qty,
-                unit_of_measure="PCS",
-                total_weight_kg=wt,
-                total_volume_cft=vol,
-                unit_price=1200.0,
-                total_value=val,
-                batch_number=mat.batchNo or "B2026-AUTO",
-                number_of_packages=mat.pkgCount,
-                package_type=mat.pkgType,
-                handling_instructions=mat.instructions
+                route_id=None,
+                route_name="Custody Leg 1",
+                vehicle_type_required="Truck",
+                estimated_distance_km=100.0,
+                required_pickup_datetime=datetime.now(timezone.utc),
+                required_delivery_datetime=datetime.now(timezone.utc) + timedelta(days=2),
+                loading_time_minutes=30,
+                unloading_time_minutes=30,
+                requires_loading_helper=False,
+                status="PENDING",
+                custodian_position_id=pos.id,
+                sequence_number=1,
+                estimated_weight_kg=tot_weight,
+                estimated_volume_cft=tot_volume
             )
-            db.add(new_mat)
-
-        # Update SDO weight and volume
-        new_sdo.estimated_weight_kg = sdo_weight
-        new_sdo.estimated_volume_cft = sdo_volume
-        db.add(new_sdo)
+            db.add(new_sdo)
+        else:
+            sdo_num = await generate_logistics_sequence_number(
+                db,
+                prefix="SDO",
+                document_type="sub_dispatch_order",
+            )
+            new_sdo = LogisticsSubDispatchOrder(
+                sdo_number=sdo_num,
+                mdo_id=new_mdo.id,
+                route_id=None,
+                route_name="Direct Custody Leg",
+                vehicle_type_required="Truck",
+                estimated_distance_km=100.0,
+                required_pickup_datetime=datetime.now(timezone.utc),
+                required_delivery_datetime=datetime.now(timezone.utc) + timedelta(days=2),
+                loading_time_minutes=30,
+                unloading_time_minutes=30,
+                requires_loading_helper=False,
+                status="PENDING",
+                custodian_position_id=dest_pos_id,
+                sequence_number=1,
+                estimated_weight_kg=tot_weight,
+                estimated_volume_cft=tot_volume
+            )
+            db.add(new_sdo)
 
     new_mdo.total_material_items = tot_items
     new_mdo.total_weight_kg = tot_weight
@@ -733,21 +1138,19 @@ async def create_mdo(payload: MdoCreate, db: AsyncSession = Depends(get_db), cur
     new_mdo.total_value = tot_value
     db.add(new_mdo)
 
-    # Activity Log
     db.add(ActivityLog(
         user_id=current_user.id,
         module="logistics",
         action="create_mdo",
         entity_type="mdo",
         entity_id=new_mdo.id,
-        description=f"Created Main Dispatch Order {mdo_num} containing {len(payload.sdos)} child dispatches."
+        description=f"Created Main Dispatch Order {mdo_num} with dispatch mode {dispatch_mode}."
     ))
 
-    # Notification
     db.add(Notification(
         user_id=current_user.id,
         title="Draft MDO Initialized",
-        message=f"Main Dispatch Order {mdo_num} has been successfully created as a draft.",
+        message=f"Main Dispatch Order {mdo_num} has been successfully created.",
         type="info",
         module="logistics",
         reference_type="MDO",
@@ -756,6 +1159,456 @@ async def create_mdo(payload: MdoCreate, db: AsyncSession = Depends(get_db), cur
 
     await db.commit()
     return {"message": "MDO created successfully", "mdo_id": new_mdo.id, "mdo_number": mdo_num}
+
+
+@router.post("/sdo/{sdo_id}/handover")
+async def sdo_handover(
+    sdo_id: int,
+    payload: SdoHandoverSchema,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    res = await db.execute(select(LogisticsSubDispatchOrder).where(LogisticsSubDispatchOrder.id == sdo_id))
+    sdo = res.scalar_one_or_none()
+    if not sdo:
+        raise HTTPException(404, "Sub-dispatch order leg not found")
+
+    res_mdo = await db.execute(select(LogisticsMainDispatchOrder).where(LogisticsMainDispatchOrder.id == sdo.mdo_id))
+    mdo = res_mdo.scalar_one_or_none()
+    if not mdo:
+        raise HTTPException(404, "Parent MDO not found")
+
+    is_authorized = False
+    from app.utils.dependencies import get_user_role_codes
+    user_role_codes = await get_user_role_codes(db, current_user.id)
+    if any(code in ("admin", "super_admin", "logistics_manager") for code in user_role_codes):
+        is_authorized = True
+    else:
+        from app.models.settings_master import Employee, Position as HndPosition
+        emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
+        emp = emp_res.scalar_one_or_none()
+        if emp:
+            # Collect ALL positions this employee holds (not just the active one)
+            all_pos_res = await db.execute(
+                select(HndPosition.id).where(HndPosition.employee_id == emp.id)
+            )
+            all_emp_pos_ids = set(all_pos_res.scalars().all())
+            if emp.position_id:
+                all_emp_pos_ids.add(emp.position_id)
+            if sdo.custodian_position_id in all_emp_pos_ids:
+                is_authorized = True
+
+    if not is_authorized:
+        raise HTTPException(403, "You are not authorized to handover this dispatch leg")
+
+    # Restrict THIRD_PARTY for intermediate positions in multi-level mode
+    if payload.handover_type == "THIRD_PARTY" and mdo.dispatch_mode == "multi-level":
+        from app.api.v1.dispatch import get_destination_position_id
+        dest_pos_id = await get_destination_position_id(db, mdo.destination_warehouse_id, mdo.destination_user_id)
+        project_id = await resolve_mdo_project_id(db, mdo.indent_id, mdo.material_issue_id)
+        starting_pos_id = await resolve_indent_creator_position(db, mdo.indent_id, mdo.material_issue_id)
+
+        chain_data = []
+        if project_id and starting_pos_id:
+            chain_data = await build_logistics_custody_chain(db, project_id, starting_pos_id, dest_pos_id)
+        chain = [entry["position"] for entry in chain_data if entry.get("can_approve", False) or entry.get("is_destination", False)]
+        
+        if sdo.sequence_number < len(chain):
+            raise HTTPException(400, "THIRD_PARTY handover is not allowed for intermediate positions. Use OWN_VEHICLE, COURIER, or IN_PERSON.")
+
+    sdo.status = "HANDED_OVER"
+    sdo.handover_type = payload.handover_type
+    sdo.handed_over_by_id = current_user.id
+    sdo.handover_time = datetime.now(timezone.utc)
+    sdo.carrier_details = {
+        "vehicle_no": payload.vehicle_no,
+        "driver_name": payload.driver_name,
+        "driver_phone": payload.driver_phone,
+        "courier_name": payload.courier_name,
+        "awb_no": payload.awb_no,
+        "remarks": payload.remarks,
+        "otp": payload.otp
+    }
+    if payload.handover_photos:
+        sdo.handover_photos = payload.handover_photos
+    if payload.handover_signature:
+        sdo.handover_signature = payload.handover_signature
+    db.add(sdo)
+
+    mdo.status = "IN_TRANSIT"
+    db.add(mdo)
+
+    # Dynamic creation of the next SDO leg
+    from app.api.v1.dispatch import get_destination_position_id
+    dest_pos_id = await get_destination_position_id(db, mdo.destination_warehouse_id, mdo.destination_user_id)
+    project_id = await resolve_mdo_project_id(db, mdo.indent_id, mdo.material_issue_id)
+    starting_pos_id = await resolve_indent_creator_position(db, mdo.indent_id, mdo.material_issue_id)
+
+    chain_data = []
+    if mdo.dispatch_mode == "multi-level" and project_id and starting_pos_id:
+        chain_data = await build_logistics_custody_chain(db, project_id, starting_pos_id, dest_pos_id)
+    chain = [entry["position"] for entry in chain_data if entry.get("can_approve", False) or entry.get("is_destination", False)]
+
+    if sdo.sequence_number < len(chain):
+        next_pos = chain[sdo.sequence_number]
+        sdo_num = await generate_logistics_sequence_number(
+            db,
+            prefix="SDO",
+            document_type="sub_dispatch_order",
+        )
+        next_sdo = LogisticsSubDispatchOrder(
+            sdo_number=sdo_num,
+            mdo_id=mdo.id,
+            route_id=None,
+            route_name=f"Custody Leg {sdo.sequence_number + 1}",
+            vehicle_type_required="Truck",
+            estimated_distance_km=100.0,
+            required_pickup_datetime=datetime.now(timezone.utc),
+            required_delivery_datetime=datetime.now(timezone.utc) + timedelta(days=2),
+            loading_time_minutes=30,
+            unloading_time_minutes=30,
+            requires_loading_helper=False,
+            status="PENDING",
+            custodian_position_id=next_pos.id,
+            sequence_number=sdo.sequence_number + 1,
+            estimated_weight_kg=sdo.estimated_weight_kg,
+            estimated_volume_cft=sdo.estimated_volume_cft
+        )
+        db.add(next_sdo)
+
+    db.add(ActivityLog(
+        user_id=current_user.id,
+        module="logistics",
+        action="sdo_handover",
+        entity_type="sdo",
+        entity_id=sdo.id,
+        description=f"SDO leg {sdo.sdo_number} handed over via {payload.handover_type}."
+    ))
+
+    await db.commit()
+    return {"success": True, "message": "Custody leg handed over successfully."}
+
+
+@router.post("/sdo/{sdo_id}/receive")
+async def sdo_receive(
+    sdo_id: int,
+    payload: SdoReceiveSchema,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    res = await db.execute(
+        select(LogisticsSubDispatchOrder)
+        .options(selectinload(LogisticsSubDispatchOrder.mdo))
+        .where(LogisticsSubDispatchOrder.id == sdo_id)
+    )
+    sdo = res.scalar_one_or_none()
+    if not sdo:
+        raise HTTPException(404, "Sub-dispatch order leg not found")
+
+    mdo = sdo.mdo
+    if not mdo:
+        raise HTTPException(404, "Parent MDO not found")
+
+    # Auth check: user must occupy the custodian position for this SDO.
+    # Check ALL positions this employee holds, not just the currently-active one, so
+    # a user who switched positions still has the right to receive a leg assigned to
+    # any of their roles.
+    from app.models.settings_master import Employee as RecvEmployee, Position as RecvPosition
+    recv_emp_res = await db.execute(
+        select(RecvEmployee).where(RecvEmployee.id == current_user.employee_id)
+    )
+    recv_emp = recv_emp_res.scalar_one_or_none()
+    from app.utils.dependencies import get_user_role_codes
+    user_role_codes = await get_user_role_codes(db, current_user.id)
+
+    user_has_custodian_position = False
+    if recv_emp:
+        # All positions linked to this employee via Position.employee_id
+        all_pos_res = await db.execute(
+            select(RecvPosition.id).where(RecvPosition.employee_id == recv_emp.id)
+        )
+        all_pos_ids = set(all_pos_res.scalars().all())
+        # Also include the currently-active position
+        if recv_emp.position_id:
+            all_pos_ids.add(recv_emp.position_id)
+        user_has_custodian_position = sdo.custodian_position_id in all_pos_ids
+
+    if not user_has_custodian_position:
+        if not any(code in ("admin", "super_admin", "logistics_manager") for code in user_role_codes):
+            raise HTTPException(403, "You do not occupy the required position to receive this dispatch leg")
+
+    sdo.status = "ACKNOWLEDGED"
+    sdo.received_by_id = current_user.id
+    sdo.received_at = datetime.now(timezone.utc)
+    sdo.seal_intact = payload.seal_intact
+    sdo.packaging_condition = payload.packaging_condition
+    sdo.discrepancy_reported = payload.discrepancy_reported
+    sdo.receiving_remarks = payload.receiving_remarks
+    if payload.receipt_photos:
+        sdo.receipt_photos = payload.receipt_photos
+    if payload.receipt_signature:
+        sdo.receipt_signature = payload.receipt_signature
+    db.add(sdo)
+
+    # Flush SDO status change early to catch ENUM→VARCHAR issues before
+    # proceeding with the rest of the logic.  If the column is still an
+    # ENUM that doesn't include 'ACKNOWLEDGED', fix it on-the-fly and retry.
+    try:
+        await db.flush()
+    except Exception as flush_err:
+        if "Data truncated" in str(flush_err) or "1265" in str(flush_err):
+            # Column is still ENUM — fix it now via raw DDL and retry
+            try:
+                raw_conn = await db.connection()
+                await raw_conn.execute(text(
+                    "ALTER TABLE logistics_sub_dispatch_orders "
+                    "MODIFY COLUMN status VARCHAR(50) NOT NULL DEFAULT 'PENDING'"
+                ))
+                await db.flush()
+            except Exception:
+                # Last resort: bypass ORM and use raw UPDATE
+                await db.rollback()
+                raw_conn = await db.connection()
+                await raw_conn.execute(text(
+                    "UPDATE logistics_sub_dispatch_orders "
+                    "SET status = 'ACKNOWLEDGED', "
+                    "    received_by_id = :uid, "
+                    "    received_at = NOW(), "
+                    "    seal_intact = :seal, "
+                    "    packaging_condition = :pkg, "
+                    "    discrepancy_reported = :disc, "
+                    "    receiving_remarks = :remarks "
+                    "WHERE id = :sdo_id"
+                ), {
+                    "uid": current_user.id,
+                    "seal": payload.seal_intact,
+                    "pkg": payload.packaging_condition,
+                    "disc": payload.discrepancy_reported,
+                    "remarks": payload.receiving_remarks,
+                    "sdo_id": sdo_id,
+                })
+                await raw_conn.commit()
+        else:
+            raise
+
+    # Resolve active custodian's role code to set dynamic MDO status
+    from app.models.settings_master import Position
+    from app.models.user import Role
+    role_code = "CUSTODIAN"
+    pos_q = await db.execute(select(Position).where(Position.id == sdo.custodian_position_id))
+    pos = pos_q.scalar_one_or_none()
+    if pos and pos.role_id:
+        role_q = await db.execute(select(Role).where(Role.id == pos.role_id))
+        role_obj = role_q.scalar_one_or_none()
+        if role_obj:
+            role_code = role_obj.code
+
+    # Set MDO status to reflect current custodian role.
+    # If the column is still an ENUM that can't hold AT_* values,
+    # fall back to IN_TRANSIT which is always valid.
+    dynamic_status = f"AT_{role_code.upper()}"
+    try:
+        mdo.status = dynamic_status
+        db.add(mdo)
+        await db.flush()
+    except Exception:
+        # ENUM doesn't support AT_* — fall back to a standard status
+        await db.rollback()
+        # Re-fetch mdo since rollback detached it
+        mdo_res = await db.execute(
+            select(LogisticsMainDispatchOrder).where(LogisticsMainDispatchOrder.id == sdo.mdo_id)
+        )
+        mdo = mdo_res.scalar_one_or_none()
+        mdo.status = "IN_TRANSIT"
+        db.add(mdo)
+        try:
+            await db.flush()
+        except Exception:
+            # Last resort: raw SQL
+            raw_conn = await db.connection()
+            await raw_conn.execute(text(
+                "UPDATE logistics_main_dispatch_orders SET status = 'IN_TRANSIT' WHERE id = :mdo_id"
+            ), {"mdo_id": mdo.id})
+            await raw_conn.commit()
+
+    db.add(ActivityLog(
+        user_id=current_user.id,
+        module="logistics",
+        action="sdo_receive",
+        entity_type="sdo",
+        entity_id=sdo.id,
+        description=f"Custody of SDO leg {sdo.sdo_number} acknowledged by {current_user.username} (Status: {mdo.status})."
+    ))
+
+    # Resolve custody chain to check if this is the final leg.
+    # Wrap in try/except so chain resolution failures don't crash the acknowledgement.
+    is_last_leg = False
+    try:
+        from app.api.v1.dispatch import get_destination_position_id
+        dest_pos_id = await get_destination_position_id(db, mdo.destination_warehouse_id, mdo.destination_user_id)
+        project_id = await resolve_mdo_project_id(db, mdo.indent_id, mdo.material_issue_id)
+        starting_pos_id = await resolve_indent_creator_position(db, mdo.indent_id, mdo.material_issue_id)
+
+        chain_data = []
+        if mdo.dispatch_mode == "multi-level" and project_id and starting_pos_id:
+            chain_data = await build_logistics_custody_chain(db, project_id, starting_pos_id, dest_pos_id)
+        chain = [entry["position"] for entry in chain_data if entry.get("can_approve", False) or entry.get("is_destination", False)]
+
+        if not chain or sdo.sequence_number >= len(chain):
+            is_last_leg = True
+    except Exception as chain_err:
+        import traceback
+        traceback.print_exc()
+        print(f"[WARNING] Custody chain resolution failed: {chain_err}")
+        # Default: if only one SDO exists, treat as last leg
+        all_sdos_res = await db.execute(
+            select(LogisticsSubDispatchOrder.id).where(LogisticsSubDispatchOrder.mdo_id == mdo.id)
+        )
+        all_sdo_ids = all_sdos_res.scalars().all()
+        if len(all_sdo_ids) <= 1:
+            is_last_leg = True
+
+    # Stock transit movement for intermediate legs of multi-level dispatches
+    if mdo.dispatch_mode == "multi-level" and not is_last_leg:
+        try:
+            from app.api.v1.dispatch import get_warehouse_for_position
+            from app.models.logistics import LogisticsDispatchMaterial
+            from app.services.stock_service import _get_or_create_balance
+            from decimal import Decimal
+
+            prev_wh_id = mdo.warehouse_id
+            if sdo.sequence_number > 1 and "chain" in locals() and chain and len(chain) >= sdo.sequence_number - 1:
+                prev_pos = chain[sdo.sequence_number - 2]
+                prev_wh_id = await get_warehouse_for_position(db, prev_pos.id) or mdo.warehouse_id
+
+            curr_wh_id = await get_warehouse_for_position(db, sdo.custodian_position_id) or mdo.destination_warehouse_id
+
+            if prev_wh_id and curr_wh_id and prev_wh_id != curr_wh_id:
+                # Fetch materials for this MDO
+                res_mats = await db.execute(
+                    select(LogisticsDispatchMaterial).where(LogisticsDispatchMaterial.mdo_id == mdo.id)
+                )
+                mats = res_mats.scalars().all()
+
+                for mat in mats:
+                    batch_id = None
+                    bin_id = None
+                    if mdo.material_issue_id:
+                        from app.models.issue import MaterialIssueItem
+                        mi_item_res = await db.execute(
+                            select(MaterialIssueItem).where(
+                                MaterialIssueItem.issue_id == mdo.material_issue_id,
+                                MaterialIssueItem.item_id == mat.material_id
+                            ).limit(1)
+                        )
+                        mi_item = mi_item_res.scalar_one_or_none()
+                        if mi_item:
+                            batch_id = mi_item.batch_id
+                            bin_id = mi_item.bin_id
+
+                    # Decrement transit_qty in prev_wh_id
+                    prev_balance = await _get_or_create_balance(
+                        db,
+                        item_id=mat.material_id,
+                        warehouse_id=prev_wh_id,
+                        bin_id=bin_id,
+                        batch_id=batch_id,
+                        lock=True,
+                    )
+                    qty = Decimal(str(mat.quantity))
+                    prev_balance.transit_qty = max(Decimal("0"), (prev_balance.transit_qty or Decimal("0")) - qty)
+
+                    # Increment transit_qty in curr_wh_id
+                    curr_balance = await _get_or_create_balance(
+                        db,
+                        item_id=mat.material_id,
+                        warehouse_id=curr_wh_id,
+                        bin_id=bin_id,
+                        batch_id=batch_id,
+                        lock=True,
+                    )
+                    curr_balance.transit_qty = (curr_balance.transit_qty or Decimal("0")) + qty
+
+                await db.flush()
+        except Exception as stock_move_err:
+            import logging
+            logging.getLogger(__name__).exception("Failed to perform intermediate warehouse transit stock transfer")
+
+    if is_last_leg:
+        mdo.status = "COMPLETED"
+        db.add(mdo)
+        await db.flush()
+
+        from app.models.dispatch import DispatchOrder, DispatchOrderItem
+        disp_check = await db.execute(select(DispatchOrder).where(DispatchOrder.dispatch_number == mdo.mdo_number))
+        disp = disp_check.scalar_one_or_none()
+
+        if not disp:
+            # Map MDO dispatch_type (may be lowercase like "own vehicle") to DispatchOrder Enum values
+            dt_map = {
+                "own vehicle": "OWN_VEHICLE",
+                "OWN_VEHICLE": "OWN_VEHICLE",
+                "COURIER": "COURIER",
+                "courier": "COURIER",
+                "IN_PERSON": "IN_PERSON",
+                "in person": "IN_PERSON",
+                "THIRD_PARTY": "THIRD_PARTY",
+                "third party": "THIRD_PARTY",
+            }
+            mapped_dispatch_type = dt_map.get(mdo.dispatch_type, "THIRD_PARTY") if mdo.dispatch_type else "THIRD_PARTY"
+
+            disp = DispatchOrder(
+                dispatch_number=mdo.mdo_number,
+                warehouse_id=mdo.warehouse_id,
+                destination_warehouse_id=mdo.destination_warehouse_id,
+                destination_user_id=mdo.destination_user_id,
+                destination_type="WAREHOUSE" if mdo.destination_warehouse_id else "USER",
+                dispatch_type=mapped_dispatch_type,
+                status="delivered",
+                remarks=mdo.special_instructions,
+                material_issue_id=mdo.material_issue_id,
+                dispatch_date=mdo.order_date,
+                expected_delivery_date=mdo.required_delivery_date,
+                delivery_acknowledged=True,
+                delivery_acknowledged_at=datetime.now(timezone.utc),
+                delivery_acknowledged_by_name=current_user.username,
+                delivery_remarks=payload.receiving_remarks,
+                goods_condition_on_delivery="DAMAGED" if payload.discrepancy_reported else "GOOD"
+            )
+            db.add(disp)
+            await db.flush()
+
+            from app.models.logistics import LogisticsDispatchMaterial
+            res_mats = await db.execute(select(LogisticsDispatchMaterial).where(LogisticsDispatchMaterial.mdo_id == mdo.id))
+            mats = res_mats.scalars().all()
+            for mat in mats:
+                item = DispatchOrderItem(
+                    dispatch_order_id=disp.id,
+                    material_id=mat.material_id,
+                    indent_id=mdo.indent_id,
+                    material_issue_id=mdo.material_issue_id,
+                    requested_quantity=mat.quantity,
+                    approved_quantity=mat.quantity,
+                    dispatched_quantity=mat.quantity,
+                    uom=mat.unit_of_measure,
+                    request_date=mdo.order_date
+                )
+                db.add(item)
+            await db.flush()
+
+        # Process stock deduction; wrap in try/except so a stock failure
+        # does not crash the acknowledgement itself.
+        try:
+            from app.api.v1.dispatch import process_dispatch_stock_deduction
+            await process_dispatch_stock_deduction(db, disp, mdo.created_by or 1)
+        except Exception as stock_err:
+            import traceback
+            traceback.print_exc()
+            print(f"[WARNING] Stock deduction failed for dispatch {disp.id}: {stock_err}")
+            # Continue — the acknowledgement is still valid even if stock deduction fails.
+
+    await db.commit()
+    return {"success": True, "message": "Custody leg acknowledgment processed successfully.", "is_last": is_last_leg}
 
 @router.post("/mdo/{id}/approve")
 async def approve_mdo(id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user)):

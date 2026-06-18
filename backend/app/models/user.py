@@ -150,8 +150,11 @@ class UserWarehouse(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     warehouse_id = Column(BigInteger, nullable=False)
+    # Optional: link this warehouse assignment to a specific role
+    role_id = Column(BigInteger, ForeignKey("roles.id", ondelete="SET NULL"), nullable=True)
 
     user = relationship("User", back_populates="warehouses")
+    role = relationship("Role", foreign_keys=[role_id])
 
 
 # =============================================================

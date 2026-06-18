@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Avatar, Dropdown } from 'antd';
+import { Avatar, Dropdown, Popover, Badge, List, Empty, Button, Typography } from 'antd';
 import {
   DashboardOutlined,
   AppstoreOutlined,
@@ -20,11 +20,14 @@ import {
   UserOutlined,
   LockOutlined,
   LogoutOutlined,
+  BellOutlined,
 } from '@ant-design/icons';
 import useAuthStore from '../store/authStore';
+import useAppStore from '../store/appStore';
 import api from '../config/api';
 import RoleSwitcher from '../components/RoleSwitcher';
 import { MODULE_NAVS } from '../utils/moduleNavs';
+import { formatDateTime } from '../utils/helpers';
 
 // Bavya design tokens — module tile palette
 const MODULES = [
@@ -79,9 +82,68 @@ const firstName = (user) => {
   return 'there';
 };
 
+const { Text } = Typography;
+
 const AppLauncher = () => {
   const navigate = useNavigate();
   const { user, hasPermission, logout } = useAuthStore();
+  const { notifications, unreadCount, markAllRead, fetchNotifications } = useAppStore();
+
+  useEffect(() => {
+    fetchNotifications();
+  }, [fetchNotifications]);
+
+  const notificationContent = (
+    <div className="notification-dropdown">
+      <div
+        style={{
+          padding: '8px 16px',
+          borderBottom: '1px solid #f0f0f0',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+        }}
+      >
+        <Text strong>Notifications</Text>
+        {unreadCount > 0 && (
+          <Button type="link" size="small" onClick={markAllRead}>
+            Mark all read
+          </Button>
+        )}
+      </div>
+      {notifications.length > 0 ? (
+        <List
+          dataSource={notifications.slice(0, 10)}
+          renderItem={(item) => (
+            <div
+              className="notification-item"
+              style={{
+                background: item.read ? 'transparent' : '#e6f7ff',
+              }}
+            >
+              <div className="notification-item-title">{item.title}</div>
+              {item.description && (
+                <div className="notification-item-desc">
+                  {item.description}
+                </div>
+              )}
+              {item.created_at && (
+                <div className="notification-item-time">
+                  {formatDateTime(item.created_at)}
+                </div>
+              )}
+            </div>
+          )}
+        />
+      ) : (
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description="No notifications"
+          style={{ padding: 24 }}
+        />
+      )}
+    </div>
+  );
   const handleLogout = async () => {
     await logout();
     navigate('/login');
@@ -256,6 +318,34 @@ const AppLauncher = () => {
     <div className="bavya-launcher">
       <div className="bavya-launcher-topbar">
         <RoleSwitcher />
+        <Popover
+          content={notificationContent}
+          trigger="click"
+          placement="bottomRight"
+          overlayStyle={{ width: 360 }}
+        >
+          <div
+            className="bavya-launcher-bell"
+            role="button"
+            tabIndex={0}
+            title="Notifications"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                e.target.click();
+              }
+            }}
+          >
+            <Badge count={unreadCount} size="small" offset={[-2, 2]}>
+              <BellOutlined
+                style={{
+                  fontSize: 18,
+                  color: '#481890',
+                }}
+              />
+            </Badge>
+          </div>
+        </Popover>
         <Dropdown menu={userMenuItems} trigger={['click']} placement="bottomRight">
           <div
             className="bavya-launcher-profile"

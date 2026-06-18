@@ -4783,6 +4783,7 @@ async def list_warehouses(
     is_active: bool = Query(None),
     exclude_virtual: bool = Query(False, description="Hide virtual warehouses (vehicles/mobile units)"),
     type: str = Query(None, description="Filter to a specific warehouse type"),
+    user_id: Optional[int] = Query(None, description="Scope to a specific user's warehouse assignments"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -4800,12 +4801,26 @@ async def list_warehouses(
     # dropdowns and on the warehouse picker, even though stock queries
     # against unauthorized warehouses are rejected — confusing UX and a
     # listing-side privilege leak.
-    from app.utils.dependencies import user_is_managerial, user_warehouse_ids
-    if not await user_is_managerial(db, current_user.id):
-        scoped_wh = await user_warehouse_ids(db, current_user.id)
+    from app.utils.dependencies import user_is_managerial, user_warehouse_ids, get_user_role_codes
+
+    # When user_id is explicitly provided, scope to that user's assignments.
+    # This lets the frontend (e.g. IndentForm) fetch a scoped list even for
+    # managerial/fulfillment roles that normally see every warehouse.
+    if user_id is not None:
+        scoped_wh = await user_warehouse_ids(db, user_id)
         if not scoped_wh:
             return []
         query = query.where(Warehouse.id.in_(scoped_wh))
+    else:
+        # Default scope: non-managerial, non-fulfillment users see only their
+        # assigned warehouses. Managerial and fulfillment roles see all.
+        role_codes = set(await get_user_role_codes(db, current_user.id))
+        is_fulfillment = bool({"store_keeper", "storekeeper", "warehouse_manager"} & role_codes)
+        if not await user_is_managerial(db, current_user.id) and not is_fulfillment:
+            scoped_wh = await user_warehouse_ids(db, current_user.id)
+            if not scoped_wh:
+                return []
+            query = query.where(Warehouse.id.in_(scoped_wh))
 
     result = await db.execute(query)
     whs = result.scalars().all()

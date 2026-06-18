@@ -87,7 +87,7 @@ class LogisticsMainDispatchOrder(Base):
     total_value = Column(Numeric(15, 2), default=0.0, nullable=False)
     special_instructions = Column(Text)
     priority = Column(Enum("LOW", "MEDIUM", "HIGH", "URGENT", name="logistics_priority_enum"), default="MEDIUM", nullable=False)
-    status = Column(Enum("DRAFT", "APPROVED", "RFQ_IN_PROGRESS", "CONFIRMED", "DISPATCHED", "IN_TRANSIT", "COMPLETED", "ACKNOWLEDGED", "CANCELLED", name="mdo_status_enum"), default="DRAFT", nullable=False)
+    status = Column(String(50), default="DRAFT", nullable=False)
     created_by = Column(BigInteger, ForeignKey("users.id"), nullable=False)
     approved_by = Column(BigInteger, ForeignKey("users.id"))
     approved_at = Column(DateTime)
@@ -98,17 +98,21 @@ class LogisticsMainDispatchOrder(Base):
     material_issue_id = Column(BigInteger, ForeignKey("material_issues.id", ondelete="SET NULL"), nullable=True)
     indent_id = Column(BigInteger, ForeignKey("indents.id", ondelete="SET NULL"), nullable=True)
     destination_warehouse_id = Column(BigInteger, ForeignKey("warehouses.id", ondelete="SET NULL"), nullable=True)
+    destination_user_id = Column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     delivery_address = Column(String(500))
     e_challan = Column(String(500))
     waybill = Column(String(500))
     dispatch_type = Column(String(50), default="THIRD_PARTY")
+    dispatch_mode = Column(String(50), default="direct", nullable=False)
 
     warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
     destination_warehouse = relationship("Warehouse", foreign_keys=[destination_warehouse_id])
+    destination_user = relationship("User", foreign_keys=[destination_user_id])
     creator = relationship("User", foreign_keys=[created_by])
     approver = relationship("User", foreign_keys=[approved_by])
     material_issue = relationship("MaterialIssue")
     indent = relationship("Indent")
+    materials = relationship("LogisticsDispatchMaterial", primaryjoin="LogisticsMainDispatchOrder.id == LogisticsDispatchMaterial.mdo_id", cascade="all, delete-orphan")
     sdos = relationship("LogisticsSubDispatchOrder", back_populates="mdo", cascade="all, delete-orphan")
     handover = relationship("DispatchHandover", back_populates="dispatch", uselist=False, cascade="all, delete-orphan")
 
@@ -130,10 +134,36 @@ class LogisticsSubDispatchOrder(Base):
     unloading_time_minutes = Column(Integer, default=0, nullable=False)
     requires_loading_helper = Column(Boolean, default=False, nullable=False)
     special_requirements = Column(Text)
-    status = Column(Enum("PENDING", "RFQ_SENT", "QUOTED", "SO_CREATED", "IN_TRANSIT", "DELIVERED", "CANCELLED", name="sdo_status_enum"), default="PENDING", nullable=False)
+    status = Column(String(50), default="PENDING", nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
+    custodian_position_id = Column(BigInteger, ForeignKey("positions.id", ondelete="SET NULL"), nullable=True)
+    sequence_number = Column(Integer, nullable=False, default=1)
+    
+    # Handover Details
+    handover_type = Column(String(50)) # OWN_VEHICLE, COURIER, THIRD_PARTY, IN_PERSON
+    handed_over_by_id = Column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    handover_time = Column(DateTime)
+    carrier_details = Column(JSON) # vehicle_no, driver_name, driver_mobile, courier_name, awb_no, OTP, etc.
+    
+    # Receipt/Receiving Details
+    received_by_id = Column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    received_at = Column(DateTime)
+    seal_intact = Column(Boolean)
+    packaging_condition = Column(String(50)) # INTACT, DAMAGED, TAMPERED
+    discrepancy_reported = Column(Boolean)
+    receiving_remarks = Column(Text)
+    
+    # Photos & Signatures at each SDO level
+    handover_photos = Column(JSON)  # Array of photo URLs captured at handover time
+    handover_signature = Column(String(500))  # Signature URL captured at handover time
+    receipt_photos = Column(JSON)  # Array of photo URLs captured at receipt time
+    receipt_signature = Column(String(500))  # Signature URL captured at receipt time
+
     mdo = relationship("LogisticsMainDispatchOrder", back_populates="sdos")
+    custodian_position = relationship("Position", foreign_keys=[custodian_position_id])
+    handed_over_by = relationship("User", foreign_keys=[handed_over_by_id])
+    received_by = relationship("User", foreign_keys=[received_by_id])
     route = relationship("LogisticsRoute")
     destinations = relationship("LogisticsSdoDestination", back_populates="sdo", cascade="all, delete-orphan")
     materials = relationship("LogisticsDispatchMaterial", back_populates="sdo", cascade="all, delete-orphan")

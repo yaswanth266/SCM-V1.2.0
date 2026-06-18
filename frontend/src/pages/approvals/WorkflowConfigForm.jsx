@@ -16,7 +16,6 @@ const { Text } = Typography;
 
 const MODULE_OPTIONS = [
   { label: 'Procurement', value: 'procurement' },
-  { label: 'Indent', value: 'indent' },
   { label: 'Warehouse', value: 'warehouse' },
 ];
 
@@ -26,10 +25,6 @@ const DOC_TYPE_MAP = {
     { label: 'Purchase Order', value: 'purchase_order' },
     { label: 'Quotation', value: 'quotation' },
     { label: 'Auto Reorder', value: 'auto_reorder' },
-  ],
-  indent: [
-    { label: 'Indent', value: 'indent' },
-    { label: 'Indent Return', value: 'indent_return' },
   ],
   warehouse: [
     { label: 'Stock Transfer', value: 'stock_transfer' },

@@ -9,11 +9,12 @@ from app.database import get_db
 from app.models.user import User
 from app.models.approval import (
     ApprovalWorkflow, ApprovalLevel, ApprovalRequest, ApprovalHistory,
-    ApprovalDelegation,
+    ApprovalDelegation, ProjectWorkflowConfig,
 )
 from app.services.approval_service import (
     process_approval_action, can_user_approve, get_pending_approvals,
     active_delegations_for, find_sla_breaches, process_escalations,
+    update_document_status,
 )
 from app.utils.dependencies import get_current_user, require_any_role
 from app.utils.helpers import paginate_params, build_paginated_response
@@ -155,6 +156,11 @@ async def create_workflow(
 ):
     """Create a workflow. If `levels` is provided, also persists them
     in one shot (so the admin UI doesn't need a follow-up call)."""
+    if payload.document_type in ("indent", "indent_return"):
+        raise HTTPException(
+            status_code=400,
+            detail="Standard workflows for indent and indent_return are disabled.",
+        )
     data = payload.model_dump()
     levels_data = data.pop("levels", None)
 
@@ -277,6 +283,11 @@ async def update_workflow(
     and recreated from the payload (matches the create endpoint's shape).
     Anything not provided is left untouched.
     """
+    if payload.document_type in ("indent", "indent_return"):
+        raise HTTPException(
+            status_code=400,
+            detail="Standard workflows for indent and indent_return are disabled.",
+        )
     result = await db.execute(
         select(ApprovalWorkflow).where(ApprovalWorkflow.id == workflow_id)
     )
@@ -423,6 +434,89 @@ async def deactivate_workflow(
         "message": "Workflow deactivated",
         "cancelled_pending_requests": cancelled_count,
     }
+
+
+# ==================== PROJECT WORKFLOW CONFIG ====================
+
+class RoleWorkflowConfigInput(BaseModel):
+    role_id: int
+    indent_approve: bool
+    indent_view: bool
+    dispatch_approve: bool
+    dispatch_view: bool
+
+class ProjectWorkflowConfigSave(BaseModel):
+    project_id: int
+    configs: List[RoleWorkflowConfigInput]
+
+@router.get("/project-workflow-config")
+async def get_project_workflow_config(
+    project_id: int = Query(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.models.user import Role
+    from app.models.settings_master import Position
+    
+    roles_result = await db.execute(
+        select(Role)
+        .outerjoin(Position, Position.role_id == Role.id)
+        .outerjoin(ProjectWorkflowConfig, ProjectWorkflowConfig.role_id == Role.id)
+        .where(
+            (Position.project_id == project_id) |
+            (ProjectWorkflowConfig.project_id == project_id)
+        )
+        .distinct()
+        .order_by(Role.name)
+    )
+    roles = roles_result.scalars().all()
+    
+    configs_result = await db.execute(
+        select(ProjectWorkflowConfig).where(ProjectWorkflowConfig.project_id == project_id)
+    )
+    configs = {c.role_id: c for c in configs_result.scalars().all()}
+    
+    return [
+        {
+            "role_id": r.id,
+            "role_name": r.name,
+            "role_code": r.code,
+            "indent_approve": configs[r.id].indent_approve if r.id in configs else False,
+            "indent_view": configs[r.id].indent_view if r.id in configs else False,
+            "dispatch_approve": configs[r.id].dispatch_approve if r.id in configs else False,
+            "dispatch_view": configs[r.id].dispatch_view if r.id in configs else False,
+        }
+        for r in roles
+    ]
+
+@router.post("/project-workflow-config")
+async def save_project_workflow_config(
+    payload: ProjectWorkflowConfigSave,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_any_role("super_admin", "admin")),
+):
+    project_id = payload.project_id
+    
+    for c in payload.configs:
+        stmt = select(ProjectWorkflowConfig).where(
+            ProjectWorkflowConfig.project_id == project_id,
+            ProjectWorkflowConfig.role_id == c.role_id
+        )
+        res = await db.execute(stmt)
+        cfg = res.scalar_one_or_none()
+        if not cfg:
+            cfg = ProjectWorkflowConfig(
+                project_id=project_id,
+                role_id=c.role_id,
+            )
+            db.add(cfg)
+        cfg.indent_approve = c.indent_approve
+        cfg.indent_view = c.indent_view
+        cfg.dispatch_approve = c.dispatch_approve
+        cfg.dispatch_view = c.dispatch_view
+        
+    await db.flush()
+    return {"success": True, "message": "Project workflow configuration saved successfully."}
 
 
 # ==================== APPROVAL REQUESTS ====================
@@ -946,7 +1040,7 @@ async def process_action(
     # indent/MR/PO still showed as pending_approval, so users had no
     # visibility that the workflow was paused.
     if request.status in ("approved", "rejected", "on_hold"):
-        await _update_document_status(db, request.document_type, request.document_id, request.status, current_user.id, request=request)
+        await update_document_status(db, request.document_type, request.document_id, request.status, current_user.id, request=request)
 
     # 2026-05-06 — superseded: previously auto-created an MR if stock was
     # short. That removed the warehouse_manager's discretion (CENTRAL stock
@@ -1285,137 +1379,6 @@ async def _fetch_document_detail(db, document_type: str, document_id: int):
     return detail
 
 
-async def _update_document_status(db, document_type: str, document_id: int, status: str, user_id: int, request: Optional[ApprovalRequest] = None):
-    """Update the source document status after approval/rejection.
-
-    BUG-APR-047 — for indents, an `approved` outcome must run the indent
-    lifecycle (stock check → auto-MI for in-stock lines, auto-MR for short
-    lines). Previously this just stamped status='approved' and walked away,
-    so the workflow-driven approval path silently skipped fulfillment.
-    """
-    from datetime import datetime, timezone
-    # Indent + approved → defer to the lifecycle which already stamps status,
-    # approved_by, approved_date and creates auto-MI / auto-MR.
-    if document_type == "indent" and status == "approved":
-        from app.services.indent_lifecycle import on_indent_approved
-        # The lifecycle's BUG-IND-012 status guard expects pending_approval;
-        # a workflow-completed indent should still be in pending_approval at
-        # this point, since we only reach here when process_action transitioned
-        # the ApprovalRequest from pending → approved.
-        try:
-            await on_indent_approved(db, indent_id=document_id, user_id=user_id)
-        except HTTPException:
-            # If the indent's status drifted (e.g., admin force-approved
-            # earlier), fall through to the plain status stamp below so the
-            # workflow doesn't deadlock.
-            pass
-        else:
-            if request is not None:
-                from app.models.indent import Indent as _Indent
-                indent_obj = (await db.execute(select(_Indent).where(_Indent.id == document_id))).scalar_one_or_none()
-                if indent_obj:
-                    request.document_number = indent_obj.indent_number
-            return
-
-    model_map = {
-        "material_request": ("app.models.procurement", "MaterialRequest"),
-        "purchase_order": ("app.models.procurement", "PurchaseOrder"),
-        "indent": ("app.models.indent", "Indent"),
-        "stock_transfer": ("app.models.transfer", "StockTransfer"),
-        "purchase_return": ("app.models.returns", "PurchaseReturn"),
-        "quotation": ("app.models.procurement", "Quotation"),
-    }
-    # 2026-05-06 — quotation status enum doesn't include 'approved' /
-    # 'pending_approval'. Map workflow outcomes onto the enum it does
-    # accept: approved → accepted; rejected → rejected; on_hold → submitted.
-    if document_type == "quotation":
-        if status == "approved":
-            status = "accepted"
-        elif status == "on_hold":
-            status = "submitted"
-    config = model_map.get(document_type)
-    if not config:
-        return
-
-    import importlib
-    module = importlib.import_module(config[0])
-    model_class = getattr(module, config[1])
-
-    result = await db.execute(select(model_class).where(model_class.id == document_id))
-    doc = result.scalar_one_or_none()
-    # BUG-APR-049 — if the source document was deleted between submission
-    # and approval, raise 404 instead of silently no-oping. Otherwise the
-    # ApprovalRequest gets stamped approved/rejected but no document
-    # change happens and the requester has no visible signal.
-    if not doc:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                f"Source {document_type} #{document_id} no longer exists; "
-                f"cannot apply status."
-            ),
-        )
-
-    # BUG-APR-048 — `on_hold` isn't part of every source-doc status enum.
-    # Map to a per-model status the document actually accepts; otherwise
-    # SQLAlchemy raises a DataError on flush. For Indent/MR/PO we revert
-    # to "pending_approval" so the doc stays in the in-flight state but
-    # the engine is paused.
-    target_status = status
-    if status == "on_hold":
-        target_status = "pending_approval"
-
-    if document_type == "purchase_order" and status == "approved":
-        from app.services.number_series import generate_number
-        from app.models.procurement import PurchaseOrder
-        from sqlalchemy import update
-        if doc.parent_po_id:
-            parent_po = (await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == doc.parent_po_id))).scalar_one_or_none()
-            if not parent_po:
-                raise HTTPException(status_code=400, detail="Parent Purchase Order not found")
-            approved_po_number = f"{parent_po.base_po_number}-V{doc.version_number or '1.0'}"
-            doc.po_number = approved_po_number
-            doc.base_po_number = parent_po.base_po_number
-        else:
-            approved_base = await generate_number(db, "procurement", "purchase_order", pad_length=7)
-            approved_po_number = f"{approved_base}-V1.0"
-            doc.po_number = approved_po_number
-            doc.base_po_number = approved_base
-
-        doc.is_current = True
-
-        # Mark all other versions of this PO as not current
-        await db.execute(
-            update(PurchaseOrder)
-            .where(PurchaseOrder.base_po_number == doc.base_po_number, PurchaseOrder.id != doc.id)
-            .values(is_current=False)
-        )
-
-        if request is not None:
-            request.document_number = approved_po_number
-        await db.flush()
-
-    if document_type == "indent" and status == "approved":
-        if doc.indent_number and "FA-IND" in doc.indent_number:
-            from app.services.number_series import generate_number
-            approved_number = await generate_number(db, "indent", "indent", pad_length=7)
-            doc.indent_number = approved_number
-            if request is not None:
-                request.document_number = approved_number
-
-    if document_type == "material_request" and status == "approved":
-        if doc.mr_number and "FA-MR" in doc.mr_number:
-            from app.services.number_series import generate_number
-            approved_number = await generate_number(db, "procurement", "material_request", pad_length=7)
-            doc.mr_number = approved_number
-            if request is not None:
-                request.document_number = approved_number
-
-    doc.status = target_status
-    if hasattr(doc, "approved_by") and status == "approved":
-        doc.approved_by = user_id
-    if hasattr(doc, "approved_date") and status == "approved":
-        doc.approved_date = datetime.now(timezone.utc)
 
 
 # ============================================================================

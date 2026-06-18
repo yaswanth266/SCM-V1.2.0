@@ -78,7 +78,7 @@ class UserCreate(BaseModel):
     department: Optional[str] = None
     designation: Optional[str] = None
     role_ids: Optional[List[int]] = []
-    warehouse_ids: Optional[List[int]] = []
+    warehouse_assignments: Optional[List['WarehouseAssignment']] = []
     project_ids: Optional[List[int]] = []
 
     @field_validator("password")
@@ -109,7 +109,7 @@ class UserUpdate(BaseModel):
     user_type: Optional[str] = None
     employee_code: Optional[str] = None
     role_ids: Optional[List[int]] = None
-    warehouse_ids: Optional[List[int]] = None
+    warehouse_assignments: Optional[List['WarehouseAssignment']] = None
     project_ids: Optional[List[int]] = None
 
 
@@ -141,6 +141,25 @@ class RoleInfo(BaseModel):
     id: int
     code: str
     name: str
+
+
+class WarehouseAssignment(BaseModel):
+    """A warehouse linked to an optional role (used in create/update payloads)."""
+    warehouse_id: int
+    role_id: Optional[int] = None
+
+
+class WarehouseInfo(BaseModel):
+    """Warehouse assignment returned in GET /settings/users/{id}."""
+    id: int
+    name: Optional[str] = None
+    role_id: Optional[int] = None
+    role_name: Optional[str] = None
+
+
+class ProjectInfo(BaseModel):
+    id: int
+    name: Optional[str] = None
 
 
 class UserPositionInfo(BaseModel):
@@ -181,6 +200,8 @@ class UserResponse(BaseModel):
     last_login: Optional[datetime] = None
     created_at: Optional[datetime] = None
     roles: List[RoleInfo] = []
+    warehouses: List[WarehouseInfo] = []
+    projects: List[ProjectInfo] = []
     positions: List[UserPositionInfo] = []
     permissions: List[str] = []
 
@@ -225,3 +246,6 @@ class AssignProjects(BaseModel):
 
 
 TokenResponse.model_rebuild()
+# Resolve forward reference to WarehouseAssignment used in UserCreate / UserUpdate
+UserCreate.model_rebuild()
+UserUpdate.model_rebuild()

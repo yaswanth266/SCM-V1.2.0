@@ -49,7 +49,7 @@ function ExpiryTab() {
     <div>
       <Space style={{ marginBottom: 16 }}>
         <span>Show batches expiring within</span>
-        <InputNumber min={1} max={365} value={days} onChange={setDays} addonAfter="days" />
+        <InputNumber min={1} max={365} value={days} onChange={setDays} suffix="days" />
         <Button icon={<ReloadOutlined />} onClick={fetch}>Refresh</Button>
       </Space>
       <Card><Table rowKey="batch_id" loading={loading} dataSource={rows} columns={cols} size="small" pagination={{ pageSize: 30 }} /></Card>
@@ -194,7 +194,7 @@ function ABCTab() {
     <div>
       <Space style={{ marginBottom: 16 }}>
         <span>Lookback period:</span>
-        <InputNumber min={7} max={730} value={days} onChange={setDays} addonAfter="days" />
+        <InputNumber min={7} max={730} value={days} onChange={setDays} suffix="days" />
         <Button icon={<ReloadOutlined />} onClick={fetch} loading={loading}>Recompute</Button>
       </Space>
       <Row gutter={16} style={{ marginBottom: 16 }}>

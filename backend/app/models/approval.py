@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Text, Boolean, DateTime, Enum, ForeignKey, Numeric, Integer, Index
+from sqlalchemy import Column, BigInteger, String, Text, Boolean, DateTime, Enum, ForeignKey, Numeric, Integer, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.database import Base
@@ -134,3 +134,24 @@ class ApprovalDelegation(Base):
 
     delegator = relationship("User", foreign_keys=[delegator_id])
     delegatee = relationship("User", foreign_keys=[delegatee_id])
+
+
+class ProjectWorkflowConfig(Base):
+    __tablename__ = "project_workflow_configs"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    project_id = Column(BigInteger, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    role_id = Column(BigInteger, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False)
+    indent_approve = Column(Boolean, default=False, nullable=False)
+    indent_view = Column(Boolean, default=False, nullable=False)
+    dispatch_approve = Column(Boolean, default=False, nullable=False)  # Material Distribution Workflow
+    dispatch_view = Column(Boolean, default=False, nullable=False)     # Material Distribution Data View
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", foreign_keys=[project_id])
+    role = relationship("Role", foreign_keys=[role_id])
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "role_id", name="uq_project_role_config"),
+    )
+

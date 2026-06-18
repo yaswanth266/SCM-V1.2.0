@@ -45,6 +45,23 @@ async def get_stock_balances(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if not isinstance(page, int):
+        page = 1
+    if not isinstance(page_size, int):
+        page_size = 50
+    if not isinstance(warehouse_id, int):
+        warehouse_id = None
+    if not isinstance(batch_id, int):
+        batch_id = None
+    if not isinstance(category, str):
+        category = None
+    if not isinstance(batch, str):
+        batch = None
+    if not isinstance(item_id, str):
+        item_id = None
+    if not isinstance(show_zero_stock, bool):
+        show_zero_stock = False
+
     offset, limit = paginate_params(page, page_size)
     from app.models.warehouse import WarehouseBin, WarehouseRack, WarehouseLine, WarehouseLocation
     from sqlalchemy.orm import joinedload
@@ -63,8 +80,10 @@ async def get_stock_balances(
     is_admin = bool({"super_admin", "admin"} & set(role_codes))
     assigned_whs = await user_warehouse_ids(db, current_user.id)
 
-    if is_admin:
-        # Admins see all real warehouses (excluding virtual)
+    is_managerial = await user_is_managerial(db, current_user.id)
+
+    if is_admin or is_managerial:
+        # Admins and managerial users see all real warehouses (excluding virtual)
         real_wh_subq = select(_Wh.id).where(_Wh.type != "virtual").subquery()
         query = query.where(StockBalance.warehouse_id.in_(select(real_wh_subq)))
         count_query = count_query.where(StockBalance.warehouse_id.in_(select(real_wh_subq)))
@@ -78,16 +97,8 @@ async def get_stock_balances(
         query = query.where(StockBalance.warehouse_id.in_(scoped_wh))
         count_query = count_query.where(StockBalance.warehouse_id.in_(scoped_wh))
     else:
-        # No mapped warehouses:
-        # If they are managerial, they can see all real warehouses
-        is_managerial = await user_is_managerial(db, current_user.id)
-        if is_managerial:
-            real_wh_subq = select(_Wh.id).where(_Wh.type != "virtual").subquery()
-            query = query.where(StockBalance.warehouse_id.in_(select(real_wh_subq)))
-            count_query = count_query.where(StockBalance.warehouse_id.in_(select(real_wh_subq)))
-        else:
-            # Non-managerial with no warehouses assigned see nothing
-            return build_paginated_response([], 0, page, page_size)
+        # Non-managerial with no warehouses assigned see nothing
+        return build_paginated_response([], 0, page, page_size)
 
     # Handle single item_id or comma-separated list (e.g., "335,337,349")
     if item_id:
@@ -408,6 +419,21 @@ async def get_stock_ledger(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if not isinstance(page, int):
+        page = 1
+    if not isinstance(page_size, int):
+        page_size = 50
+    if not isinstance(warehouse_id, int):
+        warehouse_id = None
+    if not isinstance(item_id, int):
+        item_id = None
+    if not isinstance(transaction_type, str):
+        transaction_type = None
+    if not isinstance(date_from, str):
+        date_from = None
+    if not isinstance(date_to, str):
+        date_to = None
+
     offset, limit = paginate_params(page, page_size)
     # BUG-INV-124: pin a deterministic order on (posting_date desc, id desc)
     # as a tuple so that subsequent .where() rebinds keep ordering stable
@@ -426,11 +452,12 @@ async def get_stock_ledger(
     count_query = select(func.count(StockLedger.id))
 
     # R-005: warehouse-scope isolation
-    from app.utils.dependencies import user_is_managerial, user_warehouse_ids
+    from app.utils.dependencies import user_is_managerial, user_warehouse_ids, get_warehouse_and_descendants
     if not await user_is_managerial(db, current_user.id):
-        scoped_wh = await user_warehouse_ids(db, current_user.id)
-        if not scoped_wh:
+        assigned_whs = await user_warehouse_ids(db, current_user.id)
+        if not assigned_whs:
             return build_paginated_response([], 0, page, page_size)
+        scoped_wh = await get_warehouse_and_descendants(db, assigned_whs)
         if warehouse_id is not None and warehouse_id not in scoped_wh:
             raise HTTPException(status_code=403, detail="Not authorized to view this warehouse's ledger")
         query = query.where(StockLedger.warehouse_id.in_(scoped_wh))
@@ -3200,6 +3227,30 @@ async def create_item(
                 fallback_result = await db.execute(select(Warehouse).where(Warehouse.is_active == True).limit(1))
                 warehouse = fallback_result.scalar_one_or_none()
             if warehouse:
+                # Resolve or create a default bin
+                from app.api.v1.warehouse import resolve_or_create_bin
+                bin_id = await resolve_or_create_bin(db, warehouse.id, "SYSTEM-DEFAULT")
+
+                # Resolve or create a default batch with future expiry
+                from app.models.warehouse import Batch
+                batch_number = "INITIAL-BATCH"
+                batch_result = await db.execute(
+                    select(Batch).where(Batch.item_id == item.id, Batch.batch_number == batch_number)
+                )
+                batch = batch_result.scalar_one_or_none()
+                if not batch:
+                    from datetime import datetime, timedelta
+                    future_expiry = datetime.now() + timedelta(days=3650)
+                    batch = Batch(
+                        item_id=item.id,
+                        batch_number=batch_number,
+                        expiry_date=future_expiry,
+                        status="active"
+                    )
+                    db.add(batch)
+                    await db.flush()
+                batch_id = batch.id
+
                 from app.services.stock_service import post_stock_ledger
                 await post_stock_ledger(
                     db=db,
@@ -3208,6 +3259,8 @@ async def create_item(
                     transaction_type="opening",
                     qty_in=Decimal(str(initial_quantity)),
                     rate=item.purchase_price or Decimal("0"),
+                    bin_id=bin_id,
+                    batch_id=batch_id,
                     uom_id=item.primary_uom_id,
                     created_by=current_user.id
                 )

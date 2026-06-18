@@ -2,10 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Button, Form, Input, Select, Space, Row, Col,
-  message, Card, Divider, Spin,
+  message, Card, Divider, Spin, Table, Tag, Empty,
 } from 'antd';
 import {
-  ArrowLeftOutlined, SaveOutlined,
+  ArrowLeftOutlined, SaveOutlined, BankOutlined,
 } from '@ant-design/icons';
 import PageHeader from '../../components/PageHeader';
 import api from '../../config/api';
@@ -38,6 +38,11 @@ const UserForm = () => {
   const [warehouses, setWarehouses] = useState([]);
   const [projects, setProjects] = useState([]);
 
+  // Role-warehouse mapping: { role_id: warehouse_id | null }
+  const [roleWarehouseMap, setRoleWarehouseMap] = useState({});
+  // Currently selected role IDs (mirrors form field)
+  const [selectedRoleIds, setSelectedRoleIds] = useState([]);
+
   const fetchLookups = useCallback(async () => {
     try {
       const [roleRes, whRes, projRes] = await Promise.allSettled([
@@ -47,7 +52,7 @@ const UserForm = () => {
       ]);
       if (roleRes.status === 'fulfilled') {
         const d = roleRes.value.data;
-        setRoles((d.items || d.data || d || []).map((r) => ({ label: `${r.code || r.name} - ${r.name}`, value: r.id })));
+        setRoles((d.items || d.data || d || []).map((r) => ({ label: `${r.code || r.name} - ${r.name}`, value: r.id, name: r.name, code: r.code })));
       }
       if (whRes.status === 'fulfilled') {
         const d = whRes.value.data;
@@ -66,10 +71,22 @@ const UserForm = () => {
       const res = await api.get(`/settings/users/${id}`);
       const data = res.data;
       setEditingUser(data);
+
+      const roleIds = data.roles?.map((r) => typeof r === 'object' ? r.id : r) || data.role_ids || [];
+      setSelectedRoleIds(roleIds);
+
+      // Build role→warehouse map from API response
+      const map = {};
+      (data.warehouses || []).forEach((w) => {
+        if (w.role_id) {
+          map[w.role_id] = w.id;
+        }
+      });
+      setRoleWarehouseMap(map);
+
       form.setFieldsValue({
         ...data,
-        role_ids: data.roles?.map((r) => typeof r === 'object' ? r.id : r) || data.role_ids || [],
-        warehouse_ids: data.warehouses?.map((w) => typeof w === 'object' ? w.id : w) || data.warehouse_ids || [],
+        role_ids: roleIds,
         project_ids: data.projects?.map((p) => typeof p === 'object' ? p.id : p) || data.project_ids || [],
       });
     } catch (err) {
@@ -89,17 +106,45 @@ const UserForm = () => {
     }
   }, [id]);
 
+  // When roles change in the Select, sync the warehouse map
+  const handleRolesChange = (newRoleIds) => {
+    setSelectedRoleIds(newRoleIds);
+    setRoleWarehouseMap((prev) => {
+      const next = {};
+      newRoleIds.forEach((rId) => {
+        next[rId] = prev[rId] ?? null;
+      });
+      return next;
+    });
+  };
+
+  const handleWarehouseForRole = (roleId, warehouseId) => {
+    setRoleWarehouseMap((prev) => ({ ...prev, [roleId]: warehouseId ?? null }));
+  };
+
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
       setSubmitting(true);
+
+      // Build warehouse_assignments from the role-warehouse map
+      const warehouse_assignments = Object.entries(roleWarehouseMap)
+        .filter(([, whId]) => whId != null)
+        .map(([roleId, whId]) => ({
+          warehouse_id: whId,
+          role_id: parseInt(roleId, 10),
+        }));
+
+      const payload = { ...values, warehouse_assignments };
+      // Remove form fields that aren't part of the API payload
+      // role_ids is handled by the API via role_ids key — keep it
+
       if (!isNew && editingUser) {
-        const payload = { ...values };
         if (!payload.password) delete payload.password;
         await api.put(`/settings/users/${editingUser.auth_user_id || editingUser.id}`, payload);
         message.success('User updated successfully');
       } else {
-        await api.post('/settings/users', values);
+        await api.post('/settings/users', payload);
         message.success('User created successfully');
       }
       navigate('/settings/users');
@@ -120,6 +165,47 @@ const UserForm = () => {
   }
 
   const isSelf = editingUser && currentUser && editingUser.id === currentUser.id;
+
+  // Build role→warehouse mapping rows for display
+  const mappingRows = selectedRoleIds.map((roleId) => {
+    const roleObj = roles.find((r) => r.value === roleId);
+    return {
+      key: roleId,
+      roleId,
+      roleName: roleObj ? `${roleObj.code} - ${roleObj.name}` : `Role #${roleId}`,
+      warehouseId: roleWarehouseMap[roleId] ?? null,
+    };
+  });
+
+  const mappingColumns = [
+    {
+      title: 'Role',
+      dataIndex: 'roleName',
+      key: 'roleName',
+      width: '45%',
+      render: (name) => (
+        <Tag color="blue" style={{ fontSize: 13, padding: '2px 8px' }}>
+          {name}
+        </Tag>
+      ),
+    },
+    {
+      title: 'Assigned Warehouse',
+      key: 'warehouse',
+      render: (_, row) => (
+        <Select
+          value={row.warehouseId}
+          onChange={(v) => handleWarehouseForRole(row.roleId, v)}
+          options={warehouses}
+          showSearch
+          optionFilterProp="label"
+          allowClear
+          placeholder="Select warehouse for this role"
+          style={{ width: '100%' }}
+        />
+      ),
+    },
+  ];
 
   return (
     <div>
@@ -251,7 +337,7 @@ const UserForm = () => {
             </Col>
           </Row>
 
-          <Divider orientation="left" plain>Role & Access</Divider>
+          <Divider orientation="left" plain>Role &amp; Access</Divider>
           <Row gutter={16}>
             <Col xs={24} sm={12}>
               <Form.Item name="user_type" label="User Type" rules={[{ required: true }]}>
@@ -264,6 +350,7 @@ const UserForm = () => {
               </Form.Item>
             </Col>
           </Row>
+
           <Form.Item name="role_ids" label="Roles">
             <Select
               mode="multiple"
@@ -272,20 +359,43 @@ const UserForm = () => {
               showSearch
               optionFilterProp="label"
               allowClear
+              onChange={handleRolesChange}
               // BUG-AUTH-069 fix: prevent self-demotion via UI
               disabled={isSelf}
             />
           </Form.Item>
-          <Form.Item name="warehouse_ids" label="Assigned Warehouses">
-            <Select
-              mode="multiple"
-              placeholder="Select warehouses"
-              options={warehouses}
-              showSearch
-              optionFilterProp="label"
-              allowClear
-            />
+
+          {/* Role → Warehouse Mapping */}
+          <Form.Item
+            label={
+              <Space>
+                <BankOutlined />
+                <span>Role ↔ Warehouse Mapping</span>
+                <span style={{ color: '#888', fontWeight: 400, fontSize: 12 }}>
+                  (assign a warehouse to each role)
+                </span>
+              </Space>
+            }
+          >
+            {mappingRows.length === 0 ? (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="Select roles above to assign warehouses"
+                style={{ padding: '16px 0', border: '1px dashed #d9d9d9', borderRadius: 6 }}
+              />
+            ) : (
+              <Table
+                dataSource={mappingRows}
+                columns={mappingColumns}
+                pagination={false}
+                size="small"
+                rowKey="key"
+                bordered
+                style={{ borderRadius: 6, overflow: 'hidden' }}
+              />
+            )}
           </Form.Item>
+
           <Form.Item name="project_ids" label="Assigned Projects">
             <Select
               mode="multiple"

@@ -64,11 +64,12 @@ const IndentForm = () => {
   const [uoms, setUoms] = useState([]);
 
   const loadLookups = useCallback(async () => {
+    const uid = user?.id;
     try {
       const [deptRes, whRes, projRes, uomRes] = await Promise.allSettled([
         api.get('/masters/departments', { params: { page_size: 200 } }),
-        api.get('/masters/warehouses', { params: { page_size: 200 } }),
-        api.get('/masters/projects', { params: { page_size: 200 } }),
+        api.get('/masters/warehouses', { params: { page_size: 200, user_id: uid } }),
+        api.get('/masters/projects', { params: { page_size: 200, user_id: uid } }),
         api.get('/masters/uom', { params: { page_size: 200 } }),
       ]);
       if (deptRes.status === 'fulfilled') {
@@ -80,20 +81,31 @@ const IndentForm = () => {
         const w = whRes.value.data;
         const whList = (w.items || w.data || w || []).map((i) => ({ label: i.name || i.warehouse_name, value: i.id }));
         setWarehouses(whList);
-        // Auto-pick warehouse when the user has only one assigned — saves
-        // a click and prevents picking a warehouse they don't belong to.
-        if (isNew && whList.length === 1) {
-          form.setFieldValue('warehouse_id', whList[0].value);
+        // Auto-pick warehouse from the user's primary assignment or from
+        // the scoped list when there's only one. The backend now accepts
+        // user_id to scope results to the user's actual warehouse
+        // assignments, so multiple-system-warehouse users see only theirs.
+        if (isNew) {
+          if (whList.length === 1) {
+            form.setFieldValue('warehouse_id', whList[0].value);
+          } else if (uid && user?.warehouse_id) {
+            form.setFieldValue('warehouse_id', user.warehouse_id);
+          }
         }
       }
       if (projRes.status === 'fulfilled') {
         const p = projRes.value.data;
         const projList = (p.items || p.data || p || []).map((i) => ({ label: i.name || i.project_name, value: i.id }));
         setProjects(projList);
-        // Same auto-pick for project — backend now scopes /masters/projects
-        // by user_projects, so a single-project user sees exactly one option.
-        if (isNew && projList.length === 1) {
-          form.setFieldValue('project_id', projList[0].value);
+        // Auto-pick project when the scoped list has exactly one, or from
+        // the user's assignment data. Backend scopes /masters/projects
+        // by user_id when provided.
+        if (isNew) {
+          if (projList.length === 1) {
+            form.setFieldValue('project_id', projList[0].value);
+          } else if (uid && user?.projects && user.projects.length === 1) {
+            form.setFieldValue('project_id', user.projects[0].id);
+          }
         }
       }
       if (uomRes.status === 'fulfilled') {
@@ -104,7 +116,7 @@ const IndentForm = () => {
     } catch {
       // silent
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     loadLookups();
@@ -367,7 +379,7 @@ const IndentForm = () => {
                 <Button type="primary" icon={<SendOutlined />} onClick={handleSubmitForApproval}>Submit for Approval</Button>
               </>
             )}
-            {indent.status === 'pending_approval' && (
+            {indent.status === 'pending_approval' && indent.can_approve_now === true && indent.raised_by !== user?.id && (
               <>
                 <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleApprove}>Approve</Button>
                 <Popconfirm title="Reject this indent?" onConfirm={handleReject} okButtonProps={{ danger: true }}>
@@ -550,7 +562,7 @@ const IndentForm = () => {
             )}
             {projects.length > 1 && (
               <Col xs={24} sm={12} md={8}>
-                <Form.Item name="project_id" label="Project">
+                <Form.Item name="project_id" label="Project" rules={[{ required: true, message: 'Project is required' }]}>
                   <Select options={projects} placeholder="Select project" allowClear optionFilterProp="label" />
                 </Form.Item>
               </Col>

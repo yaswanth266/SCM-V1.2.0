@@ -99,15 +99,25 @@ class MdoCreate(BaseModel):
     warehouseId: int
     priority: str
     specialInstructions: Optional[str] = None
-    sdos: List[SdoCreate]
-    # SCM Single Dispatch fields
+    materials: List[MaterialCreate]
+    dispatch_mode: Optional[str] = "direct"
+    # SCM Single/Multi-Level Dispatch fields
     material_issue_id: Optional[int] = None
     indent_id: Optional[int] = None
     destination_warehouse_id: Optional[int] = None
+    destination_user_id: Optional[int] = None
     delivery_address: Optional[str] = None
     e_challan: Optional[str] = None
     waybill: Optional[str] = None
     dispatch_type: Optional[str] = "THIRD_PARTY"
+    courier_name: Optional[str] = None
+    awb_no: Optional[str] = None
+    vehicle_no: Optional[str] = None
+    driver_name: Optional[str] = None
+    driver_phone: Optional[str] = None
+    received_by_name: Optional[str] = None
+    received_by_phone: Optional[str] = None
+    handover_remarks: Optional[str] = None
 
 # --- TRANSACTION RESPONSE SCHEMAS ---
 
@@ -172,9 +182,29 @@ class SdoResponse(BaseModel):
     created_at: datetime
     destinations: List[SdoDestinationResponse] = []
     materials: List[DispatchMaterialResponse] = []
+    custodian_position_id: Optional[int] = None
+    custodian_position_name: Optional[str] = None
+    sequence_number: Optional[int] = 1
+    handover_type: Optional[str] = None
+    handed_over_by_id: Optional[int] = None
+    handed_over_by_name: Optional[str] = None
+    handover_time: Optional[datetime] = None
+    carrier_details: Optional[Dict[str, Any]] = None
+    received_by_id: Optional[int] = None
+    received_by_name: Optional[str] = None
+    received_at: Optional[datetime] = None
+    seal_intact: Optional[bool] = None
+    packaging_condition: Optional[str] = None
+    discrepancy_reported: Optional[bool] = None
+    receiving_remarks: Optional[str] = None
+    handover_photos: Optional[List[str]] = None
+    handover_signature: Optional[str] = None
+    receipt_photos: Optional[List[str]] = None
+    receipt_signature: Optional[str] = None
 
     class Config:
         from_attributes = True
+
 
 class DispatchHandoverResponse(BaseModel):
     id: int
@@ -225,14 +255,18 @@ class MdoResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     sdos: List[SdoResponse] = []
-    # SCM Single Dispatch fields
+    materials: List[DispatchMaterialResponse] = []
+    # SCM Single/Multi-Level Dispatch fields
     material_issue_id: Optional[int] = None
     indent_id: Optional[int] = None
     destination_warehouse_id: Optional[int] = None
+    destination_user_id: Optional[int] = None
+    destination_user_name: Optional[str] = None
     delivery_address: Optional[str] = None
     e_challan: Optional[str] = None
     waybill: Optional[str] = None
     dispatch_type: Optional[str] = None
+    dispatch_mode: Optional[str] = "direct"
     handover: Optional[DispatchHandoverResponse] = None
     # Proof of Delivery / Acknowledgement fields
     delivery_acknowledged: Optional[bool] = False
@@ -531,3 +565,25 @@ class VehicleStatusUpdate(BaseModel):
 
 class VehicleIssueLog(BaseModel):
     issueDescription: str
+
+
+class SdoHandoverSchema(BaseModel):
+    handover_type: str  # OWN_VEHICLE, COURIER, THIRD_PARTY, IN_PERSON
+    vehicle_no: Optional[str] = None
+    driver_name: Optional[str] = None
+    driver_phone: Optional[str] = None
+    courier_name: Optional[str] = None
+    awb_no: Optional[str] = None
+    remarks: Optional[str] = None
+    otp: Optional[str] = None
+    handover_photos: Optional[List[str]] = None  # Material photo URLs
+    handover_signature: Optional[str] = None  # Signature image URL
+
+
+class SdoReceiveSchema(BaseModel):
+    seal_intact: bool
+    packaging_condition: str  # INTACT, DAMAGED, TAMPERED
+    discrepancy_reported: bool
+    receiving_remarks: Optional[str] = None
+    receipt_photos: Optional[List[str]] = None  # Condition photo URLs
+    receipt_signature: Optional[str] = None  # Receiver signature URL

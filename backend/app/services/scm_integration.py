@@ -186,6 +186,82 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
                 print(f"[SCM Integration] Indent {indent.indent_number} set to status 'partially_fulfilled'")
             db.add(indent)
 
+            # 3.5 Stock Ledger Movement: If inter-warehouse transfer, transfer stock from transit to destination warehouse
+            if dispatch_order and dispatch_order.delivery_acknowledged:
+                # Stock transfer is already handled by dispatch acknowledgment endpoint
+                pass
+            elif mdo.destination_warehouse_id and mdo.destination_warehouse_id != mdo.warehouse_id:
+                try:
+                    dest_wh_id = mdo.destination_warehouse_id
+                    transit_wh_id = mdo.warehouse_id
+                    if mdo.dispatch_mode.lower() == "multi-level" and dispatch_order:
+                        from app.api.v1.dispatch import get_last_intermediate_warehouse
+                        transit_wh_id = await get_last_intermediate_warehouse(db, dispatch_order)
+
+                    # Fetch materials for this MDO
+                    res_mats = await db.execute(
+                        select(LogisticsDispatchMaterial).where(LogisticsDispatchMaterial.mdo_id == mdo.id)
+                    )
+                    materials_list = res_mats.scalars().all()
+
+                    for mat in materials_list:
+                        # Check if already processed to avoid double posting
+                        from app.models.stock import StockLedger
+                        ledger_check = await db.execute(
+                            select(StockLedger).where(
+                                StockLedger.reference_type == "indent_acknowledgement",
+                                StockLedger.reference_id == ack.id,
+                                StockLedger.item_id == mat.material_id
+                            ).limit(1)
+                        )
+                        if ledger_check.scalar_one_or_none():
+                            continue
+
+                        batch_id = None
+                        bin_id = None
+                        if mdo.material_issue_id:
+                            from app.models.issue import MaterialIssueItem
+                            mi_item_res = await db.execute(
+                                select(MaterialIssueItem).where(
+                                    MaterialIssueItem.issue_id == mdo.material_issue_id,
+                                    MaterialIssueItem.item_id == mat.material_id
+                                ).limit(1)
+                            )
+                            mi_item = mi_item_res.scalar_one_or_none()
+                            if mi_item:
+                                batch_id = mi_item.batch_id
+                                bin_id = mi_item.bin_id
+
+                        # Decrement transit_qty in transit warehouse
+                        from app.services.stock_service import _get_or_create_balance, post_stock_ledger
+                        src_balance = await _get_or_create_balance(
+                            db,
+                            item_id=mat.material_id,
+                            warehouse_id=transit_wh_id,
+                            bin_id=bin_id,
+                            batch_id=batch_id,
+                            lock=True,
+                        )
+                        qty = Decimal(str(mat.quantity))
+                        src_balance.transit_qty = max(Decimal("0"), (src_balance.transit_qty or Decimal("0")) - qty)
+
+                        # Increment available quantity in destination warehouse
+                        await post_stock_ledger(
+                            db,
+                            item_id=mat.material_id,
+                            warehouse_id=dest_wh_id,
+                            transaction_type="material_issue",
+                            qty_in=qty,
+                            batch_id=batch_id,
+                            bin_id=bin_id,
+                            reference_type="indent_acknowledgement",
+                            reference_id=ack.id,
+                            uom_id=1,
+                            created_by=current_user_id,
+                        )
+                except Exception as stock_err:
+                    print(f"[SCM Integration] Stock movement failed in auto_acknowledge_scm_dispatch: {stock_err}")
+
             # 4. Log SCM Merge Event to Activity Logs
             db.add(
                 ActivityLog(

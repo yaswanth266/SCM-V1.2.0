@@ -66,10 +66,28 @@ const useAppStore = create((set) => ({
       unreadCount: 0,
     }));
     try {
-      await api.post('/notifications/mark-all-read');
+      await api.post('/notifications/read-all');
     } catch {
       // best-effort: leave the optimistic state in place — the next fetch
       // (on reload or polling) will reconcile.
+    }
+  },
+
+  fetchNotifications: async () => {
+    try {
+      const res = await api.get('/notifications', { params: { page_size: 100 } });
+      const items = res.data?.items || res.data?.data || res.data || [];
+      const mapped = items.map((n) => ({
+        ...n,
+        read: n.is_read ?? n.read,
+        description: n.description || n.message,
+      }));
+      set({
+        notifications: mapped,
+        unreadCount: mapped.filter((n) => !n.read).length,
+      });
+    } catch (err) {
+      console.error('Failed to fetch notifications:', err);
     }
   },
 }));

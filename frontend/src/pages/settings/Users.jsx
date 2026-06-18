@@ -26,6 +26,35 @@ const USER_TYPES = [
 ];
 // USER_TYPES kept here for the user-type filter dropdown in the toolbar
 
+const deduplicatePositions = (positions) => {
+  if (!Array.isArray(positions)) return [];
+  const unique = [];
+  const seenRoleIds = new Set();
+  const seenRoleNames = new Set();
+  for (const p of positions) {
+    if (!p) continue;
+    if (typeof p !== 'object') {
+      unique.push(p);
+      continue;
+    }
+    const roleId = p.role_id;
+    const roleName = (p.role_name || p.role_code || p.name || p.position_name || '').trim().toLowerCase();
+    if (roleId != null) {
+      if (seenRoleIds.has(roleId)) continue;
+      seenRoleIds.add(roleId);
+      if (roleName) seenRoleNames.add(roleName);
+      unique.push(p);
+    } else if (roleName) {
+      if (seenRoleNames.has(roleName)) continue;
+      seenRoleNames.add(roleName);
+      unique.push(p);
+    } else {
+      unique.push(p);
+    }
+  }
+  return unique;
+};
+
 const Users = () => {
   const { Text } = Typography;
   const navigate = useNavigate();
@@ -238,7 +267,7 @@ const Users = () => {
         'Email': u.email || '',
         'Phone': u.phone || '',
         'Position': (u.positions && Array.isArray(u.positions))
-          ? u.positions.map((p) => (typeof p === 'object' ? (p.name || p.position_name || '') : p)).join(' | ')
+          ? deduplicatePositions(u.positions).map((p) => (typeof p === 'object' ? (p.name || p.position_name || '') : p)).join(' | ')
           : (u.position_name || ''),
         'Department': u.department || '',
         'Position Role': u.role_name || '',
@@ -319,9 +348,10 @@ const Users = () => {
       render: (_, record) => {
         // Handle positions array (future backend support for multiple positions)
         if (record.positions && Array.isArray(record.positions) && record.positions.length > 0) {
+          const uniquePositions = deduplicatePositions(record.positions);
           return (
             <Space size={[0, 4]} wrap>
-              {record.positions.map((p, i) => {
+              {uniquePositions.map((p, i) => {
                 const label = typeof p === 'object' ? (p.name || p.position_name || '') : p;
                 return label ? <Tag key={i} color="blue">{label}</Tag> : null;
               })}

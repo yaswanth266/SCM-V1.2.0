@@ -120,6 +120,15 @@ _ROLE_KEYS = {
     },
     'store_keeper': {
         'lms',
+        'indent', 'indent-dashboard', 'indent-indents',
+        'warehouse', 'warehouse-dashboard', 'warehouse-grn', 'warehouse-putaway',
+        'warehouse-material-issues', 'warehouse-material-inward',
+        'warehouse-dispatch', 'warehouse-notifications',
+        'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-stock-transfer', 'inventory-notifications',
+    },
+    'storekeeper': {
+        'lms',
+        'indent', 'indent-dashboard', 'indent-indents',
         'warehouse', 'warehouse-dashboard', 'warehouse-grn', 'warehouse-putaway',
         'warehouse-material-issues', 'warehouse-material-inward',
         'warehouse-dispatch', 'warehouse-notifications',
@@ -210,13 +219,22 @@ async def allowed_keys_for_role(db: AsyncSession, role: Role) -> List[str]:
         act = (action or "").strip().lower()
         if not key or act not in {"view", "manage"}:
             continue
-        dynamic_keys.add(key)
-        if "-" in key:
-            dynamic_keys.add(key.split("-", 1)[0])
+        
+        # Map DB permission names to frontend menu keys if they differ
+        mapped_keys = [key]
+        if key == "indent-transactions":
+            mapped_keys.append("indent-indents")
+        elif key == "inventory-transactions":
+            mapped_keys.extend(["inventory-stock-transfer", "inventory-stock-audit", "inventory-replenishment"])
+            
+        for k in mapped_keys:
+            dynamic_keys.add(k)
+            if "-" in k:
+                dynamic_keys.add(k.split("-", 1)[0])
 
     keys = list(dynamic_keys) if dynamic_keys else list(_allowed_for_role(role.code))
-    if role.code in {"field_staff", "field_supervisor"}:
-        # Ensure field staff/supervisors can always access stock balance and stock ledger
+    if role.code in {"field_staff", "field_supervisor", "storekeeper", "store_keeper"}:
+        # Ensure field staff/supervisors and storekeepers can always access stock balance and stock ledger
         for k in ["inventory", "inventory-stock-balance", "inventory-stock-ledger"]:
             if k not in keys:
                 keys.append(k)

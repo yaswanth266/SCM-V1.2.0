@@ -57,13 +57,10 @@ class DispatchOrder(Base):
     loading_confirmed = Column(Boolean, default=False)
     loading_confirmed_at = Column(DateTime)
     
+    dispatch_mode = Column(String(50), default="direct", nullable=False)
+
     # Enhanced status lifecycle
-    status = Column(Enum(
-        "draft", "loading", "loaded", "dispatched", "in_transit",
-        "out_for_delivery", "delivered", "acknowledged",
-        "partially_acknowledged", "rejected", "returned", "cancelled",
-        name="dispatch_status_enum"
-    ), default="draft")
+    status = Column(String(50), default="draft")
     
     remarks = Column(Text)
     dispatched_by = Column(BigInteger)

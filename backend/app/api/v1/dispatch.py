@@ -181,6 +181,7 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
                     destination_warehouse_id=mdo.destination_warehouse_id,
                     destination_type="WAREHOUSE" if mdo.destination_warehouse_id else "USER",
                     dispatch_type=mapped_dt,
+                    dispatch_mode=mdo.dispatch_mode or "direct",
                     status=mapped_st,
                     remarks=mdo.special_instructions,
                     material_issue_id=mdo.material_issue_id,
@@ -191,10 +192,8 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
                 db.add(disp)
                 await db.flush()
                 
-                # Fetch MDO's materials from sub-dispatch orders
-                stmt_mats = select(LogisticsDispatchMaterial).join(
-                    LogisticsSubDispatchOrder, LogisticsSubDispatchOrder.id == LogisticsDispatchMaterial.sdo_id
-                ).where(LogisticsSubDispatchOrder.mdo_id == mdo.id)
+                # Fetch MDO's materials directly for both direct and multi-level dispatches
+                stmt_mats = select(LogisticsDispatchMaterial).where(LogisticsDispatchMaterial.mdo_id == mdo.id)
                 res_mats = await db.execute(stmt_mats)
                 mats = res_mats.scalars().all()
                 
@@ -236,6 +235,9 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
                     await process_dispatch_stock_deduction(db, disp, mdo.created_by or 1)
             else:
                 existing.expected_delivery_date = mdo.required_delivery_date
+                # Sync dispatch_mode from MDO so acknowledge_delivery picks the right transit warehouse
+                if mdo.dispatch_mode and existing.dispatch_mode != mdo.dispatch_mode:
+                    existing.dispatch_mode = mdo.dispatch_mode
                 db.add(existing)
                 # Keep status in sync in case status changed
                 if existing.status != mapped_st:
@@ -248,21 +250,16 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
                     if mapped_st in ("dispatched", "in_transit") and old_status not in ("dispatched", "in_transit", "delivered", "acknowledged"):
                         await process_dispatch_stock_deduction(db, existing, mdo.created_by or existing.dispatched_by or 1)
 
-                # Update serial_numbers on existing dispatch items from MDO materials (fix for MDOs synced before this fix)
+                # Backfill missing items OR update serial_numbers on existing dispatch items
                 try:
-                    stmt_mats = select(LogisticsDispatchMaterial).join(
-                        LogisticsSubDispatchOrder, LogisticsSubDispatchOrder.id == LogisticsDispatchMaterial.sdo_id
-                    ).where(LogisticsSubDispatchOrder.mdo_id == mdo.id)
+                    # Fetch MDO's materials directly for both direct and multi-level dispatches
+                    stmt_mats = select(LogisticsDispatchMaterial).where(LogisticsDispatchMaterial.mdo_id == mdo.id)
                     res_mats = await db.execute(stmt_mats)
                     mats = res_mats.scalars().all()
-                    
-                    for mat in mats:
-                        # Find matching existing dispatch item
-                        existing_item = next(
-                            (i for i in (existing.items or []) if i.material_id == mat.material_id),
-                            None
-                        )
-                        if existing_item and not existing_item.serial_numbers:
+
+                    if not existing.items and mats:
+                        # Dispatch order has no items — backfill from LogisticsDispatchMaterial
+                        for mat in mats:
                             serial_numbers = mat.serial_numbers
                             if not serial_numbers and mdo.material_issue_id:
                                 try:
@@ -277,10 +274,46 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
                                         serial_numbers = mi_item.serial_numbers
                                 except Exception:
                                     pass
-                            if serial_numbers:
-                                existing_item.serial_numbers = serial_numbers
-                                db.add(existing_item)
-                    await db.flush()
+                            item = DispatchOrderItem(
+                                dispatch_order_id=existing.id,
+                                material_id=mat.material_id,
+                                indent_id=mdo.indent_id,
+                                material_issue_id=mdo.material_issue_id,
+                                requested_quantity=mat.quantity,
+                                approved_quantity=mat.quantity,
+                                dispatched_quantity=mat.quantity,
+                                uom=mat.unit_of_measure,
+                                request_date=mdo.order_date,
+                                serial_numbers=serial_numbers
+                            )
+                            db.add(item)
+                        await db.flush()
+                    else:
+                        # Items already exist — just patch missing serial numbers
+                        for mat in mats:
+                            existing_item = next(
+                                (i for i in (existing.items or []) if i.material_id == mat.material_id),
+                                None
+                            )
+                            if existing_item and not existing_item.serial_numbers:
+                                serial_numbers = mat.serial_numbers
+                                if not serial_numbers and mdo.material_issue_id:
+                                    try:
+                                        mi_item_res = await db.execute(
+                                            select(MaterialIssueItem).where(
+                                                MaterialIssueItem.issue_id == mdo.material_issue_id,
+                                                MaterialIssueItem.item_id == mat.material_id
+                                            ).limit(1)
+                                        )
+                                        mi_item = mi_item_res.scalar_one_or_none()
+                                        if mi_item and mi_item.serial_numbers:
+                                            serial_numbers = mi_item.serial_numbers
+                                    except Exception:
+                                        pass
+                                if serial_numbers:
+                                    existing_item.serial_numbers = serial_numbers
+                                    db.add(existing_item)
+                        await db.flush()
                 except Exception:
                     pass
         
@@ -303,6 +336,23 @@ async def list_dispatches(
         selectinload(DispatchOrder.destination_warehouse),
         selectinload(DispatchOrder.destination_user)
     )
+
+    # Filter by user's warehouse scope if non-managerial
+    from app.utils.dependencies import user_is_managerial, user_warehouse_ids, get_warehouse_and_descendants, get_user_role_codes
+    role_codes = await get_user_role_codes(db, current_user.id)
+    is_admin = bool({"super_admin", "admin"} & set(role_codes))
+    is_managerial = await user_is_managerial(db, current_user.id)
+
+    if not (is_admin or is_managerial):
+        assigned_whs = await user_warehouse_ids(db, current_user.id)
+        if assigned_whs:
+            scoped_whs = await get_warehouse_and_descendants(db, assigned_whs)
+            query = query.where(
+                (DispatchOrder.warehouse_id.in_(scoped_whs)) |
+                (DispatchOrder.destination_warehouse_id.in_(scoped_whs))
+            )
+        else:
+            return build_paginated_response([], 0, page, page_size)
     
     if status:
         query = query.where(DispatchOrder.status == status.lower())
@@ -393,6 +443,19 @@ async def get_dispatch(
     
     if not h:
         raise HTTPException(status_code=404, detail="Dispatch not found")
+
+    from app.utils.dependencies import user_is_managerial, user_warehouse_ids, get_warehouse_and_descendants, get_user_role_codes
+    role_codes = await get_user_role_codes(db, current_user.id)
+    is_admin = bool({"super_admin", "admin"} & set(role_codes))
+    is_managerial = await user_is_managerial(db, current_user.id)
+    if not (is_admin or is_managerial):
+        assigned_whs = await user_warehouse_ids(db, current_user.id)
+        if assigned_whs:
+            scoped_whs = await get_warehouse_and_descendants(db, assigned_whs)
+            if h.warehouse_id not in scoped_whs and h.destination_warehouse_id not in scoped_whs:
+                raise HTTPException(status_code=403, detail="Not authorized to view this dispatch")
+        else:
+            raise HTTPException(status_code=403, detail="Not authorized to view this dispatch")
         
     actual_qtys = {}
     remarks_map = {}
@@ -526,6 +589,170 @@ async def get_dispatch(
         "transporter_status_message": transporter_status_message
     }
 
+from pydantic import BaseModel
+from datetime import datetime, timezone
+
+async def get_destination_position_id(db: AsyncSession, destination_warehouse_id: Optional[int], destination_user_id: Optional[int]) -> Optional[int]:
+    from app.models.user import User
+    from app.models.settings_master import Employee
+    
+    if destination_user_id:
+        user_q = await db.execute(select(User).where(User.id == destination_user_id))
+        user = user_q.scalar_one_or_none()
+        if user and user.employee_id:
+            emp_q = await db.execute(select(Employee).where(Employee.id == user.employee_id))
+            emp = emp_q.scalar_one_or_none()
+            if emp and emp.position_id:
+                return emp.position_id
+
+    if destination_warehouse_id:
+        from app.models.user import UserWarehouse
+        uw_q = await db.execute(select(UserWarehouse.user_id).where(UserWarehouse.warehouse_id == destination_warehouse_id))
+        user_ids = [r[0] for r in uw_q.all()]
+        if user_ids:
+            res = await db.execute(
+                select(Employee.position_id)
+                .join(User, User.employee_id == Employee.id)
+                .where(User.id.in_(user_ids), Employee.position_id.is_not(None))
+                .limit(1)
+            )
+            return res.scalar_one_or_none()
+            
+    return None
+
+async def get_warehouse_for_position(db: AsyncSession, position_id: int) -> Optional[int]:
+    from app.models.settings_master import Employee
+    from app.models.user import User, UserWarehouse
+    
+    # 1. Try to find via UserWarehouse mapping for users occupying this position
+    res = await db.execute(
+        select(UserWarehouse.warehouse_id)
+        .join(User, User.id == UserWarehouse.user_id)
+        .join(Employee, Employee.id == User.employee_id)
+        .where(Employee.position_id == position_id)
+        .limit(1)
+    )
+    wh_id = res.scalar_one_or_none()
+    if wh_id:
+        return wh_id
+        
+    # 2. Try searching by employee's active position or sub-positions
+    res_pos = await db.execute(
+        select(Employee.id)
+        .where(Employee.position_id == position_id)
+    )
+    emp_ids = [r[0] for r in res_pos.all()]
+    if emp_ids:
+        res = await db.execute(
+            select(UserWarehouse.warehouse_id)
+            .join(User, User.id == UserWarehouse.user_id)
+            .where(User.employee_id.in_(emp_ids))
+            .limit(1)
+        )
+        wh_id = res.scalar_one_or_none()
+        if wh_id:
+            return wh_id
+
+    return None
+
+async def get_last_intermediate_warehouse(db: AsyncSession, d) -> int:
+    # Default to the source warehouse
+    fallback = d.warehouse_id
+    if d.dispatch_mode != "multi-level":
+        return fallback
+
+    try:
+        project_id = await resolve_dispatch_project_id(db, d.items)
+        if not project_id:
+            return fallback
+
+        dest_pos_id = await get_destination_position_id(db, d.destination_warehouse_id, d.destination_user_id)
+        
+        # Resolve starting_pos_id
+        from app.models.issue import MaterialIssue
+        from app.models.indent import Indent
+        starting_pos_id = None
+        if d.material_issue_id:
+            mi_q = await db.execute(select(MaterialIssue).where(MaterialIssue.id == d.material_issue_id))
+            mi = mi_q.scalar_one_or_none()
+            if mi and mi.indent_id:
+                ind_q = await db.execute(select(Indent).where(Indent.id == mi.indent_id))
+                indent = ind_q.scalar_one_or_none()
+                if indent and indent.created_by:
+                    from app.models.settings_master import Employee
+                    from app.models.user import User
+                    emp_q = await db.execute(
+                        select(Employee.position_id)
+                        .join(User, User.employee_id == Employee.id)
+                        .where(User.id == indent.created_by)
+                    )
+                    starting_pos_id = emp_q.scalar_one_or_none()
+
+        if not starting_pos_id:
+            return fallback
+
+        from app.api.v1.logistics import build_logistics_custody_chain
+        chain_data = await build_logistics_custody_chain(db, project_id, starting_pos_id, dest_pos_id)
+        chain = [entry["position"] for entry in chain_data if entry.get("can_approve", False) or entry.get("is_destination", False)]
+
+        # The last intermediate position is chain[-2] (since chain[-1] is destination position)
+        if len(chain) >= 2:
+            last_int_pos = chain[-2]
+            last_wh = await get_warehouse_for_position(db, last_int_pos.id)
+            if last_wh:
+                return last_wh
+    except Exception as e:
+        print(f"[WARNING] failed to get last intermediate warehouse: {e}")
+
+    return fallback
+
+async def resolve_dispatch_project_id(db: AsyncSession, payload_items) -> Optional[int]:
+    from app.models.indent import Indent
+    from app.models.issue import MaterialIssue
+    
+    for it in payload_items:
+        if it.indent_id:
+            ind_q = await db.execute(select(Indent.project_id).where(Indent.id == it.indent_id))
+            proj_id = ind_q.scalar_one_or_none()
+            if proj_id:
+                return proj_id
+        if it.material_issue_id:
+            mi_q = await db.execute(select(MaterialIssue).where(MaterialIssue.id == it.material_issue_id))
+            mi = mi_q.scalar_one_or_none()
+            if mi and mi.indent_id:
+                ind_q = await db.execute(select(Indent.project_id).where(Indent.id == mi.indent_id))
+                proj_id = ind_q.scalar_one_or_none()
+                if proj_id:
+                    return proj_id
+    return None
+
+async def build_dispatch_custody_chain(db: AsyncSession, project_id: int, dest_warehouse_id: Optional[int], dest_user_id: Optional[int]) -> List:
+    from app.models.settings_master import Position
+    from app.models.approval import ProjectWorkflowConfig
+    from app.services.approval_service import get_position_ancestors
+    
+    dest_pos_id = await get_destination_position_id(db, dest_warehouse_id, dest_user_id)
+    if not dest_pos_id:
+        return []
+        
+    ancestors = await get_position_ancestors(db, dest_pos_id)
+    chain = []
+    for pos in ancestors:
+        if not pos.role_id:
+            continue
+        cfg_q = await db.execute(
+            select(ProjectWorkflowConfig).where(
+                ProjectWorkflowConfig.project_id == project_id,
+                ProjectWorkflowConfig.role_id == pos.role_id
+            )
+        )
+        cfg = cfg_q.scalar_one_or_none()
+        if cfg and cfg.dispatch_approve:
+            chain.append(pos)
+            
+    chain.reverse()
+    return chain
+
 @router.post("", response_model=DispatchResponse)
 async def create_dispatch(
     payload: DispatchCreate,
@@ -550,15 +777,31 @@ async def create_dispatch(
         uw = uw_q.scalar_one_or_none()
         warehouse_id = uw.warehouse_id if uw else 1
 
+    dispatch_mode = payload.dispatch_mode.lower() if payload.dispatch_mode else "direct"
+    status = payload.status.lower() if payload.status else "draft"
+    
+    chain = []
+    if dispatch_mode == "multi-level":
+        project_id = await resolve_dispatch_project_id(db, payload.items)
+        if project_id:
+            chain = await build_dispatch_custody_chain(db, project_id, payload.destination_warehouse_id, payload.destination_user_id)
+            if chain and status in ("dispatched", "in_transit"):
+                from app.models.user import Role
+                role_res = await db.execute(select(Role).where(Role.id == chain[0].role_id))
+                first_role = role_res.scalar_one_or_none()
+                if first_role:
+                    status = f"at_{first_role.code.lower()}"
+
     header = DispatchOrder(
         dispatch_number=dispatch_number,
         warehouse_id=warehouse_id,
         dispatch_date=payload.dispatch_date,
         expected_delivery_date=payload.expected_delivery_date,
-        status=payload.status.lower() if payload.status else "draft",
+        status=status,
         remarks=payload.remarks,
         destination_type=payload.destination_type or "USER",
         dispatch_type=payload.dispatch_type or "THIRD_PARTY",
+        dispatch_mode=dispatch_mode,
         destination_warehouse_id=payload.destination_warehouse_id,
         destination_user_id=payload.destination_user_id,
         dispatched_by=current_user.id
@@ -580,6 +823,17 @@ async def create_dispatch(
             serial_numbers=it.serial_numbers or None
         )
         db.add(item)
+        
+    if chain:
+        from app.models.dispatch_custody import DispatchCustodyTransfer
+        for idx, pos in enumerate(chain):
+            transfer = DispatchCustodyTransfer(
+                dispatch_order_id=header.id,
+                position_id=pos.id,
+                status="pending",
+                sequence=idx + 1
+            )
+            db.add(transfer)
         
     await db.commit()
     
@@ -654,6 +908,7 @@ async def update_dispatch(
     h.dispatch_type = payload.dispatch_type
     h.destination_warehouse_id = payload.destination_warehouse_id
     h.destination_user_id = payload.destination_user_id
+    h.dispatch_mode = payload.dispatch_mode.lower() if payload.dispatch_mode else h.dispatch_mode
     
     # Reassign items (SQLAlchemy delete-orphan handles deletions)
     h.items = [
@@ -741,3 +996,229 @@ async def delete_dispatch(
     await db.delete(h)
     await db.commit()
     return {"message": "Dispatch deleted successfully"}
+
+
+# ==================== CUSTODY CHAIN & SEQUENTIAL TRANSFER ====================
+
+class CustodyAcknowledgementInput(BaseModel):
+    seal_intact: bool
+    packaging_condition: str  # "INTACT", "DAMAGED", "TAMPERED"
+    discrepancy_reported: bool
+    remarks: Optional[str] = None
+
+@router.get("/custody-chain-preview")
+async def preview_custody_chain(
+    project_id: int = Query(...),
+    destination_warehouse_id: Optional[int] = Query(None),
+    destination_user_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    chain = await build_dispatch_custody_chain(db, project_id, destination_warehouse_id, destination_user_id)
+    out = []
+    from app.models.user import Role
+    from app.models.settings_master import Employee
+    for idx, pos in enumerate(chain):
+        emp_name = "Unassigned"
+        if pos.employee_id:
+            emp_q = await db.execute(select(Employee).where(Employee.id == pos.employee_id))
+            emp = emp_q.scalar_one_or_none()
+            if emp:
+                emp_name = f"{emp.first_name} {emp.last_name or ''}".strip()
+        
+        role_name = pos.role_name
+        role_code = ""
+        if pos.role_id:
+            role_q = await db.execute(select(Role).where(Role.id == pos.role_id))
+            role_obj = role_q.scalar_one_or_none()
+            if role_obj:
+                role_name = role_obj.name
+                role_code = role_obj.code
+
+        out.append({
+            "sequence": idx + 1,
+            "position_id": pos.id,
+            "position_name": pos.name,
+            "role_name": role_name,
+            "role_code": role_code,
+            "employee_name": emp_name,
+            "status": "pending",
+        })
+    return out
+
+@router.get("/{dispatch_id}/custody-chain")
+async def get_dispatch_custody_chain(
+    dispatch_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if dispatch_id.isdigit():
+        d_q = await db.execute(select(DispatchOrder).where(DispatchOrder.id == int(dispatch_id)))
+    else:
+        d_q = await db.execute(select(DispatchOrder).where(DispatchOrder.dispatch_number == dispatch_id))
+    d = d_q.scalar_one_or_none()
+    if not d:
+        raise HTTPException(status_code=404, detail="Dispatch not found")
+        
+    from app.models.dispatch_custody import DispatchCustodyTransfer
+    from app.models.settings_master import Position, Employee
+    from app.models.user import Role
+    
+    transfers_q = await db.execute(
+        select(DispatchCustodyTransfer)
+        .where(DispatchCustodyTransfer.dispatch_order_id == d.id)
+        .order_by(DispatchCustodyTransfer.sequence.asc())
+    )
+    transfers = transfers_q.scalars().all()
+    
+    # Check current user's position and admin status for can_acknowledge check
+    user_pos_id = None
+    if current_user.employee_id:
+        emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
+        emp = emp_res.scalar_one_or_none()
+        if emp:
+            user_pos_id = emp.position_id
+            
+    from app.utils.dependencies import get_user_role_codes
+    role_codes = set(await get_user_role_codes(db, current_user.id))
+    is_admin = bool({"super_admin", "admin"} & role_codes)
+    
+    active_seq = None
+    for t in transfers:
+        if t.status == "pending":
+            active_seq = t.sequence
+            break
+            
+    out = []
+    for t in transfers:
+        pos_q = await db.execute(select(Position).where(Position.id == t.position_id))
+        pos = pos_q.scalar_one_or_none()
+        pos_name = pos.name if pos else "Unknown"
+        role_name = pos.role_name if pos else "Unknown"
+        role_code = ""
+        emp_name = "Unassigned"
+        
+        if pos:
+            if pos.role_id:
+                role_res = await db.execute(select(Role).where(Role.id == pos.role_id))
+                role_obj = role_res.scalar_one_or_none()
+                if role_obj:
+                    role_name = role_obj.name
+                    role_code = role_obj.code
+            if pos.employee_id:
+                emp_q = await db.execute(select(Employee).where(Employee.id == pos.employee_id))
+                emp = emp_q.scalar_one_or_none()
+                if emp:
+                    emp_name = f"{emp.first_name} {emp.last_name or ''}".strip()
+                    
+        ack_by_name = None
+        if t.acknowledged_by_id:
+            from app.models.user import User as UserModel
+            u_q = await db.execute(select(UserModel).where(UserModel.id == t.acknowledged_by_id))
+            u = u_q.scalar_one_or_none()
+            if u:
+                ack_by_name = f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username
+                
+        can_ack = False
+        if t.status == "pending" and t.sequence == active_seq:
+            can_ack = (user_pos_id == t.position_id or is_admin)
+            
+        out.append({
+            "id": t.id,
+            "sequence": t.sequence,
+            "position_id": t.position_id,
+            "position_name": pos_name,
+            "role_name": role_name,
+            "role_code": role_code,
+            "employee_name": emp_name,
+            "status": t.status,
+            "seal_intact": t.seal_intact,
+            "packaging_condition": t.packaging_condition,
+            "discrepancy_reported": t.discrepancy_reported,
+            "remarks": t.remarks,
+            "acknowledged_by_name": ack_by_name,
+            "acknowledged_at": t.acknowledged_at.isoformat() if t.acknowledged_at else None,
+            "can_acknowledge": can_ack,
+        })
+    return out
+
+@router.post("/{dispatch_id}/acknowledge-custody")
+async def acknowledge_custody(
+    dispatch_id: str,
+    payload: CustodyAcknowledgementInput,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if dispatch_id.isdigit():
+        d_q = await db.execute(select(DispatchOrder).where(DispatchOrder.id == int(dispatch_id)).with_for_update())
+    else:
+        d_q = await db.execute(select(DispatchOrder).where(DispatchOrder.dispatch_number == dispatch_id).with_for_update())
+    d = d_q.scalar_one_or_none()
+    if not d:
+        raise HTTPException(status_code=404, detail="Dispatch not found")
+        
+    from app.models.dispatch_custody import DispatchCustodyTransfer
+    step_q = await db.execute(
+        select(DispatchCustodyTransfer)
+        .where(
+            DispatchCustodyTransfer.dispatch_order_id == d.id,
+            DispatchCustodyTransfer.status == "pending"
+        )
+        .order_by(DispatchCustodyTransfer.sequence.asc())
+        .limit(1)
+    )
+    active_step = step_q.scalar_one_or_none()
+    if not active_step:
+        raise HTTPException(status_code=400, detail="No pending custody transfers for this dispatch.")
+        
+    from app.models.settings_master import Employee
+    user_pos_id = None
+    if current_user.employee_id:
+        emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
+        emp = emp_res.scalar_one_or_none()
+        if emp:
+            user_pos_id = emp.position_id
+            
+    from app.utils.dependencies import get_user_role_codes
+    role_codes = set(await get_user_role_codes(db, current_user.id))
+    is_admin = bool({"super_admin", "admin"} & role_codes)
+    
+    if user_pos_id != active_step.position_id and not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not occupy the active position required to acknowledge custody for this step."
+        )
+        
+    active_step.status = "acknowledged"
+    active_step.acknowledged_by_id = current_user.id
+    active_step.acknowledged_at = datetime.now(timezone.utc)
+    active_step.seal_intact = payload.seal_intact
+    active_step.packaging_condition = payload.packaging_condition
+    active_step.discrepancy_reported = payload.discrepancy_reported
+    active_step.remarks = payload.remarks
+    
+    next_step_q = await db.execute(
+        select(DispatchCustodyTransfer)
+        .where(
+            DispatchCustodyTransfer.dispatch_order_id == d.id,
+            DispatchCustodyTransfer.status == "pending"
+        )
+        .order_by(DispatchCustodyTransfer.sequence.asc())
+        .limit(1)
+    )
+    next_step = next_step_q.scalar_one_or_none()
+    if next_step:
+        from app.models.settings_master import Position
+        from app.models.user import Role
+        pos_q = await db.execute(select(Position).where(Position.id == next_step.position_id))
+        pos = pos_q.scalar_one_or_none()
+        if pos and pos.role_id:
+            role_q = await db.execute(select(Role).where(Role.id == pos.role_id))
+            role_obj = role_q.scalar_one_or_none()
+            if role_obj:
+                d.status = f"at_{role_obj.code.lower()}"
+    else:
+        d.status = "in_transit"
+        
+    await db.commit()
+    return {"success": True, "message": "Custody acknowledged successfully.", "new_status": d.status}

@@ -1,20 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import {
   Card, Table, Tag, Badge, Button, Modal, Form, Select, DatePicker,
-  Input, InputNumber, Switch, Divider, Space, Collapse, Spin, message, Row, Col, Typography, Alert, Upload, Image
+  Input, InputNumber, Switch, Divider, Space, Collapse, Spin, App, Row, Col, Typography, Alert, Upload, Image
 } from 'antd';
 import {
   FolderAddOutlined, CheckCircleOutlined, PlusOutlined, DeleteOutlined,
   EnvironmentOutlined, GoldOutlined, FilePdfOutlined, CarOutlined,
   UserOutlined, MailOutlined, PhoneOutlined, KeyOutlined, ArrowRightOutlined,
   ClockCircleOutlined, SafetyCertificateOutlined, SendOutlined, UploadOutlined,
-  EyeOutlined, SearchOutlined
+  EyeOutlined, SearchOutlined, ArrowLeftOutlined
 } from '@ant-design/icons';
 import api from '../../config/api';
 import dayjs from 'dayjs';
 import { useNavigate } from 'react-router-dom';
 import { formatNumber, formatDate } from '../../utils/helpers';
 import SerialNumbersModal from '../../components/SerialNumbersModal';
+import useAuthStore from '../../store/authStore';
+
 
 const { Title, Text, Paragraph } = Typography;
 const { Option } = Select;
@@ -39,6 +41,27 @@ export const parseInstructions = (inst) => {
     };
   }
   return { desc: inst || '', weight: '', volume: '' };
+};
+
+/**
+ * Safely convert a stored image value to a displayable <img src> string.
+ *
+ * Handles three legitimate cases:
+ *   1. Relative upload paths: "/uploads/general/abc.png"  → used as-is (Vite proxy forwards to backend)
+ *   2. Absolute HTTP(S) URLs: "https://..."               → used as-is
+ *   3. Full data URIs:        "data:image/png;base64,..." → used as-is
+ *
+ * Legacy records may have a truncated raw base64 blob (the column was VARCHAR(500)).
+ * Those are NOT valid URIs and would cause ERR_INVALID_URL, so we return null
+ * which lets the caller render a "no image" fallback instead.
+ */
+export const toImgSrc = (val) => {
+  if (!val || typeof val !== 'string') return null;
+  const v = val.trim();
+  if (v.startsWith('/uploads/') || v.startsWith('http://') || v.startsWith('https://')) return v;
+  if (v.startsWith('data:image/') && v.includes(';base64,')) return v;
+  // Anything else (truncated base64, raw binary, unknown format) — discard.
+  return null;
 };
 
 export const groupDescription = (desc) => {
@@ -132,6 +155,7 @@ const FormUpload = ({ value, ...props }) => <Upload {...props} />;
 
 export default function LogisticsDispatch() {
   const navigate = useNavigate();
+  const { message } = App.useApp();
   const [loading, setLoading] = useState(true);
   const [mdos, setMdos] = useState([]);
   const [masters, setMasters] = useState(null);
@@ -144,8 +168,34 @@ export default function LogisticsDispatch() {
   const [showDesigner, setShowDesigner] = useState(false);
   const [isReadOnly, setIsReadOnly] = useState(false);
   const [form] = Form.useForm();
+  const dispatchMode = Form.useWatch('dispatch_mode', form) || 'direct';
   const [uploadedUrls, setUploadedUrls] = useState({});
   const [selectedMdo, setSelectedMdo] = useState(null);
+  const [chainPreview, setChainPreview] = useState(null);
+  const [loadingChain, setLoadingChain] = useState(false);
+
+  const [receiveLegModalOpen, setReceiveLegModalOpen] = useState(false);
+  const [handoverLegModalOpen, setHandoverLegModalOpen] = useState(false);
+  const [activeSdo, setActiveSdo] = useState(null);
+  const [receiptPhotos, setReceiptPhotos] = useState([]);
+  const [receiptSignature, setReceiptSignature] = useState('');
+  const [handoverPhotos, setHandoverPhotos] = useState([]);
+  const [handoverSignature, setHandoverSignature] = useState('');
+  const [receiveForm] = Form.useForm();
+  const [handoverForm] = Form.useForm();
+  const currentUser = useAuthStore((s) => s.user);
+  const hasKey = useAuthStore((s) => s.hasKey);
+
+  const uploadImageFile = async (file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('entity_type', 'general');
+    const response = await api.post('/attachments/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data.url || response.data.file_path;
+  };
+
 
   const handleUploadFile = async (file, fieldKey) => {
     const formData = new FormData();
@@ -193,20 +243,40 @@ export default function LogisticsDispatch() {
   const fetchData = async () => {
     try {
       setLoading(true);
+      const canViewIssues = hasKey('warehouse-material-issues');
+      const canViewIndents = hasKey('indent-indents');
+
       const [mdoRes, masterRes, issuesRes, indentRes] = await Promise.all([
-        api.get('/logistics/mdo'),
-        api.get('/logistics/masters'),
-        api.get('/warehouse/material-issues', { params: { page_size: 100, status: 'issued' } }),
-        api.get('/indents', { params: { page_size: 100, available_for_issue: true } })
+        api.get('/logistics/mdo').catch(err => {
+          console.error("Error fetching MDOs:", err);
+          return { data: [] };
+        }),
+        api.get('/logistics/masters').catch(err => {
+          console.error("Error fetching masters:", err);
+          return { data: null };
+        }),
+        canViewIssues
+          ? api.get('/warehouse/material-issues', { params: { page_size: 100, status: 'issued' } }).catch(err => {
+              console.warn("Error fetching material issues (could be permission 403):", err);
+              return { data: { items: [] } };
+            })
+          : Promise.resolve({ data: { items: [] } }),
+        canViewIndents
+          ? api.get('/indents', { params: { page_size: 100, available_for_issue: true } }).catch(err => {
+              console.warn("Error fetching indents:", err);
+              return { data: { items: [] } };
+            })
+          : Promise.resolve({ data: { items: [] } })
       ]);
-      setMdos(mdoRes.data);
-      setMasters(masterRes.data);
 
-      const issuesList = issuesRes.data.items || issuesRes.data.data || issuesRes.data || [];
-      setMaterialIssues(issuesList.filter(i => i.status === 'issued'));
+      setMdos(mdoRes.data || []);
+      setMasters(masterRes.data || null);
 
-      const indentsList = indentRes.data.items || indentRes.data.data || indentRes.data || [];
-      setIndents(indentsList.map(i => ({ label: i.indent_number, value: i.id })));
+      const issuesList = (issuesRes && issuesRes.data) ? (issuesRes.data.items || issuesRes.data.data || issuesRes.data || []) : [];
+      setMaterialIssues(Array.isArray(issuesList) ? issuesList.filter(i => i && i.status === 'issued') : []);
+
+      const indentsList = (indentRes && indentRes.data) ? (indentRes.data.items || indentRes.data.data || indentRes.data || []) : [];
+      setIndents(Array.isArray(indentsList) ? indentsList.map(i => ({ label: i.indent_number, value: i.id })) : []);
     } catch (err) {
       console.error(err);
       message.error("Failed to load SCM dispatch plan desk data.");
@@ -230,6 +300,35 @@ export default function LogisticsDispatch() {
       setMaterialIssues(prev => [...prev, selectedIssue]);
     }
   }, [selectedIssue, materialIssues]);
+
+
+  const fetchChainPreview = async (materialIssueId, destWarehouseId = null, destUserId = null) => {
+    if (!materialIssueId) {
+      setChainPreview(null);
+      return;
+    }
+    setLoadingChain(true);
+    try {
+      const params = { material_issue_id: materialIssueId };
+      if (destWarehouseId) params.destination_warehouse_id = destWarehouseId;
+      if (destUserId) params.destination_user_id = destUserId;
+      const res = await api.get('/logistics/preview-dispatch-chain', { params });
+      setChainPreview(res.data);
+    } catch (err) {
+      console.error('Failed to fetch chain preview:', err);
+      setChainPreview(null);
+    } finally {
+      setLoadingChain(false);
+    }
+  };
+
+  useEffect(() => {
+    if (dispatchMode === 'multi-level' && selectedIssue?.id) {
+      fetchChainPreview(selectedIssue.id);
+    } else if (dispatchMode === 'direct') {
+      setChainPreview(null);
+    }
+  }, [dispatchMode, selectedIssue?.id]);
 
 
   const handleIndentSelect = async (indentId) => {
@@ -319,6 +418,9 @@ export default function LogisticsDispatch() {
         setSelectedIndent(null);
         setSelectedIndentItems([]);
       }
+      if (issueId && (form.getFieldValue('dispatch_mode') || 'direct') === 'multi-level') {
+        fetchChainPreview(issueId);
+      }
     } catch (err) {
       message.error('Failed to load material issue items');
     } finally {
@@ -335,6 +437,9 @@ export default function LogisticsDispatch() {
     let issueData = null;
     try {
       setLoadingDetails(true);
+      if (!hasKey('warehouse-material-issues')) {
+        throw new Error("Permission 'warehouse-material-issues' missing, falling back to local MDO materials.");
+      }
       const issueRes = await api.get(`/warehouse/material-issues/${mdo.material_issue_id}`);
       issueData = issueRes.data;
       setSelectedIssue(issueData);
@@ -362,11 +467,11 @@ export default function LogisticsDispatch() {
         setSelectedIndentItems([]);
       }
     } catch (err) {
-      console.error("Failed to load material issue details for viewing", err);
+      console.warn("[LogisticsDispatch] Falling back to local MDO materials (permission or network issue):", err?.message || err);
       issueData = {
         id: mdo.material_issue_id,
         issue_number: `MI-ID: ${mdo.material_issue_id}`,
-        items: (mdo.sdos[0]?.materials || []).map(m => ({
+        items: (mdo.materials || []).map(m => ({
           id: m.id,
           item_id: m.material_id,
           qty: m.quantity,
@@ -399,6 +504,7 @@ export default function LogisticsDispatch() {
       dropoff_location: addr.dropoff,
       items_description: inst.desc,
       expected_delivery_date: mdo.required_delivery_date ? dayjs(mdo.required_delivery_date) : null,
+      dispatch_mode: mdo.dispatch_mode || 'direct',
 
       driver_name: mdo.handover?.driver_name,
       driver_phone: mdo.handover?.driver_phone,
@@ -409,6 +515,12 @@ export default function LogisticsDispatch() {
       awb_no: mdo.handover?.awb_no,
       handover_remarks: mdo.handover?.remarks
     });
+
+    if (mdo.dispatch_mode === 'multi-level' && mdo.material_issue_id) {
+      fetchChainPreview(mdo.material_issue_id, mdo.destination_warehouse_id, mdo.destination_user_id);
+    } else {
+      setChainPreview(null);
+    }
 
     const updatedUploadedUrls = {};
     if (mdo.e_challan) updatedUploadedUrls.e_challan = mdo.e_challan;
@@ -460,78 +572,39 @@ export default function LogisticsDispatch() {
       const serializedAddress = `PICKUP: ${pickupLoc} | DROPOFF: ${dropoffLoc}`;
       const serializedInstructions = `ITEMS_DESC: ${itemsDesc} | WEIGHT: ${finalWeight} | VOLUME: ${finalVolume}`;
 
-      const routePayload = {
-        pickupDate: dayjs().toISOString(),
-        deliveryDate: values.expected_delivery_date 
-          ? dayjs(values.expected_delivery_date).toISOString() 
-          : (selectedIndent && selectedIndent.required_date ? dayjs(selectedIndent.required_date).toISOString() : dayjs().toISOString()),
-        loadingTime: 60,
-        unloadingTime: 60,
-        helperRequired: false,
-        specialReqs: serializedInstructions,
-        destinations: [
-          {
-            locationId: masters?.locations[0]?.id || 1,
-            seq: 1,
-            contactPerson: values.received_by_name || 'Supervisor Incharge',
-            contactMobile: values.received_by_phone || '9876543210'
-          }
-        ],
-        materials: consignmentMaterials
-      };
-
       const payload = {
         warehouseId: selectedIssue.warehouse_id,
         priority: values.priority || 'MEDIUM',
         specialInstructions: serializedInstructions,
-        sdos: [routePayload],
-
+        materials: consignmentMaterials,
+        dispatch_mode: values.dispatch_mode || 'direct',
         material_issue_id: selectedIssue.id,
         indent_id: selectedIssue.indent_id,
         destination_warehouse_id: selectedIssue.destination_warehouse_id,
         delivery_address: serializedAddress,
         e_challan: uploadedUrls.e_challan || 'https://bhspl-scm.s3.amazonaws.com/challans/E-CHL2026.pdf',
         waybill: uploadedUrls.waybill || 'https://bhspl-scm.s3.amazonaws.com/waybills/E-WAY2026.pdf',
-        dispatch_type: dispatchType
+        dispatch_type: dispatchType,
+
+        // Handover details (if not RFQ)
+        courier_name: values.courier_name,
+        awb_no: values.awb_no,
+        vehicle_no: values.vehicle_no,
+        driver_name: values.driver_name,
+        driver_phone: values.driver_phone,
+        received_by_name: values.received_by_name,
+        received_by_phone: values.received_by_phone,
+        handover_remarks: uploadedUrls.receiver_signature
+          ? `RECEIVER_SIGNATURE: ${uploadedUrls.receiver_signature} | REMARKS: ${values.handover_remarks || 'Standard handover clearance completed.'}`
+          : (values.handover_remarks || 'Standard handover clearance completed.')
       };
 
       const res = await api.post('/logistics/mdo', payload);
-      const newMdoId = res.data.mdo_id;
       const newMdoNum = res.data.mdo_number;
 
       message.success(`Dispatch Plan ${newMdoNum} saved successfully!`);
 
-      if (dispatchType !== 'THIRD_PARTY') {
-        const handoverPayload = {
-          dispatch_id: newMdoId,
-          handover_type: dispatchType,
-          received_by_name: values.received_by_name || 'Warehouse Rep',
-          received_by_phone: values.received_by_phone,
-          transporter_id: values.transporter_id,
-          vehicle_no: values.vehicle_no,
-          driver_name: values.driver_name,
-          driver_phone: values.driver_phone,
-          courier_name: values.courier_name,
-          awb_no: values.awb_no,
-          remarks: uploadedUrls.receiver_signature
-            ? `RECEIVER_SIGNATURE: ${uploadedUrls.receiver_signature} | REMARKS: ${values.handover_remarks || 'Standard handover clearance completed.'}`
-            : (values.handover_remarks || 'Standard handover clearance completed.'),
-          handover_document: uploadedUrls.vehicle_image || uploadedUrls.waybill || ''
-        };
-
-        const handoverRes = await api.post('/logistics/handover', handoverPayload);
-        setActiveHandover(handoverRes.data);
-
-        message.success(`Dispatch Handover completed successfully for ${dispatchType}!`);
-        setShowDesigner(false);
-        form.resetFields();
-        setSelectedIssue(null);
-        setSelectedIndent(null);
-        setSelectedIndentItems([]);
-        setSelectedIssueItems([]);
-        setUploadedUrls({});
-        await fetchData();
-      } else {
+      if (dispatchType === 'THIRD_PARTY') {
         message.info("Routing directly to the Freight Bidding Desk (RFQ)...");
         setShowDesigner(false);
         form.resetFields();
@@ -541,6 +614,15 @@ export default function LogisticsDispatch() {
         setSelectedIssueItems([]);
         setUploadedUrls({});
         navigate('/logistics/rfq', { state: { openPublisher: true } });
+      } else {
+        setShowDesigner(false);
+        form.resetFields();
+        setSelectedIssue(null);
+        setSelectedIndent(null);
+        setSelectedIndentItems([]);
+        setSelectedIssueItems([]);
+        setUploadedUrls({});
+        await fetchData();
       }
 
     } catch (err) {
@@ -572,10 +654,9 @@ export default function LogisticsDispatch() {
 
   if (loading && mdos.length === 0) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#020617' }}>
-        <Spin size="large" tip="Loading Dispatch Plan ledger...">
-          <div />
-        </Spin>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#020617' }}>
+        <Spin size="large" />
+        <span style={{ color: '#94a3b8', fontSize: 16 }}>Loading Dispatch Plan ledger...</span>
       </div>
     );
   }
@@ -707,39 +788,6 @@ export default function LogisticsDispatch() {
           {/* Handover Details */}
           {mdo.handover ? (
             <>
-              <Card
-                size="small"
-                title={<span style={{ color: '#d97706', fontSize: '11px', fontFamily: 'monospace', fontWeight: 700, letterSpacing: '0.5px' }}><SafetyCertificateOutlined /> COMPLETED HANDOVER MANIFEST</span>}
-                style={{ background: '#fffbeb', borderColor: '#fde68a', marginBottom: '16px', borderRadius: '8px' }}
-              >
-                <Row gutter={16} style={{ fontSize: '12px', color: '#475569' }}>
-                  <Col xs={12} md={6}>
-                    <span style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: '#64748b' }}>Handover ID</span>
-                    <div style={{ color: '#0f172a', fontWeight: 'bold' }}>{mdo.handover.handover_no}</div>
-                  </Col>
-                  <Col xs={12} md={6}>
-                    <span style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: '#64748b' }}>Received By</span>
-                    <div style={{ color: '#0f172a', fontWeight: 'bold' }}>{mdo.handover.received_by_name} ({mdo.handover.received_by_phone})</div>
-                  </Col>
-                  {mdo.handover.vehicle_no && (
-                    <Col xs={12} md={6}>
-                      <span style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: '#64748b' }}>Vehicle / Driver</span>
-                      <div style={{ color: '#0f172a' }}>
-                        <strong>{mdo.handover.vehicle_no}</strong> ({mdo.handover.driver_name})
-                      </div>
-                    </Col>
-                  )}
-                  {mdo.handover.courier_name && (
-                    <Col xs={12} md={6}>
-                      <span style={{ display: 'block', fontSize: '10px', textTransform: 'uppercase', color: '#64748b' }}>Courier Carrier</span>
-                      <div style={{ color: '#0f172a' }}>
-                        <strong>{mdo.handover.courier_name}</strong> - {mdo.handover.awb_no}
-                      </div>
-                    </Col>
-                  )}
-                </Row>
-              </Card>
-
               {mdo.status === 'DISPATCHED' && (
                 <div style={{
                   background: '#eff6ff',
@@ -809,6 +857,23 @@ export default function LogisticsDispatch() {
                   <span style={{ color: '#15803d', fontSize: '12px', fontWeight: 600 }}>✅ Delivery has been acknowledged successfully by the receiver. Click "View details" to inspect Proof of Delivery (POD) signatures and photos.</span>
                 </div>
               )}
+
+              {mdo.status === 'COMPLETED' && (
+                <div style={{
+                  background: '#f0fdf4',
+                  border: '1px solid #16a34a',
+                  padding: '14px',
+                  borderRadius: '8px',
+                  marginBottom: '16px',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '12px'
+                }}>
+                  <span style={{ color: '#15803d', fontSize: '12px', fontWeight: 600 }}>✅ Delivery completed! All custody legs have been acknowledged and the consignment has been received at the destination warehouse.</span>
+                </div>
+              )}
             </>
           ) : mdo.status === 'APPROVED' && mdo.dispatch_type !== 'THIRD_PARTY' && (
             <div style={{
@@ -832,7 +897,7 @@ export default function LogisticsDispatch() {
                   setSelectedIssue({
                     id: mdo.material_issue_id,
                     warehouse_id: mdo.warehouse_id,
-                    items: mdo.sdos[0]?.materials || []
+                    items: mdo.materials || []
                   });
                   setDispatchType(mdo.dispatch_type);
 
@@ -855,42 +920,488 @@ export default function LogisticsDispatch() {
             </div>
           )}
 
-          {/* SDO sections list */}
+          {/* SDO sections list — show materials for every SDO leg */}
           <Row gutter={[12, 12]}>
-            {mdo.sdos.map((sdo) => (
-              <Col key={sdo.id} xs={24}>
-                <Card
-                  size="small"
-                  style={{ background: '#ffffff', borderColor: '#e2e8f0', borderRadius: '8px' }}
-                >
-                  {/* BOM list table */}
-                  <Table
-                    dataSource={groupMaterials(sdo.materials)}
+            {mdo.sdos.map((sdo, sdoIdx) => {
+              // Materials are stored at MDO level (sdo_id is null), so fall back
+              // to the SDO's own materials first, then MDO-level materials.
+              const sdoMaterials = (sdo.materials && sdo.materials.length > 0)
+                ? sdo.materials
+                : (mdo.materials || []);
+              return (
+                <Col key={sdo.id} xs={24}>
+                  <Card
                     size="small"
-                    pagination={false}
-                    rowKey="key"
-                    className="logistics-dark-subtable"
-                    columns={[
-                      { title: 'Code', dataIndex: 'material_code', key: 'code', render: t => <span style={{ fontFamily: 'monospace', color: '#334155' }}>{t}</span> },
-                      { title: 'Name', dataIndex: 'material_name', key: 'name', render: text => <span style={{ color: '#0f172a', fontWeight: 500 }}>{text}</span> },
-                      { title: 'Quantity', dataIndex: 'quantity', key: 'qty', render: (q, r) => <span style={{ fontFamily: 'monospace', color: '#4f46e5', fontWeight: 600 }}>{q} {r.unit_of_measure}</span> },
-                      { title: 'Batch', dataIndex: 'batch_number', key: 'batch', render: t => <span style={{ fontFamily: 'monospace' }}>{t}</span> },
-                      { title: 'Packages', key: 'pkgs', render: (_, r) => <span>{r.number_of_packages}x {r.package_type}</span> }
-                    ]}
-                  />
-                </Card>
-              </Col>
-            ))}
+                    title={
+                      <span style={{ fontSize: '12px', fontWeight: 700, color: '#334155' }}>
+                        <span style={{ 
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: '20px', height: '20px', borderRadius: '50%',
+                          background: sdo.status === 'HANDED_OVER' ? '#4f46e5' : sdo.status === 'ACKNOWLEDGED' ? '#0ea5e9' : '#94a3b8',
+                          color: '#fff', fontSize: '10px', fontWeight: 'bold', marginRight: '8px'
+                        }}>
+                          {sdoIdx + 1}
+                        </span>
+                        {sdo.sdo_number || `SDO ${sdoIdx + 1}`} — {sdo.custodian_position_name || 'Custodian'}
+                        <Tag 
+                          color={sdo.status === 'HANDED_OVER' ? 'purple' : sdo.status === 'ACKNOWLEDGED' ? 'blue' : 'warning'}
+                          style={{ marginLeft: '8px', fontSize: '10px' }}
+                        >
+                          {sdo.status}
+                        </Tag>
+                      </span>
+                    }
+                    style={{ background: '#ffffff', borderColor: '#e2e8f0', borderRadius: '8px' }}
+                  >
+                    {/* BOM list table */}
+                    <Table
+                      dataSource={groupMaterials(sdoMaterials)}
+                      size="small"
+                      pagination={false}
+                      rowKey="key"
+                      className="logistics-dark-subtable"
+                      columns={[
+                        { title: 'Code', dataIndex: 'material_code', key: 'code', render: t => <span style={{ fontFamily: 'monospace', color: '#334155' }}>{t}</span> },
+                        { title: 'Name', dataIndex: 'material_name', key: 'name', render: text => <span style={{ color: '#0f172a', fontWeight: 500 }}>{text}</span> },
+                        { title: 'Quantity', dataIndex: 'quantity', key: 'qty', render: (q, r) => <span style={{ fontFamily: 'monospace', color: '#4f46e5', fontWeight: 600 }}>{q} {r.unit_of_measure}</span> },
+                        { title: 'Batch', dataIndex: 'batch_number', key: 'batch', render: t => <span style={{ fontFamily: 'monospace' }}>{t}</span> },
+                        { title: 'Packages', key: 'pkgs', render: (_, r) => <span>{r.number_of_packages}x {r.package_type}</span> }
+                      ]}
+                    />
+                  </Card>
+                </Col>
+              );
+            })}
           </Row>
         </div>
       )
     };
   });
 
+  const renderCustodyTimeline = () => {
+    if (!selectedMdo) return null;
+    
+    const isMultiLevel = selectedMdo.dispatch_mode === 'multi-level';
+    const sdos = selectedMdo.sdos || [];
+    const sortedSdos = [...sdos].sort((a, b) => (a.sequence_number || 1) - (b.sequence_number || 1));
+
+    // Build a merged timeline: combine actual SDO legs with chain preview positions
+    // so view-only and destination positions are visible alongside real custody legs.
+    const sdoPositionIds = new Set(sortedSdos.map(s => s.custodian_position_id));
+    const previewChain = (isMultiLevel && chainPreview?.chain) ? chainPreview.chain : [];
+
+    // Remaining chain positions not yet materialised as SDOs
+    const remainingChainPositions = previewChain.filter(cp => !sdoPositionIds.has(cp.position_id));
+
+    // Total legs = actual SDOs + remaining chain positions
+    const totalLegs = sortedSdos.length + remainingChainPositions.length;
+    
+    return (
+      <Card 
+        title={<span style={{ color: '#0f172a', fontWeight: 800 }}>Custody Transfer Legs & State Transitions</span>}
+        style={{ marginTop: '20px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#f8fafc' }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Source entry */}
+          <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#10b981', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
+                WH
+              </div>
+              <div style={{ width: '2px', height: '40px', background: '#cbd5e1' }} />
+            </div>
+            <div>
+              <strong style={{ color: '#0f172a' }}>Source Warehouse: {selectedMdo.warehouse_name || 'Loading Dock'}</strong>
+              <div style={{ fontSize: '12px', color: '#64748b' }}>Consignment initialized on {formatDate(selectedMdo.order_date)}</div>
+            </div>
+          </div>
+
+          {/* Render SDO legs */}
+          {sortedSdos.map((sdo, idx) => {
+            // Check ALL positions the user holds (not just primary) so a DM with
+            // multiple positions can still see the acknowledge / handover buttons.
+            const userPositionIds = new Set(
+              (currentUser?.positions || []).map(p => p.id)
+            );
+            if (currentUser?.position_id) userPositionIds.add(currentUser.position_id);
+            const isUserCustodian = userPositionIds.has(sdo.custodian_position_id) || ['admin', 'super_admin', 'logistics_manager'].includes(currentUser?.role);
+            const isLastSdo = idx === sortedSdos.length - 1;
+            const hasRemaining = remainingChainPositions.length > 0;
+            // View-only remaining positions don't block final delivery detection.
+            // The last SDO is the final delivery leg if there are no remaining
+            // approve/destination positions (only view-only observers left).
+            const hasRemainingApproveLegs = remainingChainPositions.some(cp => !cp.view_only);
+            const isFinalDeliveryLeg = isLastSdo && !hasRemainingApproveLegs && sortedSdos.length > 1;
+            
+            return (
+              <div key={sdo.id} style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div style={{ 
+                    width: '32px', 
+                    height: '32px', 
+                    borderRadius: '50%', 
+                    background: sdo.status === 'HANDED_OVER' ? '#4f46e5' : sdo.status === 'ACKNOWLEDGED' ? '#0ea5e9' : '#cbd5e1', 
+                    color: '#fff', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    fontWeight: 'bold'
+                  }}>
+                    {idx + 1}
+                  </div>
+                  {(isLastSdo && hasRemaining) && <div style={{ width: '2px', height: '60px', background: '#cbd5e1', borderStyle: 'dashed' }} />}
+                  {(isLastSdo && !hasRemaining && idx < sortedSdos.length - 1) && <div style={{ width: '2px', height: '60px', background: '#cbd5e1' }} />}
+                  {!isLastSdo && <div style={{ width: '2px', height: '60px', background: '#cbd5e1' }} />}
+                </div>
+                <div style={{ flex: 1, background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '16px', boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <div>
+                      <strong style={{ color: '#0f172a', fontSize: '14px' }}>
+                        Leg {sdo.sequence_number || idx + 1}: {sdo.custodian_position_name || 'Custodian Position'}
+                      </strong>
+                      <div style={{ fontSize: '12px', color: '#475569', fontWeight: 500 }}>
+                        {sdo.received_by_name ? `Custodian Employee: ${sdo.received_by_name}` : 'Awaiting Custody'}
+                      </div>
+                    </div>
+                    <Tag color={
+                      sdo.status === 'HANDED_OVER' ? 'purple' :
+                      sdo.status === 'ACKNOWLEDGED' ? 'blue' :
+                      'warning'
+                    } style={{ fontWeight: 'bold' }}>
+                      {sdo.status}
+                    </Tag>
+                  </div>
+                  
+                  {/* Action buttons */}
+                  <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {sdo.status === 'PENDING' && isUserCustodian && (
+                      <Button 
+                        type="primary" 
+                        size="small"
+                        icon={isFinalDeliveryLeg ? <EnvironmentOutlined /> : <CheckCircleOutlined />}
+                        style={{ 
+                          background: isFinalDeliveryLeg ? '#059669' : '#0284c7', 
+                          borderColor: isFinalDeliveryLeg ? '#059669' : '#0284c7', 
+                          fontWeight: 600 
+                        }}
+                        onClick={() => {
+                          setActiveSdo(sdo);
+                          setReceiveLegModalOpen(true);
+                        }}
+                      >
+                        {isFinalDeliveryLeg ? 'Acknowledge Delivery' : 'Acknowledge Dispatch'}
+                      </Button>
+                    )}
+                    {sdo.status === 'ACKNOWLEDGED' && selectedMdo.status !== 'COMPLETED' && isUserCustodian && (
+                      <Button 
+                        type="primary" 
+                        size="small"
+                        icon={<SendOutlined />}
+                        style={{ background: '#4f46e5', borderColor: '#4f46e5', fontWeight: 600 }}
+                        onClick={() => {
+                          setActiveSdo(sdo);
+                          setHandoverLegModalOpen(true);
+                        }}
+                      >
+                        Handover Leg
+                      </Button>
+                    )}
+                    {isFinalDeliveryLeg && sdo.status === 'PENDING' && (
+                      <div style={{ fontSize: '11px', color: '#059669', alignSelf: 'center' }}>
+                        Completing this step marks the MDO as delivered.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Acknowledge (Receipt) Details Logs */}
+                  {sdo.status !== 'PENDING' && (
+                    <div style={{ marginTop: '12px', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
+                      <Row gutter={[16, 12]}>
+                        <Col xs={24} sm={12}>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>RECEIVED BY</span>
+                          <strong style={{ fontSize: '12px', color: '#334155' }}>{sdo.received_by_name || 'System / Admin'}</strong>
+                        </Col>
+                        <Col xs={24} sm={12}>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>RECEIVED AT</span>
+                          <strong style={{ fontSize: '12px', color: '#334155' }}>{formatDate(sdo.received_at)}</strong>
+                        </Col>
+                        <Col xs={12} sm={8}>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>SEAL INTACT</span>
+                          <strong style={{ fontSize: '12px', color: sdo.seal_intact ? '#16a34a' : '#ef4444' }}>{sdo.seal_intact ? 'YES' : 'NO'}</strong>
+                        </Col>
+                        <Col xs={12} sm={8}>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>PACKAGING</span>
+                          <strong style={{ fontSize: '12px', color: '#334155' }}>{sdo.packaging_condition}</strong>
+                        </Col>
+                        <Col xs={24} sm={8}>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>DISCREPANCY REPORTED</span>
+                          <strong style={{ fontSize: '12px', color: sdo.discrepancy_reported ? '#ef4444' : '#16a34a' }}>{sdo.discrepancy_reported ? 'YES' : 'NO'}</strong>
+                        </Col>
+                        {sdo.receiving_remarks && (
+                          <Col span={24}>
+                            <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>RECEIVING REMARKS</span>
+                            <span style={{ fontSize: '12px', color: '#475569' }}>{sdo.receiving_remarks}</span>
+                          </Col>
+                        )}
+                        
+                        <Col xs={24} md={12}>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginBottom: '6px' }}>Receipt Photos</span>
+                          {sdo.receipt_photos && sdo.receipt_photos.length > 0 ? (
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                              {sdo.receipt_photos.map((p, pIdx) => (
+                                <React.Fragment key={pIdx}>
+                                  {toImgSrc(p) ? (
+                                    <Image
+                                      src={toImgSrc(p)}
+                                      alt="Receipt Photo"
+                                      style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                    />
+                                  ) : (
+                                    <span style={{ fontSize: '11px', color: '#94a3b8' }}>Invalid image</span>
+                                  )}
+                                </React.Fragment>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: '11px', color: '#94a3b8' }}>No photos uploaded</span>
+                          )}
+                        </Col>
+                        <Col xs={24} md={12}>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginBottom: '6px' }}>Receipt Signature</span>
+                          {toImgSrc(sdo.receipt_signature) ? (
+                            <Image
+                              src={toImgSrc(sdo.receipt_signature)}
+                              alt="Receipt Signature"
+                              style={{ height: '40px', maxWidth: '120px', objectFit: 'contain', border: '1px dashed #cbd5e1', padding: '2px', background: '#fff' }}
+                            />
+                          ) : (
+                            <span style={{ fontSize: '11px', color: '#94a3b8' }}>No signature uploaded</span>
+                          )}
+                        </Col>
+                      </Row>
+                    </div>
+                  )}
+
+                  {/* Handover Details Logs */}
+                  {sdo.status === 'HANDED_OVER' && (
+                    <div style={{ marginTop: '12px', borderTop: '1px solid #f1f5f9', paddingTop: '12px', background: '#fafafa', padding: '10px', borderRadius: '6px' }}>
+                      <Row gutter={[16, 12]}>
+                        <Col xs={24} sm={12}>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>HANDED OVER BY</span>
+                          <strong style={{ fontSize: '12px', color: '#334155' }}>{sdo.handed_over_by_name || 'System / Admin'}</strong>
+                        </Col>
+                        <Col xs={24} sm={12}>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>HANDOVER TIME</span>
+                          <strong style={{ fontSize: '12px', color: '#334155' }}>{formatDate(sdo.handover_time)}</strong>
+                        </Col>
+                        <Col xs={12} sm={8}>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>HANDOVER TYPE</span>
+                          <strong style={{ fontSize: '12px', color: '#334155' }}>{sdo.handover_type?.toUpperCase()}</strong>
+                        </Col>
+                        
+                        {sdo.carrier_details && (
+                          <>
+                            {sdo.handover_type === 'own vehicle' && (
+                              <>
+                                <Col xs={12} sm={8}>
+                                  <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>VEHICLE NO</span>
+                                  <strong style={{ fontSize: '12px', color: '#334155' }}>{sdo.carrier_details.vehicle_no || '—'}</strong>
+                                </Col>
+                                <Col xs={24} sm={8}>
+                                  <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>DRIVER</span>
+                                  <strong style={{ fontSize: '12px', color: '#334155' }}>{sdo.carrier_details.driver_name} ({sdo.carrier_details.driver_phone})</strong>
+                                </Col>
+                              </>
+                            )}
+                            {sdo.handover_type === 'COURIER' && (
+                              <>
+                                <Col xs={12} sm={8}>
+                                  <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>COURIER CO</span>
+                                  <strong style={{ fontSize: '12px', color: '#334155' }}>{sdo.carrier_details.courier_name || '—'}</strong>
+                                </Col>
+                                <Col xs={24} sm={8}>
+                                  <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>AWB NO</span>
+                                  <strong style={{ fontSize: '12px', color: '#334155' }}>{sdo.carrier_details.awb_no || '—'}</strong>
+                                </Col>
+                              </>
+                            )}
+                            {sdo.handover_type === 'IN_PERSON' && (
+                              <Col xs={24} sm={16}>
+                                <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>RECEIVER</span>
+                                <strong style={{ fontSize: '12px', color: '#334155' }}>{sdo.carrier_details.received_by_name} ({sdo.carrier_details.received_by_phone})</strong>
+                              </Col>
+                            )}
+                            {sdo.carrier_details.remarks && (
+                              <Col span={24}>
+                                <span style={{ fontSize: '11px', color: '#64748b', display: 'block' }}>HANDOVER REMARKS</span>
+                                <span style={{ fontSize: '12px', color: '#475569' }}>{sdo.carrier_details.remarks}</span>
+                              </Col>
+                            )}
+                          </>
+                        )}
+                        
+                        <Col xs={24} md={12}>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginBottom: '6px' }}>Materials Photos</span>
+                          {sdo.handover_photos && sdo.handover_photos.length > 0 ? (
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                              {sdo.handover_photos.map((p, pIdx) => (
+                                <React.Fragment key={pIdx}>
+                                  {toImgSrc(p) ? (
+                                    <Image
+                                      src={toImgSrc(p)}
+                                      alt="Materials Photo"
+                                      style={{ width: '60px', height: '60px', objectFit: 'cover', borderRadius: '4px', border: '1px solid #cbd5e1' }}
+                                    />
+                                  ) : (
+                                    <span style={{ fontSize: '11px', color: '#94a3b8' }}>Invalid image</span>
+                                  )}
+                                </React.Fragment>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: '11px', color: '#94a3b8' }}>No photos uploaded</span>
+                          )}
+                        </Col>
+                        <Col xs={24} md={12}>
+                          <span style={{ fontSize: '11px', color: '#64748b', display: 'block', marginBottom: '6px' }}>Handover Signature</span>
+                          {toImgSrc(sdo.handover_signature) ? (
+                            <Image
+                              src={toImgSrc(sdo.handover_signature)}
+                              alt="Handover Signature"
+                              style={{ height: '40px', maxWidth: '120px', objectFit: 'contain', border: '1px dashed #cbd5e1', padding: '2px', background: '#fff' }}
+                            />
+                          ) : (
+                            <span style={{ fontSize: '11px', color: '#94a3b8' }}>No signature uploaded</span>
+                          )}
+                        </Col>
+                      </Row>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Remaining preview chain — view-only positions and destination */}
+          {remainingChainPositions.map((chainPos, idx) => {
+            const legNum = sortedSdos.length + idx + 1;
+            const isDestination = chainPos.is_destination;
+            const isViewOnly = chainPos.view_only;
+            const isLast = idx === remainingChainPositions.length - 1;
+
+            // View-only positions: displayed for hierarchy visibility, no actions
+            if (isViewOnly && !isDestination) {
+              return (
+                <div key={`viewonly-${legNum}`} style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', opacity: 0.5 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ 
+                      width: '32px', height: '32px', borderRadius: '50%', 
+                      background: '#f1f5f9', color: '#94a3b8', 
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                      fontWeight: 'bold', border: '2px solid #cbd5e1'
+                    }}>
+                      <EyeOutlined />
+                    </div>
+                    {!isLast && <div style={{ width: '2px', height: '40px', background: '#cbd5e1', borderStyle: 'dashed' }} />}
+                  </div>
+                  <div style={{ flex: 1, background: '#f8fafc', border: '1px dashed #cbd5e1', borderRadius: '10px', padding: '12px 16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                      <div>
+                        <strong style={{ color: '#64748b', fontSize: '14px' }}>
+                          {chainPos.position_name} ({chainPos.role_name})
+                        </strong>
+                        <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                          {chainPos.employee_name ? `${chainPos.employee_name} (${chainPos.employee_code})` : 'Unassigned'}
+                        </div>
+                      </div>
+                      <Tag color="default" style={{ fontWeight: 'bold', borderStyle: 'dashed' }}>
+                        <EyeOutlined /> VIEW ONLY
+                      </Tag>
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: '4px' }}>
+                      This position has view access only — no acknowledgement or handover actions.
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            // Destination position: Acknowledge Delivery for final delivery
+            if (isDestination) {
+              return (
+                <div key={`dest-${legNum}`} style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', opacity: 0.7 }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ 
+                      width: '32px', height: '32px', borderRadius: '50%', 
+                      background: '#f1f5f9', color: '#059669', 
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                      fontWeight: 'bold', border: '2px dashed #059669'
+                    }}>
+                      <EnvironmentOutlined />
+                    </div>
+                  </div>
+                  <div style={{ flex: 1, background: '#ecfdf5', border: '1px dashed #059669', borderRadius: '10px', padding: '12px 16px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                      <div>
+                        <strong style={{ color: '#065f46', fontSize: '14px' }}>
+                          Destination: {chainPos.position_name} ({chainPos.role_name})
+                        </strong>
+                        <div style={{ fontSize: '11px', color: '#047857' }}>
+                          {chainPos.employee_name ? `${chainPos.employee_name} (${chainPos.employee_code})` : 'Destination Warehouse User'}
+                        </div>
+                      </div>
+                      <Tag color="green" style={{ fontWeight: 'bold' }}>
+                        <EnvironmentOutlined /> ACKNOWLEDGE DELIVERY
+                      </Tag>
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#047857', marginTop: '4px' }}>
+                      Final delivery acknowledgement at destination warehouse. Completing this step marks the MDO as delivered.
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            // Upcoming approve leg (not yet created as SDO)
+            return (
+              <div key={`preview-${legNum}`} style={{ display: 'flex', gap: '16px', alignItems: 'flex-start', opacity: 0.6 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                  <div style={{ 
+                    width: '32px', 
+                    height: '32px', 
+                    borderRadius: '50%', 
+                    background: '#f1f5f9', 
+                    color: '#94a3b8', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    fontWeight: 'bold',
+                    border: '2px dashed #cbd5e1'
+                  }}>
+                    {legNum}
+                  </div>
+                  {!isLast && <div style={{ width: '2px', height: '40px', background: '#cbd5e1', borderStyle: 'dashed' }} />}
+                </div>
+                <div>
+                  <strong style={{ color: '#64748b' }}>Leg {legNum}: {chainPos.position_name} ({chainPos.role_name})</strong>
+                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                    Custodian: {chainPos.employee_name ? `${chainPos.employee_name} (${chainPos.employee_code})` : 'Unassigned'}
+                  </div>
+                  <Tag style={{ marginTop: '4px' }}>UPCOMING LEG</Tag>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+    );
+  };
+
   return (
     <div style={{ padding: '28px', background: 'radial-gradient(ellipse at top, #f8fafc 0%, #f1f5f9 80%)', minHeight: '100vh', color: '#334155', fontFamily: "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" }}>
 
-      {/* Top Banner Header */}
+      {/* Top Banner Header — hidden when form page is active */}
+      {!showDesigner && (
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
@@ -961,32 +1472,36 @@ export default function LogisticsDispatch() {
           </Button>
         </Space>
       </div>
+      )}
 
-      {/* Main Designer Modal Form */}
-      <Modal
-        title={
+      {/* Main Designer Form Page — replaces modal with full page layout */}
+      {showDesigner && (
+      <div style={{ background: '#ffffff', borderRadius: '16px', border: '1px solid #e2e8f0', boxShadow: '0 4px 20px rgba(0,0,0,0.05)', minHeight: 'calc(100vh - 100px)' }}>
+        {/* Page Header with Back Button */}
+        <div style={{ 
+          display: 'flex', alignItems: 'center', gap: '16px', padding: '20px 28px',
+          borderBottom: '1px solid #e2e8f0', background: '#f8fafc', borderRadius: '16px 16px 0 0'
+        }}>
+          <Button
+            icon={<ArrowLeftOutlined />}
+            onClick={() => {
+              setShowDesigner(false);
+              form.resetFields();
+              setSelectedIssue(null);
+              setUploadedUrls({});
+              setIsReadOnly(false);
+              setSelectedMdo(null);
+            }}
+            style={{ fontWeight: 600, borderRadius: '8px' }}
+          >
+            Back
+          </Button>
           <span style={{ color: '#0f172a', fontSize: '17px', fontWeight: 700, letterSpacing: '-0.2px', display: 'flex', alignItems: 'center', gap: '8px' }}>
             {isReadOnly ? <EyeOutlined style={{ color: '#0284c7' }} /> : <PlusOutlined style={{ color: '#0284c7' }} />}
             {isReadOnly ? 'VIEW DISPATCH PLAN DETAILS' : 'NEW DISPATCH'}
           </span>
-        }
-        open={showDesigner}
-        onCancel={() => {
-          setShowDesigner(false);
-          form.resetFields();
-          setSelectedIssue(null);
-          setUploadedUrls({});
-          setIsReadOnly(false);
-          setSelectedMdo(null);
-        }}
-        width="100%"
-        footer={null}
-        style={{ top: 0, margin: 0, padding: 0, maxWidth: '100vw' }}
-        styles={{
-          body: { background: '#ffffff', padding: '24px', minHeight: 'calc(100vh - 55px)', overflowY: 'auto' },
-          header: { background: '#ffffff', borderBottom: '1px solid #e2e8f0' }
-        }}
-      >
+        </div>
+        <div style={{ padding: '24px 28px' }}>
         <Form
           form={form}
           layout="vertical"
@@ -1160,7 +1675,7 @@ export default function LogisticsDispatch() {
                   precision={2}
                   style={{ width: '100%' }}
                   placeholder="e.g. 250.00"
-                  addonAfter="KG"
+                  suffix="KG"
                 />
               </Form.Item>
             </Col>
@@ -1177,7 +1692,7 @@ export default function LogisticsDispatch() {
                   precision={2}
                   style={{ width: '100%' }}
                   placeholder="e.g. 45.00"
-                  addonAfter="CFT"
+                  suffix="CFT"
                 />
               </Form.Item>
             </Col>
@@ -1199,6 +1714,15 @@ export default function LogisticsDispatch() {
                   <Option value="COURIER">Courier Dispatch</Option>
                   <Option value="IN_PERSON">In-Person Handover</Option>
                   <Option value="THIRD_PARTY">Third-Party Carrier Bidding (RFQ)</Option>
+                </Select>
+              </Form.Item>
+            </Col>
+
+            <Col xs={24} md={12}>
+              <Form.Item name="dispatch_mode" label={<span style={{ color: '#4f46e5', fontWeight: 600 }}>Dispatch Mode</span>} rules={[{ required: true, message: 'Please select dispatch mode' }]}>
+                <Select style={{ width: '100%' }}>
+                  <Option value="direct">Direct Dispatch</Option>
+                  <Option value="multi-level">Multi-Level Custody Transfer</Option>
                 </Select>
               </Form.Item>
             </Col>
@@ -1232,140 +1756,229 @@ export default function LogisticsDispatch() {
                 title={<span style={{ color: '#16a34a', fontWeight: 700 }}><CarOutlined /> Self-Owned Fleet Dispatch</span>}
                 style={{ background: '#f0fdf4', borderColor: '#bbf7d0', borderRadius: '12px' }}
               >
-                <Row gutter={16}>
-                  <Col xs={24} md={12}>
-                    <Form.Item name="driver_name" label="Driver Full Name" rules={[{ required: true }]}>
-                      <Input placeholder="E.g., Satish Kumar" />
+                {isReadOnly ? (
+                  <Row gutter={[16, 16]} style={{ fontSize: '13px' }}>
+                    <Col xs={12} md={6}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Driver Name</span>
+                      <strong style={{ color: '#334155' }}>{form.getFieldValue('driver_name') || '—'}</strong>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Driver Phone</span>
+                      <strong style={{ color: '#334155' }}>{form.getFieldValue('driver_phone') || '—'}</strong>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Received By</span>
+                      <strong style={{ color: '#334155' }}>{form.getFieldValue('received_by_name') || '—'}</strong>
+                    </Col>
+                    <Col xs={12} md={6}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Received By Phone</span>
+                      <strong style={{ color: '#334155' }}>{form.getFieldValue('received_by_phone') || '—'}</strong>
+                    </Col>
+                    <Col xs={24}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Remarks / Loading Specs</span>
+                      <span style={{ color: '#334155' }}>{form.getFieldValue('handover_remarks') || '—'}</span>
+                    </Col>
+                    <Col xs={12}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase', marginBottom: '8px' }}>Vehicle Image</span>
+                      {uploadedUrls.vehicle_image ? (
+                        <Image src={uploadedUrls.vehicle_image} style={{ maxHeight: '150px', objectFit: 'contain', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                      ) : (
+                        <span style={{ color: '#94a3b8' }}>No vehicle image uploaded</span>
+                      )}
+                    </Col>
+                    <Col xs={12}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase', marginBottom: '8px' }}>Receiver Signature</span>
+                      {uploadedUrls.receiver_signature ? (
+                        <Image src={uploadedUrls.receiver_signature} style={{ maxHeight: '150px', objectFit: 'contain', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                      ) : (
+                        <span style={{ color: '#94a3b8' }}>No receiver signature uploaded</span>
+                      )}
+                    </Col>
+                  </Row>
+                ) : (
+                  <>
+                    <Row gutter={16}>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="driver_name" label="Driver Full Name" rules={[{ required: true }]}>
+                          <Input placeholder="E.g., Satish Kumar" />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="driver_phone" label="Driver Phone Number" rules={[{ required: true }]}>
+                          <Input placeholder="E.g., 9988776655" />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Row gutter={16}>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="received_by_name" label="Received By (Name at Site)" rules={[{ required: true }]}>
+                          <Input placeholder="E.g., Nilesh Patil" />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="received_by_phone" label="Received By (Phone Number)" rules={[{ required: true }]}>
+                          <Input placeholder="E.g., 9898001122" />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Row gutter={16}>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="vehicle_image" label="Vehicle Image (File Attachment)" rules={[{ required: true }]}>
+                          <FormUpload
+                            maxCount={1}
+                            disabled={isReadOnly}
+                            customRequest={async ({ file, onSuccess, onError }) => {
+                              try {
+                                await handleUploadFile(file, 'vehicle_image');
+                                onSuccess(null, file);
+                              } catch (err) {
+                                onError(err);
+                              }
+                            }}
+                            showUploadList={true}
+                          >
+                            <Button icon={<UploadOutlined />} disabled={isReadOnly}>Upload Vehicle Image</Button>
+                          </FormUpload>
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="receiver_signature" label="Receiver Signature (File Attachment)" rules={[{ required: true }]}>
+                          <FormUpload
+                            maxCount={1}
+                            disabled={isReadOnly}
+                            customRequest={async ({ file, onSuccess, onError }) => {
+                              try {
+                                await handleUploadFile(file, 'receiver_signature');
+                                onSuccess(null, file);
+                              } catch (err) {
+                                onError(err);
+                              }
+                            }}
+                            showUploadList={true}
+                          >
+                            <Button icon={<UploadOutlined />} disabled={isReadOnly}>Upload Receiver Signature</Button>
+                          </FormUpload>
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Form.Item name="handover_remarks" label="Remarks / Loading Specs">
+                      <Input placeholder="Secure items. Cold chain box used..." />
                     </Form.Item>
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Form.Item name="driver_phone" label="Driver Phone Number" rules={[{ required: true }]}>
-                      <Input placeholder="E.g., 9988776655" />
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Row gutter={16}>
-                  <Col xs={24} md={12}>
-                    <Form.Item name="received_by_name" label="Received By (Name at Site)" rules={[{ required: true }]}>
-                      <Input placeholder="E.g., Nilesh Patil" />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Form.Item name="received_by_phone" label="Received By (Phone Number)" rules={[{ required: true }]}>
-                      <Input placeholder="E.g., 9898001122" />
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Row gutter={16}>
-                  <Col xs={24} md={12}>
-                    <Form.Item name="vehicle_image" label="Vehicle Image (File Attachment)" rules={[{ required: true }]}>
-                      <FormUpload
-                        maxCount={1}
-                        disabled={isReadOnly}
-                        customRequest={async ({ file, onSuccess, onError }) => {
-                          try {
-                            await handleUploadFile(file, 'vehicle_image');
-                            onSuccess(null, file);
-                          } catch (err) {
-                            onError(err);
-                          }
-                        }}
-                        showUploadList={true}
-                      >
-                        <Button icon={<UploadOutlined />} disabled={isReadOnly}>Upload Vehicle Image</Button>
-                      </FormUpload>
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Form.Item name="receiver_signature" label="Receiver Signature (File Attachment)" rules={[{ required: true }]}>
-                      <FormUpload
-                        maxCount={1}
-                        disabled={isReadOnly}
-                        customRequest={async ({ file, onSuccess, onError }) => {
-                          try {
-                            await handleUploadFile(file, 'receiver_signature');
-                            onSuccess(null, file);
-                          } catch (err) {
-                            onError(err);
-                          }
-                        }}
-                        showUploadList={true}
-                      >
-                        <Button icon={<UploadOutlined />} disabled={isReadOnly}>Upload Receiver Signature</Button>
-                      </FormUpload>
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Form.Item name="handover_remarks" label="Remarks / Loading Specs">
-                  <Input placeholder="Secure items. Cold chain box used..." />
-                </Form.Item>
+                  </>
+                )}
               </Card>
             )}
-
+    
             {dispatchType === 'IN_PERSON' && (
               <Card
                 title={<span style={{ color: '#d97706', fontWeight: 700 }}><UserOutlined /> In-Person Handover Manifest</span>}
                 style={{ background: '#fffbeb', borderColor: '#fde68a', borderRadius: '12px' }}
               >
-                <Row gutter={16}>
-                  <Col xs={24} md={12}>
-                    <Form.Item name="received_by_name" label="Pickup Person Name" rules={[{ required: true }]}>
-                      <Input placeholder="E.g., Rahul Verma" />
+                {isReadOnly ? (
+                  <Row gutter={[16, 16]} style={{ fontSize: '13px' }}>
+                    <Col xs={12} md={12}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Pickup Person Name</span>
+                      <strong style={{ color: '#334155' }}>{form.getFieldValue('received_by_name') || '—'}</strong>
+                    </Col>
+                    <Col xs={12} md={12}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Pickup Person Phone</span>
+                      <strong style={{ color: '#334155' }}>{form.getFieldValue('received_by_phone') || '—'}</strong>
+                    </Col>
+                    <Col xs={24}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Handover Remarks</span>
+                      <span style={{ color: '#334155' }}>{form.getFieldValue('handover_remarks') || '—'}</span>
+                    </Col>
+                    <Col xs={24}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase', marginBottom: '8px' }}>Receiver Signature</span>
+                      {uploadedUrls.receiver_signature ? (
+                        <Image src={uploadedUrls.receiver_signature} style={{ maxHeight: '150px', objectFit: 'contain', borderRadius: '6px', border: '1px solid #cbd5e1' }} />
+                      ) : (
+                        <span style={{ color: '#94a3b8' }}>No receiver signature uploaded</span>
+                      )}
+                    </Col>
+                  </Row>
+                ) : (
+                  <>
+                    <Row gutter={16}>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="received_by_name" label="Pickup Person Name" rules={[{ required: true }]}>
+                          <Input placeholder="E.g., Rahul Verma" />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="received_by_phone" label="Pickup Person Phone Number" rules={[{ required: true }]}>
+                          <Input placeholder="E.g., 9765432100" />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Row gutter={16}>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="receiver_signature" label="Receiver Signature (File Attachment)" rules={[{ required: true }]}>
+                          <FormUpload
+                            maxCount={1}
+                            disabled={isReadOnly}
+                            customRequest={async ({ file, onSuccess, onError }) => {
+                              try {
+                                await handleUploadFile(file, 'receiver_signature');
+                                onSuccess(null, file);
+                              } catch (err) {
+                                onError(err);
+                              }
+                            }}
+                            showUploadList={true}
+                          >
+                            <Button icon={<UploadOutlined />} disabled={isReadOnly}>Upload Receiver Signature</Button>
+                          </FormUpload>
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Form.Item name="handover_remarks" label="Handover Remarks">
+                      <Input placeholder="Employee ID verified. Clean handover executed..." />
                     </Form.Item>
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Form.Item name="received_by_phone" label="Pickup Person Phone Number" rules={[{ required: true }]}>
-                      <Input placeholder="E.g., 9765432100" />
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Row gutter={16}>
-                  <Col xs={24} md={12}>
-                    <Form.Item name="receiver_signature" label="Receiver Signature (File Attachment)" rules={[{ required: true }]}>
-                      <FormUpload
-                        maxCount={1}
-                        disabled={isReadOnly}
-                        customRequest={async ({ file, onSuccess, onError }) => {
-                          try {
-                            await handleUploadFile(file, 'receiver_signature');
-                            onSuccess(null, file);
-                          } catch (err) {
-                            onError(err);
-                          }
-                        }}
-                        showUploadList={true}
-                      >
-                        <Button icon={<UploadOutlined />} disabled={isReadOnly}>Upload Receiver Signature</Button>
-                      </FormUpload>
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Form.Item name="handover_remarks" label="Handover Remarks">
-                  <Input placeholder="Employee ID verified. Clean handover executed..." />
-                </Form.Item>
+                  </>
+                )}
               </Card>
             )}
-
+    
             {dispatchType === 'COURIER' && (
               <Card
                 title={<span style={{ color: '#0284c7', fontWeight: 700 }}><MailOutlined /> Courier Dispatch Manifest</span>}
                 style={{ background: '#f0f9ff', borderColor: '#bae6fd', borderRadius: '12px' }}
               >
-                <Row gutter={16}>
-                  <Col xs={24} md={12}>
-                    <Form.Item name="courier_name" label="Courier / Transporter Company Name" rules={[{ required: true }]}>
-                      <Input placeholder="E.g., DHL Express, BlueDart" />
+                {isReadOnly ? (
+                  <Row gutter={[16, 16]} style={{ fontSize: '13px' }}>
+                    <Col xs={12} md={12}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Courier Company Name</span>
+                      <strong style={{ color: '#334155' }}>{form.getFieldValue('courier_name') || '—'}</strong>
+                    </Col>
+                    <Col xs={12} md={12}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>AWB / Tracking Number</span>
+                      <strong style={{ color: '#334155' }}>{form.getFieldValue('awb_no') || '—'}</strong>
+                    </Col>
+                    <Col xs={24}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Delivery Remarks</span>
+                      <span style={{ color: '#334155' }}>{form.getFieldValue('handover_remarks') || '—'}</span>
+                    </Col>
+                  </Row>
+                ) : (
+                  <>
+                    <Row gutter={16}>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="courier_name" label="Courier / Transporter Company Name" rules={[{ required: true }]}>
+                          <Input placeholder="E.g., DHL Express, BlueDart" />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} md={12}>
+                        <Form.Item name="awb_no" label="Docket / AWB tracking Number" rules={[{ required: true }]}>
+                          <Input placeholder="E.g., AWB-99808112" />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Form.Item name="handover_remarks" label="Delivery Remarks">
+                      <Input placeholder="Fragile sticker applied. Consignment receipt attached..." />
                     </Form.Item>
-                  </Col>
-                  <Col xs={24} md={12}>
-                    <Form.Item name="awb_no" label="Docket / AWB tracking Number" rules={[{ required: true }]}>
-                      <Input placeholder="E.g., AWB-99808112" />
-                    </Form.Item>
-                  </Col>
-                </Row>
-                <Form.Item name="handover_remarks" label="Delivery Remarks">
-                  <Input placeholder="Fragile sticker applied. Consignment receipt attached..." />
-                </Form.Item>
+                  </>
+                )}
               </Card>
             )}
 
@@ -1536,9 +2149,339 @@ export default function LogisticsDispatch() {
             )}
           </div>
         </Form>
+        {!isReadOnly && dispatchMode === 'multi-level' && chainPreview && (
+          <Card
+            title={<span style={{ color: '#0ea5e9', fontWeight: 800 }}>Resolved Custody Chain Preview</span>}
+            style={{ marginTop: '20px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#f8fafc' }}
+          >
+            {chainPreview.chain && chainPreview.chain.length > 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                {chainPreview.chain.map((pos, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                    <span style={{ 
+                      background: pos.is_destination ? '#059669' : pos.view_only ? '#94a3b8' : '#0ea5e9', 
+                      color: '#fff', borderRadius: '50%', width: '24px', height: '24px', 
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', 
+                      fontWeight: 'bold', fontSize: '12px'
+                    }}>
+                      {pos.is_destination ? <EnvironmentOutlined /> : pos.view_only ? <EyeOutlined /> : idx + 1}
+                    </span>
+                    <div>
+                      <strong style={{ color: '#334155' }}>{pos.position_name}</strong> ({pos.role_name})
+                      {pos.view_only && !pos.is_destination && (
+                        <Tag color="default" style={{ marginLeft: '6px', fontSize: '10px', borderStyle: 'dashed' }}><EyeOutlined /> View Only</Tag>
+                      )}
+                      {pos.is_destination && (
+                        <Tag color="green" style={{ marginLeft: '6px', fontSize: '10px' }}><EnvironmentOutlined /> Destination</Tag>
+                      )}
+                      {pos.can_approve && !pos.is_destination && (
+                        <Tag color="blue" style={{ marginLeft: '6px', fontSize: '10px' }}>Custody Leg</Tag>
+                      )}
+                      <div style={{ fontSize: '11px', color: '#64748b' }}>
+                        Employee: {pos.employee_name ? `${pos.employee_name} (${pos.employee_code})` : 'Unassigned'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Text type="secondary">No positions resolved in the workflow chain.</Text>
+            )}
+          </Card>
+        )}
+        {isReadOnly && renderCustodyTimeline()}
+        </div>
+      </div>
+      )}
+
+      {/* Acknowledge Receipt Modal */}
+      <Modal
+        title={<span style={{ color: '#0f172a', fontWeight: 700 }}>
+          {(() => {
+            const _sdos = selectedMdo?.sdos || [];
+            const _sdoPosIds = new Set(_sdos.map(s => s.custodian_position_id));
+            const _preview = (chainPreview?.chain) ? chainPreview.chain : [];
+            const _remaining = _preview.filter(cp => !_sdoPosIds.has(cp.position_id));
+            const _hasApproveRemaining = _remaining.some(cp => !cp.view_only);
+            const _isFinal = _sdos.length > 1 && (activeSdo?.sequence_number || 0) >= _sdos.length && !_hasApproveRemaining;
+            return _isFinal
+              ? <><EnvironmentOutlined style={{ color: '#059669' }} /> ACKNOWLEDGE DELIVERY</>
+              : <><CheckCircleOutlined style={{ color: '#0ea5e9' }} /> ACKNOWLEDGE DISPATCH RECEIPT</>;
+          })()}
+        </span>}
+        open={receiveLegModalOpen}
+        onCancel={() => {
+          setReceiveLegModalOpen(false);
+          receiveForm.resetFields();
+          setReceiptPhotos([]);
+          setReceiptSignature('');
+        }}
+        footer={null}
+      >
+        <Form
+          form={receiveForm}
+          layout="vertical"
+          onFinish={async (values) => {
+            if (!receiptSignature) {
+              message.warning("Receiver signature upload is required!");
+              return;
+            }
+            try {
+              const payload = {
+                seal_intact: !!values.seal_intact,
+                packaging_condition: values.packaging_condition || 'INTACT',
+                discrepancy_reported: !!values.discrepancy_reported,
+                receiving_remarks: values.receiving_remarks,
+                receipt_photos: receiptPhotos,
+                receipt_signature: receiptSignature
+              };
+              
+              const res = await api.post(`/logistics/sdo/${activeSdo.id}/receive`, payload);
+              const isLastLeg = res.data?.is_last;
+              message.success(isLastLeg ? "Delivery acknowledged successfully! MDO marked as completed." : "Custody transfer leg acknowledged successfully!");
+              setReceiveLegModalOpen(false);
+              receiveForm.resetFields();
+              setReceiptPhotos([]);
+              setReceiptSignature('');
+              setShowDesigner(false);
+              await fetchData();
+            } catch (err) {
+              console.error(err);
+              const detail = err?.response?.data?.detail;
+              message.error(typeof detail === 'string' ? detail : "Failed to acknowledge dispatch leg.");
+            }
+          }}
+          initialValues={{ seal_intact: true, packaging_condition: 'INTACT', discrepancy_reported: false }}
+        >
+          <Form.Item name="seal_intact" label="Is the security seal intact?" valuePropName="checked">
+            <Switch checkedChildren="YES" unCheckedChildren="NO" />
+          </Form.Item>
+          
+          <Form.Item name="packaging_condition" label="Packaging Condition" rules={[{ required: true }]}>
+            <Select>
+              <Option value="INTACT">INTACT</Option>
+              <Option value="DAMAGED">DAMAGED</Option>
+              <Option value="TAMPERED">TAMPERED</Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item name="discrepancy_reported" label="Any discrepancy / damage reported?" valuePropName="checked">
+            <Switch checkedChildren="YES" unCheckedChildren="NO" />
+          </Form.Item>
+
+          <Form.Item name="receiving_remarks" label="Receiving Remarks / Notes">
+            <Input.TextArea rows={2} placeholder="Add any comments on quality or count..." />
+          </Form.Item>
+
+          <Form.Item label="Condition Photos (Upload material photos)" required>
+            <Upload
+              listType="picture-card"
+              multiple
+              customRequest={async ({ file, onSuccess, onError }) => {
+                try {
+                  const url = await uploadImageFile(file);
+                  setReceiptPhotos((prev) => [...prev, url]);
+                  onSuccess(null, file);
+                  message.success(`${file.name} uploaded`);
+                } catch (err) {
+                  onError(err);
+                  message.error("Upload failed");
+                }
+              }}
+            >
+              <div>
+                <PlusOutlined />
+                <div style={{ marginTop: 8 }}>Upload</div>
+              </div>
+            </Upload>
+          </Form.Item>
+
+          <Form.Item label="Receiver Signature Upload" required>
+            <Upload
+              maxCount={1}
+              listType="picture"
+              customRequest={async ({ file, onSuccess, onError }) => {
+                try {
+                  const url = await uploadImageFile(file);
+                  setReceiptSignature(url);
+                  onSuccess(null, file);
+                  message.success(`Signature uploaded successfully`);
+                } catch (err) {
+                  onError(err);
+                  message.error("Upload failed");
+                }
+              }}
+            >
+              <Button icon={<UploadOutlined />}>Upload Signature Image</Button>
+            </Upload>
+          </Form.Item>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+            <Button onClick={() => setReceiveLegModalOpen(false)}>Cancel</Button>
+            <Button type="primary" htmlType="submit">Submit Acknowledgment</Button>
+          </div>
+        </Form>
+      </Modal>
+
+      {/* Handover Leg Modal */}
+      <Modal
+        title={<span style={{ color: '#0f172a', fontWeight: 700 }}><SendOutlined style={{ color: '#4f46e5' }} /> HANDOVER CUSTODY TO NEXT LEG</span>}
+        open={handoverLegModalOpen}
+        onCancel={() => {
+          setHandoverLegModalOpen(false);
+          handoverForm.resetFields();
+          setHandoverPhotos([]);
+          setHandoverSignature('');
+        }}
+        footer={null}
+      >
+        <Form
+          form={handoverForm}
+          layout="vertical"
+          onFinish={async (values) => {
+            if (!handoverSignature) {
+              message.warning("Handover signature upload is required!");
+              return;
+            }
+            try {
+              const payload = {
+                handover_type: values.handover_type,
+                vehicle_no: values.vehicle_no,
+                driver_name: values.driver_name,
+                driver_phone: values.driver_phone,
+                courier_name: values.courier_name,
+                awb_no: values.awb_no,
+                remarks: values.remarks,
+                handover_photos: handoverPhotos,
+                handover_signature: handoverSignature
+              };
+              
+              await api.post(`/logistics/sdo/${activeSdo.id}/handover`, payload);
+              message.success("Custody leg handed over successfully!");
+              setHandoverLegModalOpen(false);
+              handoverForm.resetFields();
+              setHandoverPhotos([]);
+              setHandoverSignature('');
+              setShowDesigner(false);
+              await fetchData();
+            } catch (err) {
+              console.error(err);
+              const detail = err?.response?.data?.detail;
+              message.error(typeof detail === 'string' ? detail : "Failed to execute handover.");
+            }
+          }}
+          initialValues={{ handover_type: 'own vehicle' }}
+        >
+          <Form.Item name="handover_type" label="Handover Methodology" rules={[{ required: true }]}>
+            <Select>
+              <Option value="own vehicle">Self-Owned Fleet Dispatch</Option>
+              <Option value="COURIER">Courier Dispatch</Option>
+              <Option value="IN_PERSON">In-Person Handover</Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item noStyle shouldUpdate={(prevValues, currentValues) => prevValues.handover_type !== currentValues.handover_type}>
+            {({ getFieldValue }) => {
+              const type = getFieldValue('handover_type');
+              if (type === 'own vehicle') {
+                return (
+                  <>
+                    <Form.Item name="vehicle_no" label="Vehicle Number" rules={[{ required: true }]}>
+                      <Input placeholder="E.g., MH-12-PQ-1234" />
+                    </Form.Item>
+                    <Form.Item name="driver_name" label="Driver Full Name" rules={[{ required: true }]}>
+                      <Input placeholder="Driver Name" />
+                    </Form.Item>
+                    <Form.Item name="driver_phone" label="Driver Phone Number" rules={[{ required: true }]}>
+                      <Input placeholder="Driver Phone" />
+                    </Form.Item>
+                  </>
+                );
+              }
+              if (type === 'COURIER') {
+                return (
+                  <>
+                    <Form.Item name="courier_name" label="Courier Company Name" rules={[{ required: true }]}>
+                      <Input placeholder="E.g., DHL, BlueDart" />
+                    </Form.Item>
+                    <Form.Item name="awb_no" label="AWB / Tracking Number" rules={[{ required: true }]}>
+                      <Input placeholder="AWB Number" />
+                    </Form.Item>
+                  </>
+                );
+              }
+              if (type === 'IN_PERSON') {
+                return (
+                  <>
+                    <Form.Item name="received_by_name" label="Receiver Employee Name" rules={[{ required: true }]}>
+                      <Input placeholder="Name of person receiving custody" />
+                    </Form.Item>
+                    <Form.Item name="received_by_phone" label="Receiver Phone Number" rules={[{ required: true }]}>
+                      <Input placeholder="Phone number" />
+                    </Form.Item>
+                  </>
+                );
+              }
+              return null;
+            }}
+          </Form.Item>
+
+          <Form.Item name="remarks" label="Handover Remarks">
+            <Input.TextArea rows={2} placeholder="Loading conditions, seal number, etc..." />
+          </Form.Item>
+
+          <Form.Item label="Materials Photos (Upload condition photos)" required>
+            <Upload
+              listType="picture-card"
+              multiple
+              customRequest={async ({ file, onSuccess, onError }) => {
+                try {
+                  const url = await uploadImageFile(file);
+                  setHandoverPhotos((prev) => [...prev, url]);
+                  onSuccess(null, file);
+                  message.success(`${file.name} uploaded`);
+                } catch (err) {
+                  onError(err);
+                  message.error("Upload failed");
+                }
+              }}
+            >
+              <div>
+                <PlusOutlined />
+                <div style={{ marginTop: 8 }}>Upload</div>
+              </div>
+            </Upload>
+          </Form.Item>
+
+          <Form.Item label="Handover Custodian Signature Upload" required>
+            <Upload
+              maxCount={1}
+              listType="picture"
+              customRequest={async ({ file, onSuccess, onError }) => {
+                try {
+                  const url = await uploadImageFile(file);
+                  setHandoverSignature(url);
+                  onSuccess(null, file);
+                  message.success(`Signature uploaded successfully`);
+                } catch (err) {
+                  onError(err);
+                  message.error("Upload failed");
+                }
+              }}
+            >
+              <Button icon={<UploadOutlined />}>Upload Signature Image</Button>
+            </Upload>
+          </Form.Item>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' }}>
+            <Button onClick={() => setHandoverLegModalOpen(false)}>Cancel</Button>
+            <Button type="primary" htmlType="submit">Submit Handover</Button>
+          </div>
+        </Form>
       </Modal>
 
       {/* SCM Dispatch Plan Ledger collapse */}
+      {!showDesigner && (
       <div style={{ marginTop: '16px' }}>
         <Collapse
           style={{ background: 'transparent', border: 'none' }}
@@ -1547,6 +2490,7 @@ export default function LogisticsDispatch() {
           items={collapseItems}
         />
       </div>
+      )}
 
       <style>{`
         /* Top notch UI Animations & Styling - Senior UI Developer approved Light Theme */

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Tag, Badge, Button, Modal, Form, Select, DatePicker, Input, InputNumber, Switch, Slider, Space, Spin, message, Row, Col, Divider, Alert, Tooltip, Empty } from 'antd';
+import { Card, Table, Tag, Badge, Button, Modal, Form, Select, DatePicker, Input, InputNumber, Switch, Slider, Space, Spin, App, Row, Col, Divider, Alert, Tooltip, Empty } from 'antd';
 import {
   SendOutlined,
   DollarCircleOutlined,
@@ -40,6 +40,7 @@ const parseInstructions = (inst) => {
 };
 
 export default function LogisticsRfq() {
+  const { message } = App.useApp();
   const location = useLocation();
   const [loading, setLoading] = useState(true);
   const [rfqs, setRfqs] = useState([]);
@@ -206,10 +207,9 @@ export default function LogisticsRfq() {
 
   if (loading && rfqs.length === 0) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-        <Spin size="large" tip="Entering B2B Bidding desk...">
-          <div />
-        </Spin>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+        <Spin size="large" />
+        <span style={{ color: '#64748b', fontSize: 16 }}>Entering B2B Bidding desk...</span>
       </div>
     );
   }

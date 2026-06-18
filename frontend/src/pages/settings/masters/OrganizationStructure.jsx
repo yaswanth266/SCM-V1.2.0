@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   App as AntApp, Button, DatePicker, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Table, Tabs, Tag,
 } from 'antd';
@@ -11,6 +11,62 @@ import api from '../../../config/api';
 import { getErrorMessage } from '../../../utils/helpers';
 
 const toArray = (data) => data?.items || data?.data || data || [];
+
+const renderHierarchy = (chain) => {
+  if (!chain || !Array.isArray(chain) || chain.length === 0) {
+    return <span style={{ color: '#aaa', fontStyle: 'italic' }}>No hierarchy</span>;
+  }
+  return (
+    <Space size={[0, 2]} wrap>
+      {chain.map((pos, i) => (
+        <React.Fragment key={pos.id}>
+          {i > 0 && <span style={{ color: '#bbb', fontSize: 11 }}>›</span>}
+          <Tag
+            color={
+              pos.role_name?.includes('MANAGER') || pos.role_name?.includes('COO') ? 'blue' :
+              pos.role_name?.includes('OFFICER') ? 'geekblue' :
+              pos.role_name === 'OE' ? 'purple' :
+              pos.role_name === 'DEO' || pos.role_name === 'LAB TECHNICIAN' || pos.role_name === 'STOREKEEPER' ? 'cyan' :
+              pos.level_name ? 'default' : 'default'
+            }
+            style={{ fontSize: 11, lineHeight: '18px', margin: 0 }}
+          >
+            {pos.role_name || pos.name}
+          </Tag>
+        </React.Fragment>
+      ))}
+    </Space>
+  );
+};
+
+const deduplicatePositions = (positions) => {
+  if (!Array.isArray(positions)) return [];
+  const unique = [];
+  const seenRoleIds = new Set();
+  const seenRoleNames = new Set();
+  for (const p of positions) {
+    if (!p) continue;
+    if (typeof p !== 'object') {
+      unique.push(p);
+      continue;
+    }
+    const roleId = p.role_id;
+    const roleName = (p.role_name || p.role_code || p.name || p.position_name || '').trim().toLowerCase();
+    if (roleId != null) {
+      if (seenRoleIds.has(roleId)) continue;
+      seenRoleIds.add(roleId);
+      if (roleName) seenRoleNames.add(roleName);
+      unique.push(p);
+    } else if (roleName) {
+      if (seenRoleNames.has(roleName)) continue;
+      seenRoleNames.add(roleName);
+      unique.push(p);
+    } else {
+      unique.push(p);
+    }
+  }
+  return unique;
+};
 
 const ENDPOINTS = {
   projects: '/masters/org-projects',
@@ -37,6 +93,78 @@ const OrganizationStructure = () => {
   const [roles, setRoles] = useState([]);
   const [form] = Form.useForm();
   const [userForm] = Form.useForm();
+
+  const [positionFilters, setPositionFilters] = useState({
+    project_id: undefined,
+    office_id: undefined,
+    department: undefined,
+    status: undefined,
+  });
+
+  const [employeeFilters, setEmployeeFilters] = useState({
+    position_id: undefined,
+    status: undefined,
+    gender: undefined,
+  });
+
+  // Refs hold the LATEST filter values synchronously so fetchRows never reads
+  // a stale closure even when called on a freshly remounted DataTable.
+  const positionFiltersRef = useRef(positionFilters);
+  positionFiltersRef.current = positionFilters;
+  const employeeFiltersRef  = useRef(employeeFilters);
+  employeeFiltersRef.current  = employeeFilters;
+
+  const handlePositionFilterChange = (field, value) => {
+    // Update ref immediately so fetchRows reads the right value even before
+    // the React state update has propagated to the next render.
+    positionFiltersRef.current = { ...positionFiltersRef.current, [field]: value };
+    setPositionFilters({ ...positionFiltersRef.current });
+    // Force DataTable remount so the mount-effect fetch uses the updated params.
+    setRefreshKey((k) => k + 1);
+  };
+
+  const handleEmployeeFilterChange = (field, value) => {
+    employeeFiltersRef.current = { ...employeeFiltersRef.current, [field]: value };
+    setEmployeeFilters({ ...employeeFiltersRef.current });
+    setRefreshKey((k) => k + 1);
+  };
+
+  const handleResetFilters = () => {
+    if (activeTab === 'positions') {
+      const cleared = { project_id: undefined, office_id: undefined, department: undefined, status: undefined };
+      positionFiltersRef.current = cleared;
+      setPositionFilters(cleared);
+    } else if (activeTab === 'employees') {
+      const cleared = { position_id: undefined, status: undefined, gender: undefined };
+      employeeFiltersRef.current = cleared;
+      setEmployeeFilters(cleared);
+    }
+    setRefreshKey((k) => k + 1);
+  };
+
+  const departmentOptions = useMemo(() => {
+    const depts = new Set(positions.map((p) => p.department).filter(Boolean));
+    return Array.from(depts).sort().map((d) => ({ label: d, value: d }));
+  }, [positions]);
+
+  // Build the extra-param objects that get merged into every DataTable fetch call.
+  // DataTable re-fetches page 1 automatically whenever these change.
+  const positionExtraParams = useMemo(() => {
+    const p = {};
+    if (positionFilters.project_id != null) p.project_id = positionFilters.project_id;
+    if (positionFilters.office_id  != null) p.office_id  = positionFilters.office_id;
+    if (positionFilters.department != null) p.department = positionFilters.department;
+    if (positionFilters.status     != null) p.status     = positionFilters.status;
+    return p;
+  }, [positionFilters]);
+
+  const employeeExtraParams = useMemo(() => {
+    const p = {};
+    if (employeeFilters.position_id != null) p.position_id = employeeFilters.position_id;
+    if (employeeFilters.status      != null) p.status      = employeeFilters.status;
+    if (employeeFilters.gender      != null) p.gender      = employeeFilters.gender;
+    return p;
+  }, [employeeFilters]);
 
   const loadLookups = async () => {
     try {
@@ -65,7 +193,10 @@ const OrganizationStructure = () => {
   const projectOptions = useMemo(() => projects.map((row) => ({ label: `${row.code} - ${row.name}`, value: row.id })), [projects]);
   const officeOptions = useMemo(() => offices.map((row) => ({ label: row.name, value: row.id })), [offices]);
   const positionOptions = useMemo(
-    () => positions.map((row) => ({ label: `${row.code} - ${row.name}`, value: row.id })),
+    () => positions.map((row) => ({
+      label: `${row.code} - ${row.name}${row.employee_name ? ` (${row.employee_name})` : ''}`,
+      value: row.id,
+    })),
     [positions],
   );
   const roleOptions = useMemo(
@@ -76,7 +207,24 @@ const OrganizationStructure = () => {
     [roles],
   );
 
-  const fetchRows = (entity) => (params) => api.get(ENDPOINTS[entity], { params });
+  // fetchRows reads from refs so it always has current filter values, even on
+  // a freshly remounted DataTable whose closure was captured before state settled.
+  const fetchRows = (entity) => (params) => {
+    const finalParams = { ...params };
+    if (entity === 'positions') {
+      const f = positionFiltersRef.current;
+      if (f.project_id != null) finalParams.project_id = f.project_id;
+      if (f.office_id  != null) finalParams.office_id  = f.office_id;
+      if (f.department != null) finalParams.department = f.department;
+      if (f.status     != null) finalParams.status     = f.status;
+    } else if (entity === 'employees') {
+      const f = employeeFiltersRef.current;
+      if (f.position_id != null) finalParams.position_id = f.position_id;
+      if (f.status      != null) finalParams.status      = f.status;
+      if (f.gender      != null) finalParams.gender      = f.gender;
+    }
+    return api.get(ENDPOINTS[entity], { params: finalParams });
+  };
 
   const openAdd = () => {
     setEditingRow(null);
@@ -242,38 +390,75 @@ const OrganizationStructure = () => {
     positions: [
       { title: 'Code', dataIndex: 'code', width: 150 },
       { title: 'Position', dataIndex: 'name', width: 220 },
+      {
+        title: 'Employee',
+        key: 'employee',
+        width: 180,
+        render: (_, record) => {
+          if (record.employee_name) {
+            return `${record.employee_code ? `[${record.employee_code}] ` : ''}${record.employee_name}`;
+          }
+          return <span style={{ color: '#aaa', fontStyle: 'italic' }}>Unassigned</span>;
+        },
+      },
       { title: 'Role', dataIndex: 'role_name', width: 150 },
-      { title: 'Role Code', dataIndex: 'role_code', width: 130 },
-      { title: 'Level', dataIndex: 'level_name', width: 110 },
-      { title: 'Department', dataIndex: 'department', width: 140 },
-      { title: 'Project', dataIndex: 'project_name', width: 160 },
-      { title: 'Office', dataIndex: 'office_name', width: 160 },
-      { title: 'Reports To', dataIndex: 'parent_position_name', width: 160 },
+      { title: 'Role Code', dataIndex: 'role_code', width: 100 },
+      { title: 'Level', dataIndex: 'level_name', width: 100 },
+      { title: 'Rank', dataIndex: 'level_rank', width: 70 },
+      { title: 'Department', dataIndex: 'department', width: 130 },
+      { title: 'Section', dataIndex: 'section', width: 120 },
+      { title: 'Job', dataIndex: 'job_name', width: 140 },
+      { title: 'Job Family', dataIndex: 'job_family_name', width: 140 },
+      { title: 'Status', dataIndex: 'position_status', width: 100 },
+      { title: 'Start Date', dataIndex: 'start_date', width: 110, render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '-' },
+      { title: 'Project', dataIndex: 'project_name', width: 150 },
+      { title: 'Office', dataIndex: 'office_name', width: 150 },
+      { title: 'Reports To', dataIndex: 'parent_position_name', width: 150 },
+      {
+        title: 'Hierarchy',
+        key: 'hierarchy',
+        width: 320,
+        render: (_, record) => renderHierarchy(record.hierarchy),
+      },
       actionColumn,
     ],
     employees: [
       { title: 'Employee Code', dataIndex: 'employee_code', width: 160 },
       { title: 'Name', dataIndex: 'name', width: 220 },
-      { title: 'Status', dataIndex: 'status', width: 110 },
+      { title: 'Status', dataIndex: 'status', width: 100 },
+      { title: 'Gender', dataIndex: 'gender', width: 90 },
+      { title: 'DOB', dataIndex: 'dob', width: 110, render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '-' },
       { title: 'Phone', dataIndex: 'phone', width: 140 },
       { title: 'Email', dataIndex: 'email', width: 220 },
+      { title: 'PAN', dataIndex: 'pan_number', width: 120 },
+      { title: 'Aadhaar', dataIndex: 'aadhaar_number', width: 130 },
       {
         title: 'Positions',
         key: 'positions',
         width: 280,
         render: (_, record) => {
-          // Handle positions array (future backend support for multiple positions)
+          // Helper: format a single position object as "code – name"
+          const posLabel = (p) => {
+            if (typeof p !== 'object' || !p) return typeof p === 'string' ? p : '';
+            const code = p.code || '';
+            const name = p.name || '';
+            return code && name ? `${code} – ${name}` : code || name;
+          };
+
+          // Multiple positions (positions relationship loaded)
           if (record.positions && Array.isArray(record.positions) && record.positions.length > 0) {
+            const uniquePositions = deduplicatePositions(record.positions);
             return (
               <Space size={[0, 4]} wrap>
-                {record.positions.map((p, i) => {
-                  const label = typeof p === 'object' ? (p.name || p.position_name || '') : p;
+                {uniquePositions.map((p, i) => {
+                  const label = posLabel(p);
                   return label ? <Tag key={i} color="blue">{label}</Tag> : null;
                 })}
               </Space>
             );
           }
-          // Handle pipe-separated position_name (fallback for legacy data)
+
+          // Pipe-separated fallback for legacy multi-position data
           if (record.position_name && record.position_name.includes('|')) {
             const parts = record.position_name.split('|').map((s) => s.trim()).filter(Boolean);
             if (parts.length > 1) {
@@ -284,9 +469,23 @@ const OrganizationStructure = () => {
               );
             }
           }
-          // Single position (current behavior)
-          return record.position_name || record.designation || '-';
+
+          // Single position – show code – name
+          if (record.position_name || record.position_code) {
+            const label = record.position_code
+              ? `${record.position_code} – ${record.position_name || ''}`
+              : record.position_name;
+            return <Tag color="blue">{label}</Tag>;
+          }
+
+          return record.designation || <span style={{ color: '#aaa', fontStyle: 'italic' }}>None</span>;
         },
+      },
+      {
+        title: 'Hierarchy',
+        key: 'hierarchy',
+        width: 320,
+        render: (_, record) => renderHierarchy(record.hierarchy),
       },
       employeeActionColumn,
     ],
@@ -477,10 +676,112 @@ const OrganizationStructure = () => {
           { key: 'employees', label: 'Employees' },
         ]}
       />
+      {/* Filter Bar */}
+      {(activeTab === 'positions' || activeTab === 'employees') && (
+        <div style={{
+          marginBottom: 16,
+          padding: 16,
+          background: '#fff',
+          borderRadius: 8,
+          border: '1px solid #f0f0f0',
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 12,
+          alignItems: 'center',
+        }}>
+          <span style={{ fontWeight: 500, marginRight: 4 }}>Filters:</span>
+          
+          {activeTab === 'positions' && (
+            <>
+              <Select
+                placeholder="Filter by Project"
+                style={{ width: 180 }}
+                allowClear
+                options={projectOptions}
+                value={positionFilters.project_id}
+                onChange={(val) => handlePositionFilterChange('project_id', val)}
+              />
+              <Select
+                placeholder="Filter by Office"
+                style={{ width: 180 }}
+                allowClear
+                options={officeOptions}
+                value={positionFilters.office_id}
+                onChange={(val) => handlePositionFilterChange('office_id', val)}
+              />
+              <Select
+                placeholder="Filter by Department"
+                style={{ width: 180 }}
+                allowClear
+                options={departmentOptions}
+                value={positionFilters.department}
+                onChange={(val) => handlePositionFilterChange('department', val)}
+              />
+              <Select
+                placeholder="Filter by Status"
+                style={{ width: 140 }}
+                allowClear
+                options={[
+                  { label: 'Active', value: 'active' },
+                  { label: 'Inactive', value: 'inactive' },
+                ]}
+                value={positionFilters.status}
+                onChange={(val) => handlePositionFilterChange('status', val)}
+              />
+            </>
+          )}
+
+          {activeTab === 'employees' && (
+            <>
+              <Select
+                placeholder="Filter by Position"
+                style={{ width: 220 }}
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                options={positionOptions}
+                value={employeeFilters.position_id}
+                onChange={(val) => handleEmployeeFilterChange('position_id', val)}
+              />
+              <Select
+                placeholder="Filter by Status"
+                style={{ width: 140 }}
+                allowClear
+                options={[
+                  { label: 'Active', value: 'Active' },
+                  { label: 'Inactive', value: 'Inactive' },
+                  { label: 'Relieved', value: 'Relieved' },
+                ]}
+                value={employeeFilters.status}
+                onChange={(val) => handleEmployeeFilterChange('status', val)}
+              />
+              <Select
+                placeholder="Filter by Gender"
+                style={{ width: 120 }}
+                allowClear
+                options={[
+                  { label: 'Male', value: 'Male' },
+                  { label: 'Female', value: 'Female' },
+                  { label: 'Other', value: 'Other' },
+                ]}
+                value={employeeFilters.gender}
+                onChange={(val) => handleEmployeeFilterChange('gender', val)}
+              />
+            </>
+          )}
+
+          <Button onClick={handleResetFilters}>Reset</Button>
+        </div>
+      )}
       <DataTable
         key={`${activeTab}-${refreshKey}`}
         columns={columnsByTab[activeTab]}
         fetchFunction={fetchRows(activeTab)}
+        extraParams={
+          activeTab === 'positions' ? positionExtraParams
+          : activeTab === 'employees' ? employeeExtraParams
+          : undefined
+        }
         rowKey="id"
         searchPlaceholder={`Search ${titleByTab[activeTab].toLowerCase()}s...`}
         exportFileName={`organization_${activeTab}`}

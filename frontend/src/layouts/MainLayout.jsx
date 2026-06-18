@@ -472,7 +472,7 @@ const MainLayout = () => {
   const { user, logout, hasPermission } = useAuthStore();
   const allowedKeys = useAuthStore((s) => s.allowedKeys);
   const setSidebar = useAuthStore((s) => s.setSidebar);
-  const { collapsed, toggleSidebar, notifications, unreadCount, markAllRead } =
+  const { collapsed, toggleSidebar, notifications, unreadCount, markAllRead, fetchNotifications } =
     useAppStore();
 
   // Task 7: hydrate the server-driven sidebar on mount. If the call fails
@@ -493,6 +493,13 @@ const MainLayout = () => {
       cancelled = true;
     };
   }, [user?.id, setSidebar]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    fetchNotifications();
+    const interval = setInterval(fetchNotifications, 30_000);
+    return () => clearInterval(interval);
+  }, [user?.id, fetchNotifications]);
 
   const useServerMenu = allowedKeys && allowedKeys.length > 0;
   const allowedSet = useMemo(

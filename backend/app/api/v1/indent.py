@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from datetime import datetime, timezone, timedelta
@@ -103,6 +103,15 @@ async def list_indents(
         query = query.where(Indent.project_id == project_id)
         count_query = count_query.where(Indent.project_id == project_id)
 
+    # Temporary debug logging
+    try:
+        with open("indent_debug.log", "a") as f:
+            f.write(f"\n--- REQUEST at {datetime.now()} ---\n")
+            f.write(f"User ID: {current_user.id}, Username: {current_user.username}\n")
+            f.write(f"Params - Status: {status}, Type: {indent_type}, WH: {warehouse_id}, Proj: {project_id}\n")
+    except Exception:
+        pass
+
     # Filter for indents pending acknowledgement (approved/fulfilled but not yet acknowledged)
     if pending_acknowledgement:
         query = query.where(
@@ -174,41 +183,102 @@ async def list_indents(
     # Roles that need org-wide visibility to do their job properly.
     _ORG_WIDE_CODES = frozenset({
         "super_admin", "admin",
-        "warehouse_manager", "store_keeper", "purchase_manager",
+        "purchase_manager",
     })
     from app.utils.dependencies import get_user_role_codes
     role_codes = set(await get_user_role_codes(db, current_user.id))
     is_admin = bool(_ORG_WIDE_CODES & role_codes)
+
+    from app.models.settings_master import Employee, Position
+    from app.models.approval import ProjectWorkflowConfig
+    from app.models.user import User as UserModel
+    from app.services.approval_service import get_position_descendants
+
+    user_pos_id = None
+    user_role_id = current_user.active_role_id
+    desc_user_ids = []
+    allowed_proj_ids = []
+
+    if current_user.employee_id:
+        emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
+        emp = emp_res.scalar_one_or_none()
+        if emp and emp.position_id:
+            user_pos_id = emp.position_id
+            if user_role_id is None:
+                pos_res = await db.execute(select(Position).where(Position.id == emp.position_id))
+                pos = pos_res.scalar_one_or_none()
+                if pos:
+                    user_role_id = pos.role_id
+
+    if user_pos_id:
+        descendants = await get_position_descendants(db, user_pos_id)
+        desc_pos_ids = [d.id for d in descendants]
+        if desc_pos_ids:
+            desc_emps_res = await db.execute(
+                select(Employee.id).where(Employee.position_id.in_(desc_pos_ids))
+            )
+            desc_emp_ids = [r[0] for r in desc_emps_res.all()]
+            if desc_emp_ids:
+                desc_users_res = await db.execute(
+                    select(UserModel.id).where(UserModel.employee_id.in_(desc_emp_ids))
+                )
+                desc_user_ids = [r[0] for r in desc_users_res.all()]
+
+    if user_role_id:
+        proj_cfg_res = await db.execute(
+            select(ProjectWorkflowConfig.project_id).where(
+                ProjectWorkflowConfig.role_id == user_role_id,
+                ProjectWorkflowConfig.indent_view == True
+            )
+        )
+        allowed_proj_ids = [r[0] for r in proj_cfg_res.all()]
+
     if not is_admin:
         is_field_only = (
             bool(role_codes)
             and role_codes.issubset(_FIELD_ONLY_CODES)
         )
-        if is_field_only:
-            # Hard scope: only what the user themselves raised.
-            query = query.where(Indent.raised_by == current_user.id)
-            count_query = count_query.where(Indent.raised_by == current_user.id)
-        else:
-            # Operator / non-admin manager scope: own + warehouse-assigned
-            # + project-assigned. Without an explicit warehouse mapping
-            # they see only what they raised.
-            wh_ids = await user_warehouse_ids(db, current_user.id)
-            from sqlalchemy import or_
-            scope = Indent.raised_by == current_user.id
-            if wh_ids:
-                scope = or_(scope, Indent.warehouse_id.in_(wh_ids))
-            try:
-                from app.models.user import UserProject
-                up_rows = await db.execute(
-                    select(UserProject.project_id).where(UserProject.user_id == current_user.id)
+        _FULFILLMENT_ROLES = frozenset({"store_keeper", "storekeeper", "warehouse_manager"})
+        is_fulfillment = bool(_FULFILLMENT_ROLES & role_codes)
+        
+        from app.models.user import UserWarehouse
+        has_any_wh_assignment = (await db.execute(
+            select(func.count(UserWarehouse.id)).where(UserWarehouse.user_id == current_user.id)
+        )).scalar() > 0
+
+        wh_ids = await user_warehouse_ids(db, current_user.id)
+        from app.utils.dependencies import get_warehouse_and_descendants
+        all_wh_ids = await get_warehouse_and_descendants(db, wh_ids)
+        from sqlalchemy import or_
+        scope = Indent.raised_by == current_user.id
+        
+        if is_fulfillment:
+            if all_wh_ids:
+                scope = or_(
+                    scope,
+                    and_(Indent.status.in_(["approved", "partially_fulfilled"]), Indent.warehouse_id.in_(all_wh_ids))
                 )
-                user_proj_ids = [r[0] for r in up_rows.all()]
-                if user_proj_ids:
-                    scope = or_(scope, Indent.project_id.in_(user_proj_ids))
-            except Exception:
-                pass
-            query = query.where(scope)
-            count_query = count_query.where(scope)
+            elif not has_any_wh_assignment:
+                scope = or_(scope, Indent.status.in_(["approved", "partially_fulfilled"]))
+        if allowed_proj_ids:
+            scope = or_(scope, Indent.project_id.in_(allowed_proj_ids))
+        if desc_user_ids:
+            scope = or_(scope, Indent.raised_by.in_(desc_user_ids))
+        if all_wh_ids and not is_field_only:
+            scope = or_(scope, Indent.warehouse_id.in_(all_wh_ids))
+            
+        try:
+            from app.models.user import UserProject
+            up_rows = await db.execute(
+                select(UserProject.project_id).where(UserProject.user_id == current_user.id)
+            )
+            user_proj_ids = [r[0] for r in up_rows.all()]
+            if user_proj_ids:
+                scope = or_(scope, Indent.project_id.in_(user_proj_ids))
+        except Exception:
+            pass
+        query = query.where(scope)
+        count_query = count_query.where(scope)
 
 
     query = apply_search_filter(query, Indent, search, ["indent_number", "department"])
@@ -260,16 +330,11 @@ async def list_indents(
             # Build a quick lookup of raised_by per indent so we can deny
             # the originator (admin overrides keep the original behavior).
             indent_raisers = {ind.id: ind.raised_by for ind in indents}
+            from app.services.approval_service import can_user_approve
             for ar in ars:
-                lvl = lvl_by_key.get((ar.workflow_id, ar.current_level))
-                can_now = is_admin_bypass
-                if lvl is not None and not can_now:
-                    if lvl.approver_user_id == current_user.id:
-                        can_now = True
-                    elif lvl.approver_role_id and lvl.approver_role_id in user_role_ids:
-                        can_now = True
+                can_now = await can_user_approve(db, ar.id, current_user.id)
                 # Raiser cannot approve their own indent, even if their
-                # role grants them L1 authority. Admins keep override.
+                # role grants them authority. Admins keep override.
                 if (
                     not is_admin_bypass
                     and indent_raisers.get(ar.document_id) == current_user.id
@@ -348,26 +413,99 @@ async def get_indent(
 
     # Bug fix R-004 — originator must ALWAYS be able to see their own indent,
     # regardless of role/warehouse. Check that first before any other gates.
+    from app.models.settings_master import Employee, Position
+    from app.models.approval import ProjectWorkflowConfig
+    from app.models.user import User as UserModel
+    from app.services.approval_service import get_position_descendants
+
+    user_pos_id = None
+    user_role_id = current_user.active_role_id
+    desc_user_ids = []
+
+    if current_user.employee_id:
+        emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
+        emp = emp_res.scalar_one_or_none()
+        if emp and emp.position_id:
+            user_pos_id = emp.position_id
+            if user_role_id is None:
+                pos_res = await db.execute(select(Position).where(Position.id == emp.position_id))
+                pos = pos_res.scalar_one_or_none()
+                if pos:
+                    user_role_id = pos.role_id
+
+    if user_pos_id:
+        descendants = await get_position_descendants(db, user_pos_id)
+        desc_pos_ids = [d.id for d in descendants]
+        if desc_pos_ids:
+            desc_emps_res = await db.execute(
+                select(Employee.id).where(Employee.position_id.in_(desc_pos_ids))
+            )
+            desc_emp_ids = [r[0] for r in desc_emps_res.all()]
+            if desc_emp_ids:
+                desc_users_res = await db.execute(
+                    select(UserModel.id).where(UserModel.employee_id.in_(desc_emp_ids))
+                )
+                desc_user_ids = [r[0] for r in desc_users_res.all()]
+
+    # Bug fix R-004 — originator must ALWAYS be able to see their own indent,
+    # regardless of role/warehouse. Check that first before any other gates.
     is_originator = (indent.raised_by is not None and indent.raised_by == current_user.id)
 
     if not is_originator:
-        # ACCESS SCOPING — strict role-based.
-        # • Managerial roles: full visibility.
-        # • Field-only roles: their own raised indents only (handled by
-        #   is_originator above — anything reaching here is not theirs).
-        # • Operator roles: warehouse-scoped.
-        if not await user_is_managerial(db, current_user.id):
-            from app.utils.dependencies import get_user_role_codes
-            _FIELD_ONLY_CODES = frozenset({
-                "field_staff", "field_supervisor", "field_user", "field_operator",
-                "nurse", "pharmacy_assistant", "site_user",
-            })
-            role_codes = set(await get_user_role_codes(db, current_user.id))
-            is_field_only = bool(role_codes) and role_codes.issubset(_FIELD_ONLY_CODES)
-            if is_field_only:
-                raise HTTPException(status_code=403, detail="Not authorized to view this indent")
-            wh_ids = await user_warehouse_ids(db, current_user.id)
-            if indent.warehouse_id not in wh_ids:
+        from app.utils.dependencies import get_user_role_codes
+        role_codes = set(await get_user_role_codes(db, current_user.id))
+        is_admin = bool({"super_admin", "admin"} & role_codes)
+        if not is_admin:
+            allowed = False
+            if user_role_id and indent.project_id:
+                cfg_check = await db.execute(
+                    select(ProjectWorkflowConfig).where(
+                        ProjectWorkflowConfig.project_id == indent.project_id,
+                        ProjectWorkflowConfig.role_id == user_role_id,
+                        ProjectWorkflowConfig.indent_view == True
+                    )
+                )
+                if cfg_check.scalar_one_or_none():
+                    allowed = True
+            
+            if not allowed and desc_user_ids and indent.raised_by in desc_user_ids:
+                allowed = True
+                
+            if not allowed:
+                wh_ids = await user_warehouse_ids(db, current_user.id)
+                from app.utils.dependencies import get_warehouse_and_descendants
+                all_wh_ids = await get_warehouse_and_descendants(db, wh_ids)
+                if indent.warehouse_id in all_wh_ids:
+                    allowed = True
+            
+            if not allowed:
+                _FULFILLMENT_ROLES = frozenset({"store_keeper", "storekeeper", "warehouse_manager"})
+                is_fulfillment = bool(_FULFILLMENT_ROLES & role_codes)
+                if is_fulfillment and indent.status in ("approved", "partially_fulfilled"):
+                    wh_ids = await user_warehouse_ids(db, current_user.id)
+                    from app.utils.dependencies import get_warehouse_and_descendants
+                    all_wh_ids = await get_warehouse_and_descendants(db, wh_ids)
+                    from app.models.user import UserWarehouse
+                    has_any_wh_assignment = (await db.execute(
+                        select(func.count(UserWarehouse.id)).where(UserWarehouse.user_id == current_user.id)
+                    )).scalar() > 0
+                    if (all_wh_ids and indent.warehouse_id in all_wh_ids) or (not all_wh_ids and not has_any_wh_assignment):
+                        allowed = True
+
+            if not allowed:
+                try:
+                    from app.models.user import UserProject
+                    up_rows = await db.execute(
+                        select(UserProject.project_id).where(
+                            UserProject.user_id == current_user.id,
+                            UserProject.project_id == indent.project_id
+                        )
+                    )
+                    if up_rows.all():
+                        allowed = True
+                except Exception:
+                    pass
+            if not allowed:
                 raise HTTPException(status_code=403, detail="Not authorized to view this indent")
 
     data = IndentResponse.model_validate(indent).model_dump()
@@ -421,33 +559,13 @@ async def get_indent(
         if ar:
             data["current_workflow_level"] = ar.current_level
             data["total_workflow_levels"] = ar.total_levels
-            lvl_row = await db.execute(
-                select(ApprovalLevel)
-                .where(ApprovalLevel.workflow_id == ar.workflow_id)
-                .where(ApprovalLevel.level == ar.current_level)
-                .limit(1)
-            )
-            lvl = lvl_row.scalar_one_or_none()
             user_role_codes = set(await get_user_role_codes(db, current_user.id))
-            user_role_ids: set = set()
-            try:
-                from app.models.user import UserRole as _UR
-                ur_rows = await db.execute(
-                    select(_UR.role_id).where(_UR.user_id == current_user.id)
-                )
-                user_role_ids = {r[0] for r in ur_rows.all()}
-            except Exception:
-                pass
             is_admin_bypass = bool({"super_admin", "admin"} & user_role_codes)
-            can_now = is_admin_bypass
-            if lvl is not None and not can_now:
-                if lvl.approver_user_id == current_user.id:
-                    can_now = True
-                elif lvl.approver_role_id and lvl.approver_role_id in user_role_ids:
-                    can_now = True
+            from app.services.approval_service import can_user_approve
+            can_now = await can_user_approve(db, ar.id, current_user.id)
             # Never allow the raiser to approve their own indent, even if
-            # their role happens to match the current level.
-            if indent.raised_by == current_user.id:
+            # their position or role has authority.
+            if indent.raised_by == current_user.id and not is_admin_bypass:
                 can_now = False
             data["can_approve_now"] = bool(can_now)
 
@@ -575,6 +693,24 @@ async def create_indent(
         proj_ids = [r[0] for r in proj_rows.all()]
         if len(proj_ids) == 1:
             project_id = proj_ids[0]
+        else:
+            if current_user.employee_id and current_user.active_role_id:
+                from app.models.settings_master import Position
+                pos_q = await db.execute(
+                    select(Position.project_id).where(
+                        Position.employee_id == current_user.employee_id,
+                        Position.role_id == current_user.active_role_id
+                    )
+                )
+                project_id = pos_q.scalar_one_or_none()
+            if project_id is None and current_user.employee_id:
+                from app.models.settings_master import Employee, Position
+                emp_q = await db.execute(
+                    select(Position.project_id)
+                    .join(Employee, Employee.position_id == Position.id)
+                    .where(Employee.id == current_user.employee_id)
+                )
+                project_id = emp_q.scalar_one_or_none()
     if warehouse_id is None:
         raise HTTPException(
             status_code=422,
@@ -634,7 +770,9 @@ async def update_indent(
     is_originator = indent.raised_by == current_user.id
     if not (is_admin or is_originator):
         wh_ids = await user_warehouse_ids(db, current_user.id)
-        if indent.warehouse_id not in wh_ids:
+        from app.utils.dependencies import get_warehouse_and_descendants
+        all_wh_ids = await get_warehouse_and_descendants(db, wh_ids)
+        if indent.warehouse_id not in all_wh_ids:
             raise HTTPException(
                 status_code=403,
                 detail="Not authorized to update this indent",

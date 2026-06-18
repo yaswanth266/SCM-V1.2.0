@@ -264,6 +264,30 @@ async def ensure_organization_structure_schema(session: AsyncSession) -> None:
     await conn.run_sync(Position.__table__.create, checkfirst=True)
     await conn.run_sync(Employee.__table__.create, checkfirst=True)
 
+    # Wave 11C — add HRMS API extra columns if missing
+    for col_name, col_ddl in (
+        ("job_name", "ALTER TABLE positions ADD COLUMN job_name VARCHAR(100) NULL"),
+        ("job_family_name", "ALTER TABLE positions ADD COLUMN job_family_name VARCHAR(100) NULL"),
+        ("job_family_id", "ALTER TABLE positions ADD COLUMN job_family_id BIGINT NULL"),
+        ("role_type_id", "ALTER TABLE positions ADD COLUMN role_type_id BIGINT NULL"),
+        ("status", "ALTER TABLE positions ADD COLUMN status VARCHAR(50) DEFAULT 'active'"),
+        ("start_date", "ALTER TABLE positions ADD COLUMN start_date DATETIME NULL"),
+        ("hire_date", "ALTER TABLE employees ADD COLUMN hire_date DATE NULL"),
+        ("bank_details", "ALTER TABLE employees ADD COLUMN bank_details JSON NULL"),
+    ):
+        col_check = (await conn.execute(text("""
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = DATABASE() AND table_name = :table AND column_name = :col
+            LIMIT 1
+        """), {"table": "positions" if col_name != "hire_date" and col_name != "bank_details" else "employees",
+                "col": col_name})).scalar_one_or_none()
+        if col_check is None:
+            tab = "positions" if col_name not in ("hire_date", "bank_details") else "employees"
+            try:
+                await conn.execute(text(col_ddl))
+            except Exception:
+                pass
+
     position_role_exists = (await conn.execute(text("""
         SELECT 1
         FROM information_schema.columns
@@ -1042,10 +1066,30 @@ async def ensure_universal_dispatch_ack_schema(session: AsyncSession) -> None:
         DispatchAcknowledgementDocument,
         DispatchOrderItem
     )
+    from app.models.dispatch_custody import DispatchCustodyTransfer
     await conn.run_sync(DispatchDeliveryAcknowledgement.__table__.create, checkfirst=True)
     await conn.run_sync(DispatchAcknowledgementItem.__table__.create, checkfirst=True)
     await conn.run_sync(DispatchAcknowledgementDocument.__table__.create, checkfirst=True)
     await conn.run_sync(DispatchOrderItem.__table__.create, checkfirst=True)
+    await conn.run_sync(DispatchCustodyTransfer.__table__.create, checkfirst=True)
+
+    custody_columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'dispatch_custody_transfers'
+        """))).all()
+    }
+    if "seal_intact" not in custody_columns:
+        await conn.execute(text("ALTER TABLE dispatch_custody_transfers ADD COLUMN seal_intact TINYINT(1) NULL"))
+    if "packaging_condition" not in custody_columns:
+        await conn.execute(text("ALTER TABLE dispatch_custody_transfers ADD COLUMN packaging_condition VARCHAR(50) NULL"))
+    if "discrepancy_reported" not in custody_columns:
+        await conn.execute(text("ALTER TABLE dispatch_custody_transfers ADD COLUMN discrepancy_reported TINYINT(1) NULL"))
+    if "remarks" not in custody_columns:
+        await conn.execute(text("ALTER TABLE dispatch_custody_transfers ADD COLUMN remarks TEXT NULL"))
 
     # Safe dropping of legacy tables
     try:
@@ -1108,15 +1152,13 @@ async def ensure_universal_dispatch_ack_schema(session: AsyncSession) -> None:
         await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_location_longitude DECIMAL(11, 8) NULL"))
     if "delivery_location_verified" not in columns:
         await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN delivery_location_verified TINYINT(1) NOT NULL DEFAULT 0"))
+    if "dispatch_mode" not in columns:
+        await conn.execute(text("ALTER TABLE dispatch_orders ADD COLUMN dispatch_mode VARCHAR(50) NOT NULL DEFAULT 'direct'"))
     
     try:
         await conn.execute(text("""
             ALTER TABLE dispatch_orders 
-            MODIFY COLUMN status ENUM(
-                'draft', 'loading', 'loaded', 'dispatched', 'in_transit',
-                'out_for_delivery', 'delivered', 'acknowledged',
-                'partially_acknowledged', 'rejected', 'returned', 'cancelled'
-            ) DEFAULT 'draft'
+            MODIFY COLUMN status VARCHAR(50) DEFAULT 'draft'
         """))
     except Exception:
         pass

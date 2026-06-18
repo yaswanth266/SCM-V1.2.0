@@ -122,16 +122,45 @@ async def list_demand_pool(
     }
     buckets = defaultdict(Bucket)
 
+    from app.models.warehouse import Warehouse as _Wh
+    real_main_id = None
+    # Prioritize the designated primary 'CENTRAL' depot first
+    real_row = await db.execute(
+        select(_Wh.id)
+        .where(_Wh.type == "main")
+        .where(_Wh.name == "CENTRAL")
+        .where(_Wh.is_active == True)
+        .limit(1)
+    )
+    real_main_id = real_row.scalar()
+    
+    if not real_main_id:
+        # Fallback to other main/regional warehouses ordered by ID descending
+        real_row = await db.execute(
+            select(_Wh.id)
+            .where(_Wh.type.in_(("main", "regional")))
+            .where(_Wh.is_active == True)
+            .order_by(_Wh.id.desc())
+            .limit(1)
+        )
+        real_main_id = real_row.scalar()
+
+    def get_effective_wh(ind):
+        if not ind.warehouse_id:
+            return None
+        wh = ind.warehouse
+        if wh and (wh.type == "virtual" or "MOBILE UNIT" in (wh.name or "").upper()) and real_main_id:
+            return real_main_id
+        return ind.warehouse_id
+
     for ind in indents:
         if ind.id in legacy_indent_ids:
             continue  # already consumed by legacy 1:1 convert-to-mr
-        # BUG-PRO-070 fix: indents with NULL warehouse_id were all bucketed under
-        # the same key=(None, item_id, uom_id) — this silently collapsed demand
-        # from unrelated departments/projects into a single MR. Skip them and
-        # surface a separate "needs_warehouse" group instead so an operator picks
-        # a warehouse manually before consolidation.
-        if ind.warehouse_id is None:
+
+        eff_wh_id = get_effective_wh(ind)
+        if eff_wh_id is None:
             continue
+
         for it in (ind.items or []):
             # BUG-PRO-065 fix: an *explicit* approved_qty=0 means the approver
             # rejected the line — do NOT silently fall back to requested_qty.
@@ -162,10 +191,10 @@ async def list_demand_pool(
             else:
                 ident_status = "pending"
 
-            key = (ind.warehouse_id, it.item_id, it.uom_id)
+            key = (eff_wh_id, it.item_id, it.uom_id)
             b = buckets[key]
-            b["warehouse_id"] = ind.warehouse_id
-            b["warehouse_name"] = (ind.warehouse.name if ind.warehouse else None)
+            b["warehouse_id"] = eff_wh_id
+            b["warehouse_name"] = "CENTRAL" if eff_wh_id == real_main_id else (ind.warehouse.name if ind.warehouse else None)
             b["item_id"] = it.item_id
             b["item_code"] = it.item.item_code if it.item else None
             b["item_name"] = it.item.name if it.item else None
@@ -239,9 +268,7 @@ async def list_demand_pool(
             stock_map[(it_id, wh_id)] = float(qty or 0)
 
     for b in buckets.values():
-        # The Source warehouse is ALWAYS the main/regional hub warehouse (CENTRAL)
-        # where materials are actually issued from to fulfill indents.
-        eff_wh = real_main_id if real_main_id else dest_wh
+        eff_wh = real_main_id if real_main_id else b["warehouse_id"]
         avail = stock_map.get((b["item_id"], eff_wh), 0.0)
         b["available_qty"] = avail
         b["stock_at_warehouse_id"] = eff_wh
@@ -339,32 +366,41 @@ async def consolidate_indents_to_mr(
             "Refresh the demand pool and retry.",
         )
 
-    # 2026-05-06 — Vehicle model: indents destined for a virtual warehouse
-    # (mobile unit / vehicle) must consolidate against CENTRAL. Pre-fetch the
-    # type for every distinct warehouse_id used by the loaded indents so we
-    # avoid lazy-loading `ind.warehouse` (which raises MissingGreenlet in
-    # async sessions).
     from app.models.warehouse import Warehouse as _Wh
+    # Prioritize the designated primary 'CENTRAL' depot first
     real_wh_id = (await db.execute(
         select(_Wh.id)
-        .where(_Wh.type.in_(("main", "regional")))
+        .where(_Wh.type == "main")
+        .where(_Wh.name == "CENTRAL")
         .where(_Wh.is_active == True)
-        .order_by(_Wh.id.asc())
         .limit(1)
     )).scalar()
+    
+    if not real_wh_id:
+        real_wh_id = (await db.execute(
+            select(_Wh.id)
+            .where(_Wh.type.in_(("main", "regional")))
+            .where(_Wh.is_active == True)
+            .order_by(_Wh.id.desc())
+            .limit(1)
+        )).scalar()
+
     wh_ids_in_play = {ind.warehouse_id for ind in indents if ind.warehouse_id}
-    wh_type_map: dict[int, str] = {}
+    wh_info_map: dict[int, tuple[str, str]] = {}
     if wh_ids_in_play:
-        type_rows = (await db.execute(
-            select(_Wh.id, _Wh.type).where(_Wh.id.in_(wh_ids_in_play))
+        info_rows = (await db.execute(
+            select(_Wh.id, _Wh.type, _Wh.name).where(_Wh.id.in_(wh_ids_in_play))
         )).all()
-        wh_type_map = {wid: wtype for wid, wtype in type_rows}
+        wh_info_map = {wid: (wtype, wname) for wid, wtype, wname in info_rows}
 
     def _eff_wh(ind_wh_id):
         if ind_wh_id is None:
             return None
-        if wh_type_map.get(ind_wh_id) == "virtual" and real_wh_id:
-            return real_wh_id
+        info = wh_info_map.get(ind_wh_id)
+        if info:
+            wtype, wname = info
+            if (wtype == "virtual" or "MOBILE UNIT" in (wname or "").upper()) and real_wh_id:
+                return real_wh_id
         return ind_wh_id
 
     # Group by warehouse → then by (item_id, uom_id)

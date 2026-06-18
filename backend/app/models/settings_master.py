@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Text, Boolean, DateTime, Date, ForeignKey, Integer
+from sqlalchemy import Column, BigInteger, String, Text, Boolean, DateTime, Date, ForeignKey, Integer, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.database import Base
@@ -78,6 +78,13 @@ class Position(Base):
     level_rank = Column(Integer)
     department = Column(String(100))
     section = Column(String(100))
+    # Wave 11C — additional fields from HRMS API
+    job_name = Column(String(100))
+    job_family_name = Column(String(100))
+    job_family_id = Column(BigInteger)
+    role_type_id = Column(BigInteger)
+    status = Column(String(50), default="active")
+    start_date = Column(DateTime)
     project_id = Column(BigInteger, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     office_id = Column(BigInteger, ForeignKey("offices.id", ondelete="SET NULL"), nullable=True)
     parent_position_id = Column(BigInteger, ForeignKey("positions.id", ondelete="SET NULL"), nullable=True)
@@ -107,6 +114,9 @@ class Employee(Base):
     aadhaar_number = Column(String(12))
     email = Column(String(100))
     phone = Column(String(15))
+    # Wave 11C — additional fields from HRMS API
+    hire_date = Column(Date)
+    bank_details = Column(JSON)
     position_id = Column(BigInteger, ForeignKey("positions.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

@@ -125,6 +125,7 @@ class StatusPayload(BaseModel):
 
 async def _build_user_response(db: AsyncSession, u, roles_loaded=True):
     """Build a UserResponse from a User model instance."""
+    from app.schemas.auth import WarehouseInfo, ProjectInfo
     full_name = u.first_name
     if u.last_name:
         full_name = f"{u.first_name} {u.last_name}"
@@ -134,6 +135,30 @@ async def _build_user_response(db: AsyncSession, u, roles_loaded=True):
         for ur in u.roles:
             if ur.role:
                 role_list.append(RoleInfo(id=ur.role.id, code=ur.role.code, name=ur.role.name))
+
+    # Build warehouse list with names (and role info if set)
+    warehouse_list = []
+    if u.warehouses:
+        from app.models.warehouse import Warehouse
+        wh_ids = [uw.warehouse_id for uw in u.warehouses]
+        wh_rows = (await db.execute(
+            select(Warehouse.id, Warehouse.name).where(Warehouse.id.in_(wh_ids))
+        )).all()
+        wh_name_map = {row.id: row.name for row in wh_rows}
+        for uw in u.warehouses:
+            warehouse_list.append(WarehouseInfo(
+                id=uw.warehouse_id,
+                name=wh_name_map.get(uw.warehouse_id),
+                role_id=uw.role_id if hasattr(uw, 'role_id') else None,
+                role_name=(uw.role.name if hasattr(uw, 'role') and uw.role else None),
+            ))
+
+    # Build project list
+    project_list = []
+    if u.projects:
+        for up in u.projects:
+            if up.project:
+                project_list.append(ProjectInfo(id=up.project.id, name=up.project.name))
 
     # Ensure employee is loaded/resolved
     employee_position_id = None
@@ -161,7 +186,8 @@ async def _build_user_response(db: AsyncSession, u, roles_loaded=True):
         designation=u.designation, is_active=u.is_active,
         status="active" if u.is_active else "inactive",
         last_login=u.last_login, created_at=u.created_at,
-        roles=role_list, positions=positions_list, permissions=[],
+        roles=role_list, warehouses=warehouse_list, projects=project_list,
+        positions=positions_list, permissions=[],
     )
 
 
@@ -342,9 +368,13 @@ async def create_user(
     for role_id in (payload.role_ids or []):
         db.add(UserRole(user_id=user.id, role_id=role_id))
 
-    # Assign warehouses
-    for wh_id in (payload.warehouse_ids or []):
-        db.add(UserWarehouse(user_id=user.id, warehouse_id=wh_id))
+    # Assign warehouses with optional per-role mapping
+    for assignment in (payload.warehouse_assignments or []):
+        db.add(UserWarehouse(
+            user_id=user.id,
+            warehouse_id=assignment.warehouse_id,
+            role_id=assignment.role_id,
+        ))
 
     # Assign projects
     for proj_id in (payload.project_ids or []):
@@ -352,10 +382,12 @@ async def create_user(
 
     await db.flush()
 
-    # Reload with roles
+    # Reload with roles, warehouses, and projects
     result = await db.execute(
         select(User).options(
             selectinload(User.roles).selectinload(UserRole.role),
+            selectinload(User.warehouses).selectinload(UserWarehouse.role),
+            selectinload(User.projects).selectinload(UserProject.project),
             selectinload(User.employee)
         )
         .where(User.id == user.id)
@@ -496,7 +528,7 @@ async def list_users(
         .join(Role, Position.role_id == Role.id, isouter=True)
         .options(
             selectinload(User.roles).selectinload(UserRole.role),
-            selectinload(User.warehouses),
+            selectinload(User.warehouses).selectinload(UserWarehouse.role),
             selectinload(User.projects).selectinload(UserProject.project),
         )
     )
@@ -617,6 +649,8 @@ async def get_user(
     result = await db.execute(
         select(User).options(
             selectinload(User.roles).selectinload(UserRole.role),
+            selectinload(User.warehouses).selectinload(UserWarehouse.role),
+            selectinload(User.projects).selectinload(UserProject.project),
             selectinload(User.employee)
         )
         .where(User.id == user_id)
@@ -691,12 +725,16 @@ async def update_user(
         for role_id in role_ids:
             db.add(UserRole(user_id=user_id, role_id=role_id))
 
-    # Handle warehouse reassignment
-    warehouse_ids = update_data.pop("warehouse_ids", None)
-    if warehouse_ids is not None:
+    # Handle warehouse reassignment (role-warehouse mapping)
+    warehouse_assignments = update_data.pop("warehouse_assignments", None)
+    if warehouse_assignments is not None:
         await db.execute(delete(UserWarehouse).where(UserWarehouse.user_id == user_id))
-        for wh_id in warehouse_ids:
-            db.add(UserWarehouse(user_id=user_id, warehouse_id=wh_id))
+        for assignment in warehouse_assignments:
+            db.add(UserWarehouse(
+                user_id=user_id,
+                warehouse_id=assignment["warehouse_id"] if isinstance(assignment, dict) else assignment.warehouse_id,
+                role_id=assignment.get("role_id") if isinstance(assignment, dict) else assignment.role_id,
+            ))
 
     # Handle project reassignment
     project_ids = update_data.pop("project_ids", None)
@@ -721,10 +759,12 @@ async def update_user(
     await _sync_employee_link(db, user, employee_id)
     await db.flush()
 
-    # Reload with roles
+    # Reload with roles, warehouses, and projects
     result = await db.execute(
         select(User).options(
             selectinload(User.roles).selectinload(UserRole.role),
+            selectinload(User.warehouses).selectinload(UserWarehouse.role),
+            selectinload(User.projects).selectinload(UserProject.project),
             selectinload(User.employee)
         )
         .where(User.id == user_id)
@@ -1161,7 +1201,16 @@ async def delete_office(
     return {"message": "Office deleted"}
 
 
-def _position_payload(row: Position, project_name=None, office_name=None, parent_name=None, role_name=None, role_code=None) -> dict:
+def _position_payload(
+    row: Position,
+    project_name=None,
+    office_name=None,
+    parent_name=None,
+    role_name=None,
+    role_code=None,
+    employee_name=None,
+    employee_code=None,
+) -> dict:
     return {
         "id": row.id,
         "name": row.name,
@@ -1173,12 +1222,22 @@ def _position_payload(row: Position, project_name=None, office_name=None, parent
         "level_rank": row.level_rank,
         "department": row.department,
         "section": row.section,
+        # Wave 11C - HRMS API extra fields
+        "job_name": row.job_name,
+        "job_family_name": row.job_family_name,
+        "job_family_id": row.job_family_id,
+        "role_type_id": row.role_type_id,
+        "position_status": row.status,
+        "start_date": row.start_date.isoformat() if row.start_date else None,
         "project_id": row.project_id,
         "office_id": row.office_id,
         "parent_position_id": row.parent_position_id,
         "project_name": project_name,
         "office_name": office_name,
         "parent_position_name": parent_name,
+        "employee_id": row.employee_id,
+        "employee_name": employee_name,
+        "employee_code": employee_code,
     }
 
 
@@ -1186,7 +1245,11 @@ def _position_payload(row: Position, project_name=None, office_name=None, parent
 async def list_positions(
     page: int = Query(1, ge=1),
     page_size: int = Query(200, ge=1, le=1000),
-    search: str = Query(None),
+    search: Optional[str] = None,
+    project_id: Optional[int] = None,
+    office_id: Optional[int] = None,
+    department: Optional[str] = None,
+    status: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1203,12 +1266,92 @@ async def list_positions(
     count_q = select(func.count(Position.id))
     if search:
         like = f"%{search}%"
-        condition = or_(Position.name.ilike(like), Position.code.ilike(like), Position.department.ilike(like), Position.role_name.ilike(like), Role.name.ilike(like), Role.code.ilike(like))
-        q = q.where(condition)
-        count_q = count_q.join(Role, Position.role_id == Role.id, isouter=True).where(condition)
+        condition = or_(
+            Position.name.ilike(like),
+            Position.code.ilike(like),
+            Position.department.ilike(like),
+            Position.role_name.ilike(like),
+            Role.name.ilike(like),
+            Role.code.ilike(like),
+            Employee.name.ilike(like),
+            Employee.employee_code.ilike(like)
+        )
+        q = q.join(Employee, or_(Position.employee_id == Employee.id, Employee.position_id == Position.id), isouter=True).where(condition).distinct()
+        count_q = (
+            select(func.count(Position.id.distinct()))
+            .join(Role, Position.role_id == Role.id, isouter=True)
+            .join(Employee, or_(Position.employee_id == Employee.id, Employee.position_id == Position.id), isouter=True)
+            .where(condition)
+        )
+    if project_id is not None:
+        q = q.where(Position.project_id == project_id)
+        count_q = count_q.where(Position.project_id == project_id)
+    if office_id is not None:
+        q = q.where(Position.office_id == office_id)
+        count_q = count_q.where(Position.office_id == office_id)
+    if department:
+        q = q.where(Position.department == department)
+        count_q = count_q.where(Position.department == department)
+    if status:
+        q = q.where(Position.status == status)
+        count_q = count_q.where(Position.status == status)
     total = (await db.execute(count_q)).scalar() or 0
     rows = (await db.execute(q.order_by(Position.level_rank.asc(), Position.name.asc()).offset(offset).limit(limit))).all()
-    items = [_position_payload(row, project_name, office_name, parent_name, role_name, role_code) for row, project_name, office_name, parent_name, role_name, role_code in rows]
+    
+    if rows:
+        pos_objs = [r[0] for r in rows]
+        position_ids = [p.id for p in pos_objs]
+        direct_employee_ids = [p.employee_id for p in pos_objs if p.employee_id is not None]
+        
+        emp_q = select(Employee).where(
+            or_(
+                Employee.position_id.in_(position_ids),
+                Employee.id.in_(direct_employee_ids)
+            )
+        )
+        emp_res = await db.execute(emp_q)
+        employees = {e.id: e for e in emp_res.scalars().all()}
+        
+        # Resolve ONE employee per position.
+        # Priority: Position.employee_id (direct) > Employee.position_id (reverse).
+        # This prevents the same employee from appearing under multiple positions
+        # when both mapping directions point to different positions.
+        pos_to_employee = {}
+        
+        # First pass: direct mapping (Position.employee_id)
+        for p in pos_objs:
+            if p.employee_id and p.employee_id in employees:
+                pos_to_employee[p.id] = employees[p.employee_id]
+        
+        # Second pass: reverse mapping (Employee.position_id) - only for positions
+        # that have no direct mapping yet
+        for e in employees.values():
+            if e.position_id and e.position_id not in pos_to_employee:
+                pos_to_employee[e.position_id] = e
+    else:
+        pos_to_employee = {}
+
+    items = []
+    for row, project_name, office_name, parent_name, role_name, role_code in rows:
+        pos = row
+        emp = pos_to_employee.get(pos.id)
+        emp_name = emp.name if emp else None
+        emp_code = emp.employee_code if emp else None
+        
+        items.append(
+            _position_payload(
+                pos,
+                project_name=project_name,
+                office_name=office_name,
+                parent_name=parent_name,
+                role_name=role_name,
+                role_code=role_code,
+                employee_name=emp_name,
+                employee_code=emp_code,
+            )
+        )
+        # Add hierarchy chain
+        items[-1]["hierarchy"] = await _get_position_hierarchy(db, pos.id)
     return build_paginated_response(items, total, page, page_size)
 
 async def _validate_position_refs(db: AsyncSession, payload: PositionCreate, row_id: int | None = None) -> None:
@@ -1288,11 +1431,51 @@ async def delete_position(
     await db.flush()
     return {"message": "Position deleted"}
 
+async def _get_position_hierarchy(
+    db: AsyncSession,
+    position_id: int,
+) -> list[dict]:
+    """Trace parent_position_id chain upward to the top (COO level)."""
+    chain = []
+    current_id = position_id
+    seen = set()
+    while current_id and current_id not in seen:
+        seen.add(current_id)
+        row = (await db.execute(
+            select(Position.id, Position.name, Position.code, Position.role_name, Position.level_name, Position.parent_position_id)
+            .where(Position.id == current_id)
+        )).one_or_none()
+        if not row:
+            break
+        chain.append({
+            "id": row.id,
+            "name": row.name,
+            "code": row.code,
+            "role_name": row.role_name,
+            "level_name": row.level_name,
+        })
+        current_id = row.parent_position_id
+    return chain
+
+
+@router.get("/positions/{position_id}/hierarchy")
+async def get_position_hierarchy(
+    position_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    chain = await _get_position_hierarchy(db, position_id)
+    return chain
+
+
 @router.get("/employees")
 async def list_employees(
     page: int = Query(1, ge=1),
     page_size: int = Query(200, ge=1, le=1000),
-    search: str = Query(None),
+    search: Optional[str] = None,
+    position_id: Optional[int] = None,
+    status: Optional[str] = None,
+    gender: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1309,6 +1492,15 @@ async def list_employees(
         condition = or_(Employee.name.ilike(like), Employee.employee_code.ilike(like), Employee.email.ilike(like), Employee.phone.ilike(like))
         q = q.where(condition)
         count_q = count_q.where(condition)
+    if position_id is not None:
+        q = q.where(Employee.position_id == position_id)
+        count_q = count_q.where(Employee.position_id == position_id)
+    if status:
+        q = q.where(Employee.status == status)
+        count_q = count_q.where(Employee.status == status)
+    if gender:
+        q = q.where(Employee.gender == gender)
+        count_q = count_q.where(Employee.gender == gender)
     total = (await db.execute(count_q)).scalar() or 0
     rows = (await db.execute(q.order_by(Employee.name).offset(offset).limit(limit))).all()
     items = []
@@ -1320,6 +1512,10 @@ async def list_employees(
         data["position_code"] = primary_pos.code if primary_pos else None
         data["user_id"] = user_id
         data["username"] = username
+        if primary_pos and primary_pos.id:
+            data["hierarchy"] = await _get_position_hierarchy(db, primary_pos.id)
+        else:
+            data["hierarchy"] = []
         items.append(data)
     return build_paginated_response(items, total, page, page_size)
 
@@ -1490,6 +1686,21 @@ def _external_next_url(payload, current_url: str) -> str | None:
     return urljoin(current_url, str(next_url))
 
 
+async def _robust_get(client: httpx.AsyncClient, url: str, headers: dict, max_retries: int = 5, initial_backoff: float = 0.5):
+    backoff = initial_backoff
+    for attempt in range(max_retries):
+        try:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            return response
+        except Exception as exc:
+            if attempt == max_retries - 1:
+                raise exc
+            print(f"HTTP request to {url} failed: {exc}. Retrying in {backoff}s... (Attempt {attempt+1}/{max_retries})")
+            await asyncio.sleep(backoff)
+            backoff *= 2
+
+
 async def _fetch_external_employee_rows(max_pages: int) -> tuple[list[dict], int | None, int]:
     if not settings.HR_EMPLOYEE_API_URL:
         raise HTTPException(status_code=422, detail="Set HR_EMPLOYEE_API_URL in backend/.env")
@@ -1514,8 +1725,7 @@ async def _fetch_external_employee_rows(max_pages: int) -> tuple[list[dict], int
                     break
                 seen_urls.add(next_url)
                 try:
-                    response = await client.get(next_url, headers=headers)
-                    response.raise_for_status()
+                    response = await _robust_get(client, next_url, headers)
                     payload = response.json()
                     pages_fetched += 1
                     if isinstance(payload, dict) and isinstance(payload.get("count"), int):
@@ -1946,8 +2156,7 @@ async def _sync_all_positions(
         seen_urls.add(next_url)
 
         try:
-            response = await client.get(next_url, headers=headers)
-            response.raise_for_status()
+            response = await _robust_get(client, next_url, headers)
             payload = response.json()
             pages_fetched += 1
         except Exception as exc:
@@ -1996,8 +2205,7 @@ async def _sync_position_employee_mappings(db: AsyncSession, headers: dict[str, 
         seen_urls.add(next_url)
 
         try:
-            response = await client.get(next_url, headers=headers)
-            response.raise_for_status()
+            response = await _robust_get(client, next_url, headers)
             payload = response.json()
             pages_fetched += 1
         except Exception as exc:
@@ -2091,8 +2299,7 @@ async def sync_employees_from_external_api(
                 seen_urls.add(next_url)
                 
                 try:
-                    response = await client.get(next_url, headers=headers)
-                    response.raise_for_status()
+                    response = await _robust_get(client, next_url, headers)
                     payload = response.json()
                     pages_fetched += 1
                 except Exception as exc:
@@ -2171,6 +2378,7 @@ async def sync_employees_from_external_api(
 async def list_projects(
     search: str = Query(None),
     status: str = Query(None),
+    user_id: Optional[int] = Query(None, description="Scope to a specific user's project assignments"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2188,15 +2396,35 @@ async def list_projects(
         query = query.where(Project.name.ilike(f"%{search}%") | Project.code.ilike(f"%{search}%"))
 
     from app.utils.dependencies import user_is_managerial
-    if not await user_is_managerial(db, current_user.id):
+
+    # When user_id is provided, scope to that user's assignments so the
+    # frontend (e.g. IndentForm) can fetch a scoped list even for managerial
+    # roles that would otherwise see every project in the system.
+    target_id = user_id if user_id is not None else current_user.id
+    if user_id is not None or not await user_is_managerial(db, current_user.id):
         from app.models.user import UserProject
+        # 1. Resolve from user_projects table (explicit assignments)
         rows = await db.execute(
-            select(UserProject.project_id).where(UserProject.user_id == current_user.id)
+            select(UserProject.project_id).where(UserProject.user_id == target_id)
         )
-        proj_ids = [r[0] for r in rows.all()]
+        proj_ids = set(r[0] for r in rows.all())
+
+        # 2. Also resolve from the user's position -> project chain
+        #    User.employee_id -> Employee.position_id -> Position.project_id
+        proj_q = await db.execute(
+            select(Position.project_id)
+            .select_from(User)
+            .join(Employee, User.employee_id == Employee.id)
+            .join(Position, Employee.position_id == Position.id)
+            .where(User.id == target_id)
+        )
+        proj_from_pos = proj_q.scalar_one_or_none()
+        if proj_from_pos is not None:
+            proj_ids.add(proj_from_pos)
+
         if not proj_ids:
             return []
-        query = query.where(Project.id.in_(proj_ids))
+        query = query.where(Project.id.in_(list(proj_ids)))
 
     result = await db.execute(query)
     projects = result.scalars().all()

@@ -34,4 +34,6 @@ from app.models.logistics import (
 )
 from app.models.carrier import CarrierUser
 from app.models.vendor_portal import VendorUser
+from app.models.dispatch_custody import DispatchCustodyTransfer
+
 

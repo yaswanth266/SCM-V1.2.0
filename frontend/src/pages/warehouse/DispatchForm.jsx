@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Button, Form, Input, InputNumber, Select, Space, DatePicker,
-  message, Row, Col, Table, Card, Divider, Typography, Tag, Spin, Popconfirm, Tooltip, Radio, Image
+  message, Row, Col, Table, Card, Divider, Typography, Tag, Spin, Popconfirm, Tooltip, Radio, Image,
+  Steps, Modal
 } from 'antd';
 import {
   PlusOutlined, ArrowLeftOutlined, SaveOutlined, MinusCircleOutlined,
@@ -50,6 +51,63 @@ const DispatchForm = () => {
 
   const destinationType = Form.useWatch('destination_type', form) || 'USER';
   const dispatchType = Form.useWatch('dispatch_type', form) || 'THIRD_PARTY';
+  const dispatchMode = Form.useWatch('dispatch_mode', form) || 'direct';
+  const destinationWarehouseId = Form.useWatch('destination_warehouse_id', form);
+  const destinationUserId = Form.useWatch('destination_user_id', form);
+
+  const [custodyChain, setCustodyChain] = useState([]);
+  const [loadingChain, setLoadingChain] = useState(false);
+  const [custodyModalOpen, setCustodyModalOpen] = useState(false);
+  const [custodySubmitting, setCustodySubmitting] = useState(false);
+  const [custodyForm] = Form.useForm();
+
+  const fetchSavedCustodyChain = useCallback(async () => {
+    if (isNew) return;
+    setLoadingChain(true);
+    try {
+      const res = await api.get(`/warehouse/dispatch/${id}/custody-chain`);
+      setCustodyChain(res.data || []);
+    } catch (err) {
+      console.error('Failed to fetch custody chain', err);
+    } finally {
+      setLoadingChain(false);
+    }
+  }, [id, isNew]);
+
+  useEffect(() => {
+    if (!isNew) return;
+    
+    const fetchPreview = async () => {
+      const projectId = selectedIndent?.project_id;
+      if (!projectId || dispatchMode !== 'multi-level') {
+        setCustodyChain([]);
+        return;
+      }
+      
+      const params = { project_id: projectId };
+      if (destinationType === 'WAREHOUSE' && destinationWarehouseId) {
+        params.destination_warehouse_id = destinationWarehouseId;
+      } else if (destinationType === 'USER' && destinationUserId) {
+        params.destination_user_id = destinationUserId;
+      } else {
+        setCustodyChain([]);
+        return;
+      }
+
+      setLoadingChain(true);
+      try {
+        const res = await api.get('/warehouse/dispatch/custody-chain-preview', { params });
+        setCustodyChain(res.data || []);
+      } catch (err) {
+        console.error('Failed to preview custody chain', err);
+        setCustodyChain([]);
+      } finally {
+        setLoadingChain(false);
+      }
+    };
+
+    fetchPreview();
+  }, [isNew, selectedIndent, destinationType, destinationWarehouseId, destinationUserId, dispatchMode]);
 
   const loadLookups = useCallback(async () => {
     try {
@@ -198,9 +256,13 @@ const DispatchForm = () => {
       setDispatchData(data);
       form.setFieldsValue({
         ...data,
+        dispatch_mode: data.dispatch_mode || 'direct',
         dispatch_date: data.dispatch_date ? dayjs(data.dispatch_date) : null,
         expected_delivery_date: data.expected_delivery_date ? dayjs(data.expected_delivery_date) : null,
       });
+      if (data.dispatch_mode === 'multi-level') {
+        fetchSavedCustodyChain();
+      }
       if (data.items && data.items.length > 0) {
         const firstItem = data.items[0];
         if (firstItem.indent_id) {
@@ -264,6 +326,7 @@ const DispatchForm = () => {
         status: 'Draft',
         destination_type: 'USER',
         dispatch_type: 'THIRD_PARTY',
+        dispatch_mode: 'direct',
         issue_id_ref: queryIssueId ? Number(queryIssueId) : undefined,
       });
       if (queryIssueId) handleIssueSelect(Number(queryIssueId));
@@ -375,6 +438,45 @@ const DispatchForm = () => {
       </PageHeader>
 
       <Row gutter={[16, 16]}>
+        {/* Dispatch Mode Card at top */}
+        <Col span={24}>
+          <Card
+            size="small"
+            style={{
+              marginBottom: 0,
+              borderRadius: '12px',
+              border: dispatchMode === 'multi-level' ? '1.5px solid #f59e0b' : '1px solid #cbd5e1',
+              background: dispatchMode === 'multi-level' ? '#fffbeb' : '#ffffff',
+            }}
+          >
+            <Row align="middle" gutter={16}>
+              <Col flex="auto">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <Tag
+                    color={dispatchMode === 'multi-level' ? 'gold' : 'blue'}
+                    style={{ border: 'none', fontWeight: 700, borderRadius: '4px', margin: 0 }}
+                  >
+                    {dispatchMode === 'multi-level' ? 'MULTI-LEVEL' : 'DIRECT'}
+                  </Tag>
+                  <span style={{ fontSize: '13px', color: '#334155', fontWeight: 500 }}>
+                    {dispatchMode === 'multi-level'
+                      ? 'Shipment will route through intermediate custody positions per project workflow configuration.'
+                      : 'Shipment will be dispatched directly to the destination without intermediate custody stops.'}
+                  </span>
+                </div>
+              </Col>
+              <Col>
+                <Form.Item name="dispatch_mode" style={{ margin: 0 }} rules={[{ required: true, message: 'Please select dispatch mode' }]}>
+                  <Radio.Group buttonStyle="solid" disabled={!editMode}>
+                    <Radio.Button value="direct">Direct Dispatch</Radio.Button>
+                    <Radio.Button value="multi-level">Multi-Level Dispatch</Radio.Button>
+                  </Radio.Group>
+                </Form.Item>
+              </Col>
+            </Row>
+          </Card>
+        </Col>
+
         {dispatchData && dispatchData.delivery_acknowledged && (
           <Col span={24}>
             <Card 
@@ -606,7 +708,7 @@ const DispatchForm = () => {
           <Card size="small">
             <Form form={form} layout="horizontal">
               <Row gutter={24}>
-                <Col span={24} style={{ marginBottom: '16px' }}>
+                <Col span={12} style={{ marginBottom: '16px' }}>
                   <Form.Item name="dispatch_type" label="Shipment Type / Method" rules={[{ required: true }]}>
                     <Radio.Group buttonStyle="solid" disabled={!editMode}>
                       <Radio.Button value="THIRD_PARTY">Third Party Freight</Radio.Button>
@@ -616,6 +718,7 @@ const DispatchForm = () => {
                     </Radio.Group>
                   </Form.Item>
                 </Col>
+
                 <Col span={8}>
                   <Form.Item name="dispatch_date" label="Dispatch Date" rules={[{ required: true }]}>
                     <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} disabled={!editMode} />
@@ -679,11 +782,163 @@ const DispatchForm = () => {
                     <TextArea rows={2} disabled={!editMode} placeholder="Enter delivery instructions or gate pass references..." />
                   </Form.Item>
                 </Col>
+
+                {dispatchMode === 'multi-level' && (
+                  <Col span={24} style={{ marginTop: '16px' }}>
+                    <Card 
+                      title={<span style={{ fontWeight: 600 }}>Custody Handover Chain</span>}
+                      size="small"
+                      loading={loadingChain}
+                      style={{ background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}
+                    >
+                      {custodyChain.length === 0 ? (
+                        <div style={{ color: '#8c8c8c', padding: '16px', textAlign: 'center' }}>
+                          No custody chain defined for this project/destination.
+                        </div>
+                      ) : (
+                        <div style={{ padding: '16px 8px' }}>
+                          <Steps
+                            direction="vertical"
+                            current={custodyChain.findIndex(c => c.status === 'pending')}
+                            items={custodyChain.map((step, idx) => {
+                              let status = 'wait';
+                              let color = '#8c8c8c';
+                              
+                              if (step.status === 'acknowledged') {
+                                status = 'finish';
+                                color = '#16a34a';
+                              } else if (step.status === 'pending') {
+                                const firstPending = custodyChain.find(c => c.status === 'pending');
+                                if (firstPending && firstPending.sequence === step.sequence) {
+                                  status = 'process';
+                                  color = '#1d4ed8';
+                                } else {
+                                  status = 'wait';
+                                  color = '#6b7280';
+                                }
+                              } else if (step.status === 'skipped') {
+                                status = 'wait';
+                              }
+
+                              return {
+                                title: <span style={{ fontWeight: 600, color: color }}>{step.role_name || step.position_name}</span>,
+                                description: (
+                                  <div style={{ marginTop: 4 }}>
+                                    <div style={{ fontWeight: 500, color: '#1e293b' }}>{step.employee_name}</div>
+                                    {step.status === 'acknowledged' && (
+                                      <div style={{ fontSize: '12px', color: '#64748b', marginTop: 4, background: '#fff', padding: '8px', borderRadius: '6px', border: '1px solid #e2e8f0' }}>
+                                        <div><strong>Seal Intact:</strong> {step.seal_intact ? 'Yes' : 'No'}</div>
+                                        <div><strong>Condition:</strong> <Tag color={step.packaging_condition === 'INTACT' ? 'green' : 'orange'}>{step.packaging_condition}</Tag></div>
+                                        <div><strong>Discrepancy:</strong> {step.discrepancy_reported ? <Tag color="red">Yes</Tag> : 'No'}</div>
+                                        {step.remarks && <div><strong>Remarks:</strong> {step.remarks}</div>}
+                                        <div style={{ fontSize: '11px', color: '#94a3b8', marginTop: 4 }}>
+                                          Received by {step.acknowledged_by_name} on {formatDate(step.acknowledged_at)}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                ),
+                                status: status,
+                              };
+                            })}
+                          />
+                        </div>
+                      )}
+                    </Card>
+                  </Col>
+                )}
+
+                {custodyChain.find(step => step.can_acknowledge) && !isNew && (
+                  <Col span={24} style={{ marginTop: '16px' }}>
+                    <div style={{
+                      background: 'linear-gradient(135deg, #eff6ff, #dbeafe)',
+                      border: '1px solid #bfdbfe',
+                      borderRadius: '12px',
+                      padding: '16px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
+                    }}>
+                      <div>
+                        <h4 style={{ margin: 0, color: '#1e3a8a', fontWeight: 600, fontSize: '15px' }}>
+                          Pending Custody Acknowledgement
+                        </h4>
+                        <p style={{ margin: '4px 0 0 0', color: '#1e40af', fontSize: '13px' }}>
+                          You occupy the active position/role <strong>{custodyChain.find(step => step.can_acknowledge)?.role_name}</strong> ({custodyChain.find(step => step.can_acknowledge)?.employee_name}) required to acknowledge custody receipt for this step.
+                        </p>
+                      </div>
+                      <Button 
+                        type="primary" 
+                        icon={<CheckOutlined />} 
+                        onClick={() => setCustodyModalOpen(true)}
+                        style={{ background: '#1d4ed8', borderColor: '#1d4ed8', height: '40px', borderRadius: '8px', fontWeight: 600 }}
+                      >
+                        Acknowledge Custody
+                      </Button>
+                    </div>
+                  </Col>
+                )}
               </Row>
             </Form>
           </Card>
         </Col>
       </Row>
+
+      <Modal
+        title="Acknowledge Custody Handover"
+        open={custodyModalOpen}
+        onCancel={() => {
+          setCustodyModalOpen(false);
+          custodyForm.resetFields();
+        }}
+        onOk={async () => {
+          try {
+            const values = await custodyForm.validateFields();
+            setCustodySubmitting(true);
+            await api.post(`/warehouse/dispatch/${id}/acknowledge-custody`, values);
+            message.success('Custody acknowledged successfully');
+            setCustodyModalOpen(false);
+            custodyForm.resetFields();
+            fetchDispatch();
+            fetchSavedCustodyChain();
+          } catch (err) {
+            message.error(getErrorMessage(err));
+          } finally {
+            setCustodySubmitting(false);
+          }
+        }}
+        confirmLoading={custodySubmitting}
+        okText="Acknowledge Receipt"
+      >
+        <Form form={custodyForm} layout="vertical" initialValues={{ seal_intact: true, packaging_condition: 'INTACT', discrepancy_reported: false }}>
+          <Form.Item name="seal_intact" label="Is Transit Seal Intact?" valuePropName="checked" rules={[{ required: true }]}>
+            <Radio.Group>
+              <Radio value={true}>Yes</Radio>
+              <Radio value={false}>No</Radio>
+            </Radio.Group>
+          </Form.Item>
+          
+          <Form.Item name="packaging_condition" label="Packaging Condition" rules={[{ required: true }]}>
+            <Radio.Group>
+              <Radio value="INTACT">Intact</Radio>
+              <Radio value="DAMAGED">Damaged</Radio>
+              <Radio value="TAMPERED">Tampered</Radio>
+            </Radio.Group>
+          </Form.Item>
+
+          <Form.Item name="discrepancy_reported" label="Discrepancy Reported?" valuePropName="checked" rules={[{ required: true }]}>
+            <Radio.Group>
+              <Radio value={true}>Yes</Radio>
+              <Radio value={false}>No</Radio>
+            </Radio.Group>
+          </Form.Item>
+
+          <Form.Item name="remarks" label="Remarks / Verification Details">
+            <TextArea rows={3} placeholder="Provide any details about vehicle inspection, cargo condition, etc." />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 };

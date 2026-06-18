@@ -1196,6 +1196,7 @@ class PositionCreate(BaseModel):
     project_id: Optional[int] = None
     office_id: Optional[int] = None
     parent_position_id: Optional[int] = None
+    employee_id: Optional[int] = None
 
     @field_validator("name")
     @classmethod
@@ -1222,6 +1223,15 @@ class PositionResponse(PositionCreate):
     project_name: Optional[str] = None
     office_name: Optional[str] = None
     parent_position_name: Optional[str] = None
+    employee_name: Optional[str] = None
+    employee_code: Optional[str] = None
+    # Wave 11C — HRMS API extra fields
+    job_name: Optional[str] = None
+    job_family_name: Optional[str] = None
+    job_family_id: Optional[int] = None
+    role_type_id: Optional[int] = None
+    position_status: Optional[str] = None
+    start_date: Optional[datetime] = None
     model_config = {"from_attributes": True}
 
 
@@ -1292,6 +1302,7 @@ class EmployeePositionResponse(BaseModel):
     id: int
     name: str
     code: str
+    role_id: Optional[int] = None
     role_name: Optional[str] = None
     department: Optional[str] = None
     level_name: Optional[str] = None

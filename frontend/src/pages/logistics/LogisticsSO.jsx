@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Tag, Badge, Button, Form, Select, Input, InputNumber, Space, Spin, message, Row, Col, Divider, Steps, Alert, Tooltip, Rate, DatePicker } from 'antd';
+import { Card, Table, Tag, Badge, Button, Form, Select, Input, InputNumber, Space, Spin, App, Row, Col, Divider, Steps, Alert, Tooltip, Rate, DatePicker } from 'antd';
 import {
   CarOutlined,
   CheckCircleOutlined,
@@ -20,6 +20,7 @@ const { Option } = Select;
 const { Step } = Steps;
 
 export default function LogisticsSO() {
+  const { message } = App.useApp();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -760,9 +761,10 @@ export default function LogisticsSO() {
                     >
                       {searchingDispatch ? (
                         <div style={{ textAlign: 'center', padding: '30px' }}>
-                          <Spin tip="Locating associated SCM Dispatch Order...">
-                            <div />
-                          </Spin>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
+                            <Spin size="middle" />
+                            <div style={{ color: '#64748b', fontSize: '14px' }}>Locating associated SCM Dispatch Order...</div>
+                          </div>
                         </div>
                       ) : linkedDispatch ? (
                         <div style={{ padding: '8px' }}>

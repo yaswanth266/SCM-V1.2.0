@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Statistic, Progress, List, Tag, Button, Spin, Alert, message } from 'antd';
+import { Card, Row, Col, Statistic, Progress, List, Tag, Button, Spin, Alert, App } from 'antd';
 import {
   FileTextOutlined,
   CompassOutlined,
@@ -15,6 +15,7 @@ import {
 import api from '../../config/api';
 
 export default function LogisticsDashboard() {
+  const { message } = App.useApp();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [masters, setMasters] = useState(null);
@@ -54,8 +55,9 @@ export default function LogisticsDashboard() {
 
   if (loading && !data) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-        <Spin indicator={<LoadingOutlined style={{ fontSize: 40 }} spin />} tip="Loading Logistics dashboard..." />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+        <Spin indicator={<LoadingOutlined style={{ fontSize: 40 }} spin />} />
+        <span style={{ color: '#64748b', fontSize: 16 }}>Loading Logistics dashboard...</span>
       </div>
     );
   }

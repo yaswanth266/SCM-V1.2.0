@@ -208,7 +208,15 @@ async def get_user_role_codes(db: AsyncSession, user_id: int) -> List[str]:
             .where(UserRole.user_id == user_id)
             .where(Role.is_active == True)  # noqa: E712
         )
-    return [row[0] for row in result.all()]
+    raw_codes = [row[0] for row in result.all()]
+    normalized_codes = []
+    for code in raw_codes:
+        normalized_codes.append(code)
+        if code == "storekeeper":
+            normalized_codes.append("store_keeper")
+        elif code == "store_keeper":
+            normalized_codes.append("storekeeper")
+    return normalized_codes
 
 
 def require_permission(module: str, action: str, resource: str):
@@ -461,11 +469,67 @@ async def user_is_managerial(db: AsyncSession, user_id: int) -> bool:
 
 
 async def user_warehouse_ids(db: AsyncSession, user_id: int) -> List[int]:
-    """Return the warehouse ids mapped to this user (possibly empty)."""
-    from app.models.user import UserWarehouse
-    result = await db.execute(
-        select(UserWarehouse.warehouse_id).where(UserWarehouse.user_id == user_id)
+    """Return the warehouse ids mapped to this user (possibly empty).
+    Filters by user's active_role_id if set, including global (null role_id) assignments.
+    Bypasses the active_role_id filter for STOREKEEPER position-based users.
+    """
+    from app.models.user import User, UserWarehouse
+    from app.models.settings_master import Employee, Position
+    from sqlalchemy import or_
+
+    user_res = await db.execute(select(User.active_role_id).where(User.id == user_id))
+    active_role_id = user_res.scalar_one_or_none()
+
+    # Check if the user holds a STOREKEEPER position
+    pos_res = await db.execute(
+        select(Position.role_name)
+        .join(Employee, Employee.position_id == Position.id)
+        .join(User, User.employee_id == Employee.id)
+        .where(User.id == user_id)
     )
+    pos_role_name = pos_res.scalar_one_or_none()
+
+    stmt = select(UserWarehouse.warehouse_id).where(UserWarehouse.user_id == user_id)
+    if pos_role_name == "STOREKEEPER":
+        # Bypass active role filter to show all their mapped warehouses (their own warehouses)
+        pass
+    elif active_role_id is not None:
+        stmt = stmt.where(or_(UserWarehouse.role_id == active_role_id, UserWarehouse.role_id.is_(None)))
+
+    # Fetch raw role codes to check for "store_keeper" without the "storekeeper" normalisation collision
+    if active_role_id is not None:
+        r_res = await db.execute(
+            select(Role.code)
+            .where(Role.id == active_role_id)
+            .where(Role.is_active == True)
+        )
+    else:
+        r_res = await db.execute(
+            select(Role.code)
+            .join(UserRole, UserRole.role_id == Role.id)
+            .where(UserRole.user_id == user_id)
+            .where(Role.is_active == True)
+        )
+    raw_role_codes = [row[0] for row in r_res.all()]
+
+    if "store_keeper" in raw_role_codes:
+        from app.models.warehouse import Warehouse as _WhModel
+        c_res = await db.execute(
+            select(_WhModel.id).where(
+                (_WhModel.name == "CENTRAL") | (_WhModel.code == "20070")
+            )
+        )
+        central_wh_id = c_res.scalar_one_or_none()
+        if central_wh_id is None:
+            central_wh_id = 18  # default fallback
+        
+        result = await db.execute(stmt)
+        mapped = [row[0] for row in result.all()]
+        if central_wh_id not in mapped:
+            mapped.append(central_wh_id)
+        return mapped
+
+    result = await db.execute(stmt)
     return [row[0] for row in result.all()]
 
 

@@ -38,6 +38,7 @@ class DispatchHeaderBase(BaseModel):
     remarks: Optional[str] = None
     destination_type: Optional[str] = "USER"
     dispatch_type: Optional[str] = "THIRD_PARTY"
+    dispatch_mode: Optional[str] = "direct"
     warehouse_id: Optional[int] = None
     destination_warehouse_id: Optional[int] = None
     destination_user_id: Optional[int] = None

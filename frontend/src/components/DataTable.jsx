@@ -14,6 +14,7 @@ const DataTable = ({
   columns,
   dataSource: externalData,
   fetchFunction,
+  extraParams,
   rowKey = 'id',
   searchPlaceholder = 'Search...',
   showSearch = true,
@@ -48,6 +49,11 @@ const DataTable = ({
   });
   const [sorter, setSorter] = useState({});
   const [filters, setFilters] = useState({});
+
+  // extraParams: external filter values merged into every fetch call
+  const extraParamsRef = useRef(extraParams || {});
+  extraParamsRef.current = extraParams || {};
+  const extraParamsJSON = JSON.stringify(extraParams || {});
   const printRef = useRef(null);
 
   const handlePrint = useReactToPrint({
@@ -72,6 +78,8 @@ const DataTable = ({
             sort_order: params.sortOrder === 'ascend' ? 'asc' : 'desc',
           }),
           ...params.filters,
+          // Merge in any external filter params (e.g. from filter dropdowns above the table)
+          ...extraParamsRef.current,
         };
 
         Object.keys(queryParams).forEach((key) => {
@@ -111,11 +119,15 @@ const DataTable = ({
     [pagination.current, pagination.pageSize, searchText]
   );
 
+  // Fetch on mount AND whenever extraParams change (filter selections).
+  // This replaces the previous mount-only useEffect([], []) so that
+  // changing a filter dropdown immediately re-fetches page 1.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (fetchFunctionRef.current) {
       fetchData({ current: 1 });
     }
-  }, []);
+  }, [extraParamsJSON]);
 
   useEffect(() => {
     if (externalData) {

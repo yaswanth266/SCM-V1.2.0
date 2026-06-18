@@ -1024,13 +1024,32 @@ async def acknowledge_delivery(
         DispatchAcknowledgementDocument
     )
     
-    # 1. Fetch dispatch order
+    # 1. Fetch dispatch order (eagerly load items to avoid MissingGreenlet in multi-level dispatch flows)
     d_q = await db.execute(
-        select(DispatchOrder).where(DispatchOrder.id == dispatch_id).with_for_update()
+        select(DispatchOrder)
+        .options(selectinload(DispatchOrder.items))
+        .where(DispatchOrder.id == dispatch_id)
+        .with_for_update()
     )
     d = d_q.scalar_one_or_none()
     if not d:
         raise HTTPException(status_code=404, detail="Dispatch order not found")
+
+    # Block sign-off if intermediate custody transfers are pending
+    from app.models.dispatch_custody import DispatchCustodyTransfer
+    pending_custody = await db.execute(
+        select(DispatchCustodyTransfer)
+        .where(
+            DispatchCustodyTransfer.dispatch_order_id == d.id,
+            DispatchCustodyTransfer.status == "pending"
+        )
+        .limit(1)
+    )
+    if pending_custody.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot acknowledge final delivery: Intermediate custody transfers are still pending."
+        )
         
     if d.status in ("acknowledged", "cancelled"):
         raise HTTPException(
@@ -1223,13 +1242,18 @@ async def acknowledge_delivery(
                     if b:
                         batch_id = b.id
 
-                # Decrement transit_qty in source warehouse
+                # Decrement transit_qty in correct transit warehouse
+                transit_wh_id = d.warehouse_id
+                if d.dispatch_mode == "multi-level":
+                    from app.api.v1.dispatch import get_last_intermediate_warehouse
+                    transit_wh_id = await get_last_intermediate_warehouse(db, d)
+
                 from app.services.stock_service import _get_or_create_balance
                 from decimal import Decimal
                 src_balance = await _get_or_create_balance(
                     db,
                     item_id=it.material_id,
-                    warehouse_id=d.warehouse_id,
+                    warehouse_id=transit_wh_id,
                     bin_id=bin_id,
                     batch_id=batch_id,
                     lock=True,

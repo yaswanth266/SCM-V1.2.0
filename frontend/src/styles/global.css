@@ -1004,6 +1004,26 @@ body.bavya-uat .ant-checkbox-wrapper:hover .ant-checkbox:not(.ant-checkbox-check
   box-shadow: 0 4px 16px rgba(72, 24, 144, 0.12);
   transform: translateY(-1px);
 }
+.bavya-launcher-bell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid #EEE6E0;
+  box-shadow: 0 2px 8px rgba(72, 24, 144, 0.06);
+  cursor: pointer;
+  margin-right: 12px;
+  transition: box-shadow 0.15s, transform 0.15s, border-color 0.15s;
+  user-select: none;
+}
+.bavya-launcher-bell:hover {
+  box-shadow: 0 4px 16px rgba(72, 24, 144, 0.12);
+  transform: translateY(-1px);
+  border-color: #481890;
+}
 .bavya-launcher-switcher-capsule {
   display: inline-flex;
   align-items: center;

@@ -13,7 +13,48 @@ export default function RoleSwitcher() {
 
   if (!user) return null;
 
-  const hasMultiplePositions = user.positions && user.positions.length > 1;
+  const deduplicatePositions = (positions, activeId) => {
+    if (!Array.isArray(positions)) return [];
+    const unique = [];
+    const seenRoleIds = new Set();
+    const seenRoleNames = new Set();
+
+    // First, find and preserve the active position
+    const active = positions.find(p => p.id === activeId);
+    if (active) {
+      unique.push(active);
+      if (active.role_id != null) {
+        seenRoleIds.add(active.role_id);
+      }
+      const activeRoleName = (active.role_name || active.role_code || '').trim().toLowerCase();
+      if (activeRoleName) {
+        seenRoleNames.add(activeRoleName);
+      }
+    }
+
+    for (const p of positions) {
+      if (active && p.id === activeId) continue;
+      const roleId = p.role_id;
+      const roleName = (p.role_name || p.role_code || '').trim().toLowerCase();
+
+      if (roleId != null) {
+        if (seenRoleIds.has(roleId)) continue;
+        seenRoleIds.add(roleId);
+        if (roleName) seenRoleNames.add(roleName);
+        unique.push(p);
+      } else if (roleName) {
+        if (seenRoleNames.has(roleName)) continue;
+        seenRoleNames.add(roleName);
+        unique.push(p);
+      } else {
+        unique.push(p);
+      }
+    }
+    return unique;
+  };
+
+  const positions = deduplicatePositions(user.positions, user.position_id);
+  const hasMultiplePositions = positions.length > 1;
   const hasMultipleRoles = user.roles && user.roles.length > 1;
 
   if (!hasMultiplePositions && !hasMultipleRoles) return null;
@@ -35,13 +76,13 @@ export default function RoleSwitcher() {
       }
     };
 
-    const items = user.positions.map((p) => ({
+    const items = positions.map((p) => ({
       key: p.id,
       label: p.name + (p.role_name ? ` (${p.role_name})` : ''),
       onClick: () => onSwitchPosition(p.id),
     }));
 
-    const activePosition = user.positions.find((p) => p.id === user.position_id);
+    const activePosition = positions.find((p) => p.id === user.position_id);
     const displayName = activePosition ? activePosition.name : 'Switch position';
 
     return (

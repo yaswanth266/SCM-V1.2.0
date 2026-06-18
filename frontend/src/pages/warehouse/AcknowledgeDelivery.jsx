@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Button, Form, Input, InputNumber, Select, Space, Card, Row, Col,
-  Table, Divider, Typography, Tag, Spin, message, Upload, Image
+  Table, Divider, Typography, Tag, Spin, App, Upload, Image, Alert
 } from 'antd';
 import {
   ArrowLeftOutlined, CheckCircleOutlined,
@@ -12,6 +12,7 @@ import api from '../../config/api';
 import PageHeader from '../../components/PageHeader';
 import SerialNumbersModal from '../../components/SerialNumbersModal';
 import { getErrorMessage, formatNumber } from '../../utils/helpers';
+import useAuthStore from '../../store/authStore';
 
 const { TextArea } = Input;
 const { Title, Text } = Typography;
@@ -19,12 +20,14 @@ const { Title, Text } = Typography;
 
 
 const AcknowledgeDelivery = () => {
+  const { message } = App.useApp();
   const { id } = useParams();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const queryDispatchNo = searchParams.get('dispatchNo');
 
   const [form] = Form.useForm();
+  const user = useAuthStore(s => s.user);
 
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -41,6 +44,8 @@ const AcknowledgeDelivery = () => {
   const [dispatch, setDispatch] = useState(null);
   const [items, setItems] = useState([]);
   const [uploadedUrls, setUploadedUrls] = useState({});
+  const [custodyChain, setCustodyChain] = useState([]);
+  const hasPendingCustody = custodyChain.some(step => step.status === 'pending');
 
 
 
@@ -60,8 +65,10 @@ const AcknowledgeDelivery = () => {
         const dispList = dispatchRes.data?.items || dispatchRes.data?.data || dispatchRes.data || [];
         setDispatches(dispList);
 
-        // Pre-select first operating warehouse if none selected
-        if (whsList.length > 0) {
+        // Pre-select user's mapped warehouse or first operating warehouse if none selected
+        if (user && user.warehouse_id) {
+          setSelectedWarehouseId(user.warehouse_id);
+        } else if (whsList.length > 0) {
           setSelectedWarehouseId(whsList[0].id);
         }
       } catch (err) {
@@ -159,6 +166,19 @@ const AcknowledgeDelivery = () => {
         }));
 
         setItems(initialItems);
+
+        // Fetch custody chain if multi-level
+        if (data.dispatch_mode === 'multi-level') {
+          try {
+            const chainRes = await api.get(`/warehouse/dispatch/${selectedDispatchId}/custody-chain`);
+            setCustodyChain(chainRes.data || []);
+          } catch (chainErr) {
+            console.error('Failed to load custody chain', chainErr);
+            setCustodyChain([]);
+          }
+        } else {
+          setCustodyChain([]);
+        }
 
         // Pre-fill fields from acknowledgement data if acknowledged
         if (data.delivery_acknowledged) {
@@ -402,8 +422,9 @@ const AcknowledgeDelivery = () => {
       message.success(response.data.message || 'Delivery Acknowledged Successfully!');
       navigate('/logistics/dispatch');
     } catch (err) {
-      if (err.errorFields) return;
-      message.error('Failed to acknowledge delivery: ' + getErrorMessage(err));
+      if (err?.errorFields) return;
+      const errMsg = err?.response?.data?.detail || err?.message || 'Unknown error';
+      message.error('Failed to acknowledge delivery: ' + errMsg);
     } finally {
       setSubmitting(false);
     }
@@ -502,12 +523,12 @@ const AcknowledgeDelivery = () => {
           <Button onClick={() => navigate('/logistics/dispatch')} icon={<ArrowLeftOutlined />}>
             Back to Plans
           </Button>
-          {!dispatch?.delivery_acknowledged && (
+           {!dispatch?.delivery_acknowledged && (
             <Button
               type="primary"
               icon={<CheckCircleOutlined />}
               loading={submitting}
-              disabled={dispatch && dispatch.is_ready_for_acknowledgement === false}
+              disabled={dispatch && (dispatch.is_ready_for_acknowledgement === false || hasPendingCustody)}
               onClick={handleSubmit}
               style={{ background: 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)', borderColor: 'transparent', fontWeight: 'bold' }}
             >
@@ -570,6 +591,32 @@ const AcknowledgeDelivery = () => {
               type="warning"
               showIcon
               style={{ borderRadius: '12px', border: '1px solid #ffe58f', background: '#fffbe6' }}
+            />
+          </Col>
+        )}
+
+        {dispatch && hasPendingCustody && (
+          <Col span={24}>
+            <Alert
+              message="Intermediate Custody Transfers Pending"
+              description={
+                <div>
+                  This is a Multi-Level Dispatch, and intermediate custody handovers must be completed before final receipt sign-off.
+                  <div style={{ marginTop: 8 }}>
+                    <strong>Pending Steps:</strong>
+                    <ul style={{ margin: '4px 0 0 0', paddingLeft: 20 }}>
+                      {custodyChain.filter(step => step.status === 'pending').map(step => (
+                        <li key={step.id}>
+                          {step.role_name || step.position_name} ({step.employee_name})
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              }
+              type="error"
+              showIcon
+              style={{ borderRadius: '12px' }}
             />
           </Col>
         )}
@@ -697,7 +744,7 @@ const AcknowledgeDelivery = () => {
               >
                 <Form form={form} layout="vertical">
                   {/* Upload Signature Proof / Stamp Photo */}
-                  <Form.Item name="signature_image" label={<span style={{ fontWeight: 600, fontSize: '13px' }}>📝 Receiver Signature / Stamp Photo</span>}>
+                  <Form.Item label={<span style={{ fontWeight: 600, fontSize: '13px' }}>📝 Receiver Signature / Stamp Photo</span>}>
                     {!dispatch?.delivery_acknowledged && dispatch?.is_ready_for_acknowledgement !== false && (
                       <Upload
                         maxCount={1}
@@ -747,7 +794,7 @@ const AcknowledgeDelivery = () => {
                   )}
 
                   {/* Upload Material Photos */}
-                  <Form.Item name="materials_photos" label={<span style={{ fontWeight: 600, fontSize: '13px' }}>📦 Materials Condition Photo Evidence</span>}>
+                  <Form.Item label={<span style={{ fontWeight: 600, fontSize: '13px' }}>📦 Materials Condition Photo Evidence</span>}>
                     {!dispatch?.delivery_acknowledged && dispatch?.is_ready_for_acknowledgement !== false && (
                       <Upload
                         maxCount={1}

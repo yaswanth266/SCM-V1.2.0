@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Table, Tag, Badge, Spin, Typography, message, Button, Modal, Form, Input, InputNumber, Space, Tooltip } from 'antd';
+import { Card, Table, Tag, Badge, Spin, Typography, App, Button, Modal, Form, Input, InputNumber, Space, Tooltip } from 'antd';
 import {
   CarOutlined,
   StarFilled,
@@ -18,6 +18,7 @@ import api from '../../config/api';
 const { Title, Paragraph } = Typography;
 
 export default function LogisticsMaster() {
+  const { message } = App.useApp();
   const [loading, setLoading] = useState(true);
   const [carriersLoading, setCarriersLoading] = useState(false);
   const [masters, setMasters] = useState(null);
@@ -178,10 +179,9 @@ export default function LogisticsMaster() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-        <Spin size="large" tip="Loading Master Registries...">
-          <div />
-        </Spin>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
+        <Spin size="large" />
+        <span style={{ color: '#64748b', fontSize: 16 }}>Loading Master Registries...</span>
       </div>
     );
   }
