@@ -12,6 +12,7 @@ from app.models.logistics import (
     LogisticsRfqMaster, LogisticsRfqVendor, LogisticsRfqResponse,
     LogisticsRfqResponseVehicle, LogisticsRfqResponseSdoAssignment,
     LogisticsRfqDispatchMapping, LogisticsSubDispatchOrder,
+    LogisticsDispatchMaterial,
     LogisticsServiceOrder, LogisticsServiceOrderVehicle, LogisticsServiceOrderSdoMapping,
 )
 from app.schemas.carrier_auth import CarrierQuoteSubmit, CarrierDeclineRfq
