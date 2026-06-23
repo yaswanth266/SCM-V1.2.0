@@ -20,6 +20,7 @@ class IndentItemCreate(BaseModel):
 
 class IndentCreate(BaseModel):
     project_id: Optional[int] = None
+    source_bom_id: Optional[int] = None
     # Optional at the schema layer — backend auto-fills from the user's
     # assignments when missing (single-assignment users skip the picker).
     # Handler raises 422 if still unresolved after auto-fill.
@@ -86,6 +87,7 @@ class IndentUpdate(BaseModel):
     # set status here meant a regular PUT could push an indent from
     # draft -> approved without going through any workflow.
     warehouse_id: Optional[int] = None
+    source_bom_id: Optional[int] = None
     required_date: Optional[date] = None
     indent_type: Optional[str] = None
     remarks: Optional[str] = None
@@ -115,6 +117,9 @@ class IndentResponse(BaseModel):
     id: int
     indent_number: str
     project_id: Optional[int] = None
+    source_bom_id: Optional[int] = None
+    source_bom_code: Optional[str] = None
+    source_bom_name: Optional[str] = None
     warehouse_id: int
     indent_date: datetime
     required_date: Optional[datetime] = None

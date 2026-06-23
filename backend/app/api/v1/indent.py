@@ -10,6 +10,7 @@ import json
 from app.database import get_db
 from app.models.user import User
 from app.models.indent import Indent, IndentItem, IndentAcknowledgement, IndentAcknowledgementItem
+from app.models.master import BOM
 from app.models.system import FileAttachment
 
 # Per MoM 2026-04-19 §6: max 3 indents per requester per rolling 30-day window.
@@ -69,6 +70,7 @@ async def list_indents(
         selectinload(Indent.items).selectinload(IndentItem.item),
         selectinload(Indent.items).selectinload(IndentItem.uom),
         selectinload(Indent.warehouse),
+        selectinload(Indent.source_bom),
         # Bug fix BUG_0042: include project so we can return project_name
         selectinload(Indent.project),
     )
@@ -336,6 +338,8 @@ async def list_indents(
         data["warehouse_name"] = ind.warehouse.name if ind.warehouse else None
         # Bug fix BUG_0042: surface project name for the list view column
         data["project_name"] = ind.project.name if ind.project else None
+        data["source_bom_code"] = ind.source_bom.bom_code if ind.source_bom else None
+        data["source_bom_name"] = ind.source_bom.name if ind.source_bom else None
         data["raised_by_name"] = user_map.get(ind.raised_by)
         data["approved_by_name"] = user_map.get(ind.approved_by)
         # Workflow gating fields (None when no workflow / not pending).
@@ -372,6 +376,7 @@ async def get_indent(
             selectinload(Indent.items).selectinload(IndentItem.item),
             selectinload(Indent.items).selectinload(IndentItem.uom),
             selectinload(Indent.warehouse),
+            selectinload(Indent.source_bom),
         )
         .where(Indent.id == indent_id)
     )
@@ -470,6 +475,8 @@ async def get_indent(
 
     data = IndentResponse.model_validate(indent).model_dump()
     data["warehouse_name"] = indent.warehouse.name if indent.warehouse else None
+    data["source_bom_code"] = indent.source_bom.bom_code if indent.source_bom else None
+    data["source_bom_name"] = indent.source_bom.name if indent.source_bom else None
 
     # Resolve user display names for raised_by / approved_by so the UI shows
     # "Murali" instead of "2". Fetch both in one query.
@@ -676,10 +683,34 @@ async def create_indent(
             status_code=422,
             detail="warehouse_id is required (no single warehouse mapped to your account)",
         )
+    if payload.source_bom_id:
+        bom_res = await db.execute(
+            select(BOM).where(BOM.id == payload.source_bom_id, BOM.is_active == True)
+        )
+        bom = bom_res.scalar_one_or_none()
+        if not bom:
+            raise HTTPException(status_code=422, detail="Selected BOM does not exist or is inactive")
+        
+        # Role-based backend validation: ensure employees can only raise indents for BOMs tagged to their position_id
+        from app.utils.dependencies import get_user_role_codes
+        role_codes = set(await get_user_role_codes(db, current_user.id))
+        is_admin = bool({"super_admin", "admin"} & role_codes)
+        if not is_admin:
+            user_position_id = None
+            if current_user.employee_id:
+                from app.models.settings_master import Employee
+                emp_res = await db.execute(select(Employee.position_id).where(Employee.id == current_user.employee_id))
+                user_position_id = emp_res.scalar_one_or_none()
+            if user_position_id != bom.position_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You are not authorized to raise indents for this BOM template"
+                )
 
     indent = Indent(
         indent_number=indent_number,
         project_id=project_id,
+        source_bom_id=payload.source_bom_id,
         warehouse_id=warehouse_id,
         indent_date=indent_date,
         required_date=payload.required_date,
@@ -740,6 +771,29 @@ async def update_indent(
 
     payload_data = payload.model_dump(exclude_unset=True)
     new_items = payload_data.pop("items", None)
+    if payload_data.get("source_bom_id"):
+        bom_res = await db.execute(
+            select(BOM).where(BOM.id == payload_data["source_bom_id"], BOM.is_active == True)
+        )
+        bom = bom_res.scalar_one_or_none()
+        if not bom:
+            raise HTTPException(status_code=422, detail="Selected BOM does not exist or is inactive")
+        
+        # Role-based backend validation: ensure employees can only raise indents for BOMs tagged to their position_id
+        from app.utils.dependencies import get_user_role_codes
+        role_codes = set(await get_user_role_codes(db, current_user.id))
+        is_admin = bool({"super_admin", "admin"} & role_codes)
+        if not is_admin:
+            user_position_id = None
+            if current_user.employee_id:
+                from app.models.settings_master import Employee
+                emp_res = await db.execute(select(Employee.position_id).where(Employee.id == current_user.employee_id))
+                user_position_id = emp_res.scalar_one_or_none()
+            if user_position_id != bom.position_id:
+                raise HTTPException(
+                    status_code=403,
+                    detail="You are not authorized to raise indents for this BOM template"
+                )
 
     # BUG-IND-009 — only drafts may be edited. Previously scalar fields
     # (warehouse_id, required_date, indent_type, remarks) silently mutated

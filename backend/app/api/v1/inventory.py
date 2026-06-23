@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel
@@ -3918,6 +3919,7 @@ async def _get_bom_detail(db: AsyncSession, bom_id: int):
         .where(BOM.id == bom_id)
         .options(
             selectinload(BOM.project),
+            selectinload(BOM.position),
             selectinload(BOM.components).selectinload(BOMComponent.item),
             selectinload(BOM.components).selectinload(BOMComponent.uom)
         )
@@ -3946,6 +3948,8 @@ def _enrich_bom_response(bom: BOM) -> dict:
         "name": bom.name,
         "project_id": bom.project_id,
         "project_name": bom.project.name if bom.project else None,
+        "position_id": bom.position_id,
+        "position_name": bom.position.name if bom.position else None,
         "document_types": bom.document_types,
         "is_active": bom.is_active,
         "created_at": bom.created_at,
@@ -3969,6 +3973,7 @@ async def create_bom(
         bom_code=bom_code,
         name=payload.name,
         project_id=payload.project_id,
+        position_id=payload.position_id,
         document_types=payload.document_types,
         is_active=True,
         created_by=current_user.id,
@@ -4001,6 +4006,7 @@ async def list_boms(
     page_size: int = Query(20, ge=1, le=1000),
     search: str = Query(None),
     project_id: int = Query(None),
+    position_id: int = Query(None),
     is_active: bool = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -4012,6 +4018,10 @@ async def list_boms(
     if project_id is not None:
         query = query.where(BOM.project_id == project_id)
         count_query = count_query.where(BOM.project_id == project_id)
+
+    if position_id is not None:
+        query = query.where(BOM.position_id == position_id)
+        count_query = count_query.where(BOM.position_id == position_id)
 
     if is_active is not None:
         query = query.where(BOM.is_active == is_active)
@@ -4026,6 +4036,7 @@ async def list_boms(
     result = await db.execute(
         query.options(
             selectinload(BOM.project),
+            selectinload(BOM.position),
             selectinload(BOM.components).selectinload(BOMComponent.item),
             selectinload(BOM.components).selectinload(BOMComponent.uom)
         )
@@ -4065,6 +4076,8 @@ async def update_bom(
         bom.name = payload.name
     if payload.project_id is not None or "project_id" in payload.model_fields_set:
         bom.project_id = payload.project_id
+    if payload.position_id is not None or "position_id" in payload.model_fields_set:
+        bom.position_id = payload.position_id
     if payload.document_types is not None:
         bom.document_types = payload.document_types
     if payload.is_active is not None:

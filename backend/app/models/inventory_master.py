@@ -427,6 +427,7 @@ class BOM(Base):
     bom_code = Column(String(50), unique=True, nullable=False)
     name = Column(String(255), nullable=False)
     project_id = Column(BigInteger, ForeignKey("projects.id"), nullable=True)
+    position_id = Column(BigInteger, ForeignKey("positions.id"), nullable=True)
     document_types = Column(JSON, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_by = Column(BigInteger, ForeignKey("users.id"), nullable=True)
@@ -434,6 +435,7 @@ class BOM(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
     project = relationship("Project")
+    position = relationship("Position")
     created_by_user = relationship("User", foreign_keys=[created_by])
     components = relationship("BOMComponent", back_populates="bom", cascade="all, delete-orphan")
 
