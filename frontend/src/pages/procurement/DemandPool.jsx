@@ -29,7 +29,7 @@ function IdentStatusTag({ status }) {
 }
 
 /* ── expanded source-indent rows ─────────────────────────────────────────── */
-function SourcesPanel({ sources, uomName }) {
+function SourcesPanel({ sources, uomName, navigate, canIssueSource, stockStatus }) {
   return (
     <div style={{ padding: '4px 0' }}>
       {sources.map((s) => {
@@ -73,6 +73,33 @@ function SourcesPanel({ sources, uomName }) {
               <Text type="secondary" style={{ fontSize: 11, whiteSpace: 'nowrap' }}>
                 Due: {formatDate(s.required_date)}
               </Text>
+            )}
+
+            {/* Actions for child indent row */}
+            {canIssueSource(s) && (stockStatus === 'in_stock' || stockStatus === 'partial') ? (
+              <Tooltip title="Stock available — go to Material Issue prefilled from this indent">
+                <Button
+                  size="small"
+                  type="link"
+                  icon={<ExportOutlined />}
+                  onClick={() => navigate(`/warehouse/material-issues?indent_id=${s.indent_id}`)}
+                  style={{ marginLeft: 'auto' }}
+                >
+                  Issue Now
+                </Button>
+              </Tooltip>
+            ) : (s.issued_qty ?? 0) > (s.acknowledged_qty ?? 0) ? (
+              <Tooltip title="Material has been issued — waiting for raiser to acknowledge receipt">
+                <Tag
+                  color="geekblue"
+                  icon={<ClockCircleOutlined />}
+                  style={{ fontSize: 11, marginLeft: 'auto', margin: 0 }}
+                >
+                  Awaiting Ack
+                </Tag>
+              </Tooltip>
+            ) : (
+              <div style={{ marginLeft: 'auto', width: 90 }} />
             )}
           </div>
         );
@@ -386,7 +413,13 @@ const DemandPool = () => {
         }}
         expandable={{
           expandedRowRender: (r) => (
-            <SourcesPanel sources={r.sources || []} uomName={r.uom_name || ''} />
+            <SourcesPanel
+              sources={r.sources || []}
+              uomName={r.uom_name || ''}
+              navigate={navigate}
+              canIssueSource={canIssueSource}
+              stockStatus={r.stock_status}
+            />
           ),
           rowExpandable: (r) => (r.sources?.length || 0) > 0,
         }}
