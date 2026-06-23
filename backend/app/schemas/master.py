@@ -1624,6 +1624,7 @@ class BOMComponentResponse(BaseModel):
 class BOMCreate(BaseModel):
     name: str
     project_id: Optional[int] = None
+    position_id: Optional[int] = None
     document_types: List[str]
     components: List[BOMComponentCreate]
 
@@ -1633,6 +1634,8 @@ class BOMResponse(BaseModel):
     name: str
     project_id: Optional[int] = None
     project_name: Optional[str] = None
+    position_id: Optional[int] = None
+    position_name: Optional[str] = None
     document_types: List[str]
     is_active: bool
     created_at: datetime
@@ -1643,6 +1646,7 @@ class BOMResponse(BaseModel):
 class BOMUpdate(BaseModel):
     name: Optional[str] = None
     project_id: Optional[int] = None
+    position_id: Optional[int] = None
     document_types: Optional[List[str]] = None
     is_active: Optional[bool] = None
     components: Optional[List[BOMComponentCreate]] = None

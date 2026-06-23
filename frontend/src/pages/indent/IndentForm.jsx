@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Button, Form, Input, InputNumber, Select, Space, DatePicker,
   message, Row, Col, Table, Card, Descriptions, Divider,
-  Typography, Tooltip, Tag, Spin, Popconfirm, Upload,
+  Typography, Tooltip, Tag, Spin, Popconfirm, Upload, Checkbox,
 } from 'antd';
 import {
   PlusOutlined, ArrowLeftOutlined, SendOutlined, EditOutlined,
@@ -40,6 +40,7 @@ const IndentForm = () => {
 
   const [form] = Form.useForm();
   const user = useAuthStore((s) => s.user);
+  const isAdmin = user?.role === 'super_admin' || user?.role === 'admin' || user?.roles?.some(r => r.code === 'super_admin' || r.code === 'admin');
   const [loading, setLoading] = useState(!isNew);
   const [submitting, setSubmitting] = useState(false);
   const [indent, setIndent] = useState(null);
@@ -62,15 +63,23 @@ const IndentForm = () => {
   const [warehouses, setWarehouses] = useState([]);
   const [projects, setProjects] = useState([]);
   const [uoms, setUoms] = useState([]);
+  const [bomOptions, setBomOptions] = useState([]);
+  const [bomLoading, setBomLoading] = useState(false);
+  const [bomLoadMode, setBomLoadMode] = useState('normal');
+  const [originalBomComponents, setOriginalBomComponents] = useState([]);
+  const [memberCount, setMemberCount] = useState(1);
 
   const loadLookups = useCallback(async () => {
     const uid = user?.id;
     try {
-      const [deptRes, whRes, projRes, uomRes] = await Promise.allSettled([
+      const bomParams = { page_size: 200, is_active: true, position_id: user?.position_id || -1 };
+
+      const [deptRes, whRes, projRes, uomRes, bomRes] = await Promise.allSettled([
         api.get('/masters/departments', { params: { page_size: 200 } }),
         api.get('/masters/warehouses', { params: { page_size: 200, user_id: uid } }),
         api.get('/masters/projects', { params: { page_size: 200, user_id: uid } }),
         api.get('/masters/uom', { params: { page_size: 200 } }),
+        api.get('/masters/boms', { params: bomParams }),
       ]);
       if (deptRes.status === 'fulfilled') {
         const d = deptRes.value.data;
@@ -113,6 +122,22 @@ const IndentForm = () => {
         const items = u.items || u.data || u || [];
         setUoms(items.map((i) => ({ label: `${i.name} (${i.abbreviation || ''})`, value: i.id })));
       }
+      if (bomRes.status === 'fulfilled') {
+        const b = bomRes.value.data;
+        const items = b.items || b.data || b || [];
+        setBomOptions(
+          items
+            .filter((bom) => {
+              const docs = (bom.document_types || []).map((d) => d.toLowerCase());
+              return docs.length === 0 || docs.includes('indent') || docs.includes('all');
+            })
+            .map((bom) => ({
+              label: `${bom.bom_code || 'BOM'} - ${bom.name}`,
+              value: bom.id,
+              project_id: bom.project_id,
+            }))
+        );
+      }
     } catch {
       // silent
     }
@@ -142,6 +167,7 @@ const IndentForm = () => {
         ...data,
         indent_date: data.indent_date ? dayjs(data.indent_date) : null,
         required_date: data.required_date ? dayjs(data.required_date) : null,
+        source_bom_id: data.source_bom_id || null,
       });
       const items = (data.items || []).map((item, idx) => ({
         key: item.id || Date.now() + idx,
@@ -184,6 +210,65 @@ const IndentForm = () => {
       await api.post('/attachments/upload', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });
+    }
+  };
+
+  const loadBOMItems = async (bomId, count = memberCount) => {
+    if (!bomId) {
+      form.setFieldValue('source_bom_id', null);
+      setOriginalBomComponents([]);
+      return;
+    }
+    setBomLoading(true);
+    try {
+      const res = await api.get(`/masters/boms/${bomId}`);
+      const bom = res.data;
+      const components = bom.components || [];
+      if (components.length === 0) {
+        message.warning('Selected BOM has no configured components');
+        return;
+      }
+      setOriginalBomComponents(components);
+      const rows = components.map((component, idx) => ({
+        key: `${Date.now()}-${idx}`,
+        item_id: component.item_id,
+        item_name: component.item_name
+          ? `[${component.item_code || '-'}] ${component.item_name}`
+          : component.item_code || '',
+        requested_qty: Number(component.qty || 0) * count,
+        uom_id: component.uom_id || null,
+        uom: component.uom_name || '',
+        remarks: `From BOM ${bom.bom_code || bom.name} (Count: ${count})`,
+      }));
+      setIndentItems(rows);
+      form.setFieldValue('source_bom_id', bom.id);
+      form.setFieldValue('project_id', bom.project_id || form.getFieldValue('project_id'));
+      message.success(`Loaded ${rows.length} item(s) from ${bom.bom_code || 'BOM'}`);
+    } catch (err) {
+      message.error(getErrorMessage(err));
+    } finally {
+      setBomLoading(false);
+    }
+  };
+
+  const handleMemberCountChange = (count) => {
+    const cleanCount = Math.max(1, Number(count) || 1);
+    setMemberCount(cleanCount);
+    if (originalBomComponents.length > 0) {
+      const selectedBomId = form.getFieldValue('source_bom_id');
+      const bomLabel = bomOptions.find(b => b.value === selectedBomId)?.label || 'BOM';
+      const rows = originalBomComponents.map((component, idx) => ({
+        key: `${Date.now()}-${idx}`,
+        item_id: component.item_id,
+        item_name: component.item_name
+          ? `[${component.item_code || '-'}] ${component.item_name}`
+          : component.item_code || '',
+        requested_qty: Number(component.qty || 0) * cleanCount,
+        uom_id: component.uom_id || null,
+        uom: component.uom_name || '',
+        remarks: `From BOM ${bomLabel} (Count: ${cleanCount})`,
+      }));
+      setIndentItems(rows);
     }
   };
 
@@ -239,6 +324,7 @@ const IndentForm = () => {
 
       const payload = {
         warehouse_id: values.warehouse_id,
+        source_bom_id: values.source_bom_id || null,
         indent_type: values.indent_type || 'regular',
         indent_date: formatDateForAPI(values.indent_date),
         required_date: formatDateForAPI(values.required_date),
@@ -420,6 +506,11 @@ const IndentForm = () => {
             <Descriptions.Item label="Department">{indent.department || indent.department_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="Warehouse">{indent.warehouse_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="Project">{indent.project_name || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Source BOM">
+              {indent.source_bom_code || indent.source_bom_name
+                ? `${indent.source_bom_code || ''}${indent.source_bom_code && indent.source_bom_name ? ' - ' : ''}${indent.source_bom_name || ''}`
+                : '-'}
+            </Descriptions.Item>
             <Descriptions.Item label="Status"><StatusTag status={indent.status} /></Descriptions.Item>
             <Descriptions.Item label="Created By">{indent.created_by_name || indent.requested_by_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="Remarks" span={3}>{indent.remarks || '-'}</Descriptions.Item>
@@ -516,6 +607,7 @@ const IndentForm = () => {
               );
             }
           }}
+          disabled={bomLoadMode === 'initial'}
           style={{ width: '100%' }}
         />
       ),
@@ -523,7 +615,7 @@ const IndentForm = () => {
     {
       title: 'Requested Qty', dataIndex: 'requested_qty', width: 120,
       render: (val, record) => (
-        <InputNumber min={0.01} value={val} onChange={(v) => updateItemRow(record.key, 'requested_qty', v)} style={{ width: '100%' }} />
+        <InputNumber min={0.01} value={val} onChange={(v) => updateItemRow(record.key, 'requested_qty', v)} disabled={bomLoadMode === 'initial'} style={{ width: '100%' }} />
       ),
     },
     {
@@ -536,6 +628,7 @@ const IndentForm = () => {
           placeholder="Select UOM"
           optionFilterProp="label"
           allowClear
+          disabled={bomLoadMode === 'initial'}
           style={{ width: '100%' }}
         />
       ),
@@ -548,7 +641,7 @@ const IndentForm = () => {
     },
     {
       title: '', width: 40,
-      render: (_, record) => indentItems.length > 1 ? (
+      render: (_, record) => indentItems.length > 1 && bomLoadMode !== 'initial' ? (
         <Tooltip title="Remove"><MinusCircleOutlined style={{ color: '#ff4d4f', cursor: 'pointer', fontSize: 16 }} onClick={() => removeItemRow(record.key)} /></Tooltip>
       ) : null,
     },
@@ -584,6 +677,7 @@ const IndentForm = () => {
           {projects.length <= 1 && (
             <Form.Item name="project_id" hidden><Input /></Form.Item>
           )}
+          <Form.Item name="source_bom_id" hidden><Input /></Form.Item>
 
           <Row gutter={16}>
             {warehouses.length > 1 && (
@@ -625,6 +719,41 @@ const IndentForm = () => {
             </Col>
           </Row>
 
+          {bomOptions.length > 0 && (
+            <Row gutter={16}>
+              <Col xs={24} md={12}>
+                <Form.Item label="Configured BOM">
+                  <Select
+                    allowClear
+                    showSearch
+                    loading={bomLoading}
+                    optionFilterProp="label"
+                    placeholder="Select BOM to load configured items"
+                    options={bomOptions.filter((bom) => {
+                      const selectedProject = form.getFieldValue('project_id');
+                      return !bom.project_id || !selectedProject || bom.project_id === selectedProject;
+                    })}
+                    value={form.getFieldValue('source_bom_id')}
+                    onChange={(val) => loadBOMItems(val)}
+                  />
+                </Form.Item>
+              </Col>
+              {form.getFieldValue('source_bom_id') && (
+                <Col xs={24} md={12}>
+                  <Form.Item label="Member Count (Quantity Multiplier)">
+                    <InputNumber
+                      min={1}
+                      value={memberCount}
+                      onChange={handleMemberCountChange}
+                      style={{ width: '100%' }}
+                      placeholder="Enter number of members/beneficiaries"
+                    />
+                  </Form.Item>
+                </Col>
+              )}
+            </Row>
+          )}
+
           <Divider orientation="left">Items</Divider>
           <Table
             dataSource={indentItems}
@@ -633,7 +762,7 @@ const IndentForm = () => {
             pagination={false}
             size="small"
             scroll={{ x: 900 }}
-            footer={() => (
+            footer={bomLoadMode === 'initial' ? null : () => (
               <Button type="dashed" onClick={addItemRow} icon={<PlusOutlined />} block>Add Item</Button>
             )}
             style={{ marginBottom: 24 }}

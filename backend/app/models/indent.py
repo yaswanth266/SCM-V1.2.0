@@ -10,6 +10,7 @@ class Indent(Base):
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     indent_number = Column(String(50), unique=True, nullable=False)
     project_id = Column(BigInteger, ForeignKey("projects.id"))
+    source_bom_id = Column(BigInteger, ForeignKey("boms.id"), nullable=True)
     warehouse_id = Column(BigInteger, ForeignKey("warehouses.id"), nullable=False)
     indent_date = Column(DateTime, nullable=False)
     required_date = Column(DateTime)
@@ -24,6 +25,7 @@ class Indent(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     project = relationship("Project")
+    source_bom = relationship("BOM")
     warehouse = relationship("Warehouse")
     raiser = relationship("User", foreign_keys=[raised_by])
     items = relationship("IndentItem", back_populates="indent", cascade="all, delete-orphan")

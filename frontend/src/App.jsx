@@ -386,6 +386,11 @@ const RedirectToPriceListEdit = () => {
   return <Navigate to={`/inventory/masters/price-lists/${id}/edit`} replace />;
 };
 
+const RedirectToBOMEdit = () => {
+  const { id } = useParams();
+  return <Navigate to={`/inventory/masters/boms/${id}/edit`} replace />;
+};
+
 const ModuleIndexRedirect = ({ moduleId, fallback }) => {
   const allowedKeys = useAuthStore((s) => s.allowedKeys);
   const nav = MODULE_NAVS[moduleId];
@@ -697,7 +702,7 @@ const App = () => {
             <Route path="/masters/organization-structure/hr-sync" element={<Navigate to="/settings/masters/organization-structure/hr-sync" replace />} />
             <Route path="/masters/boms" element={<Navigate to="/inventory/masters/boms" replace />} />
             <Route path="/masters/boms/new" element={<Navigate to="/inventory/masters/boms/new" replace />} />
-            <Route path="/masters/boms/:id/edit" element={<Navigate to="/inventory/masters/boms/:id/edit" replace />} />
+            <Route path="/masters/boms/:id/edit" element={<RedirectToBOMEdit />} />
             <Route path="/masters" element={<Navigate to="/launcher" replace />} />
 
             {/* Logistics Module */}

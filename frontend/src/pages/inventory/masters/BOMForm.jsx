@@ -23,16 +23,18 @@ const BOMForm = () => {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [projects, setProjects] = useState([]);
+  const [positions, setPositions] = useState([]);
   const [uoms, setUoms] = useState([]);
   const [departments, setDepartments] = useState([]);
 
   // Fetch Lookups
   const loadLookups = useCallback(async () => {
     try {
-      const [projRes, uomRes, deptRes] = await Promise.allSettled([
+      const [projRes, uomRes, deptRes, posRes] = await Promise.allSettled([
         api.get('/masters/org-projects', { params: { page_size: 500 } }),
         api.get('/masters/uom', { params: { page_size: 500 } }),
         api.get('/masters/departments'),
+        api.get('/masters/positions', { params: { page_size: 1000 } }),
       ]);
 
       if (projRes.status === 'fulfilled') {
@@ -49,6 +51,11 @@ const BOMForm = () => {
         const data = deptRes.value.data || [];
         setDepartments(data.map((d) => ({ label: d.name, value: d.value })));
       }
+
+      if (posRes.status === 'fulfilled') {
+        const data = posRes.value.data?.items || posRes.value.data?.data || posRes.value.data || [];
+        setPositions(data.map((p) => ({ label: `[${p.code || p.position_code || ''}] ${p.name || p.position_name || ''}`, value: p.id })));
+      }
     } catch (err) {
       console.error('Failed to load lookups', err);
     }
@@ -62,6 +69,7 @@ const BOMForm = () => {
       form.setFieldsValue({
         name: data.name,
         project_id: data.project_id,
+        position_id: data.position_id,
         department: data.department || undefined,
         document_types: data.document_types,
         is_active: data.is_active,
@@ -115,6 +123,7 @@ const BOMForm = () => {
       const payload = {
         name: values.name,
         project_id: values.project_id || null,
+        position_id: values.position_id || null,
         department: values.department || null,
         document_types: values.document_types || [],
         components: values.components.map((c) => ({
@@ -170,7 +179,7 @@ const BOMForm = () => {
             </Col>
           </Row>
           <Row gutter={16}>
-            <Col span={8}>
+            <Col span={6}>
               <Form.Item name="project_id" label="Project">
                 <Select
                   placeholder="Select project (optional)"
@@ -181,7 +190,18 @@ const BOMForm = () => {
                 />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={6}>
+              <Form.Item name="position_id" label="Target Position">
+                <Select
+                  placeholder="Select position (optional)"
+                  options={positions}
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                />
+              </Form.Item>
+            </Col>
+            <Col span={6}>
               <Form.Item name="department" label="Department">
                 <Select
                   placeholder="Select department (optional)"
@@ -192,7 +212,7 @@ const BOMForm = () => {
                 />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={6}>
               <Form.Item
                 name="document_types"
                 label="Document Types"

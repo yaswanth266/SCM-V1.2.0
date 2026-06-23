@@ -45,6 +45,7 @@ const BOMs = () => {
     { title: 'BOM Code', dataIndex: 'bom_code', width: 180, render: (text, record) => <a onClick={() => handleEdit(record)}>{text}</a> },
     { title: 'BOM Name', dataIndex: 'name' },
     { title: 'Project', dataIndex: 'project_name', render: (text) => text || '-' },
+    { title: 'Position', dataIndex: 'position_name', render: (text) => text || '-' },
     {
       title: 'Document Types',
       dataIndex: 'document_types',
