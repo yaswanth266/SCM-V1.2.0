@@ -305,12 +305,50 @@ const GateEntry = () => {
     {
       title: 'Reference',
       key: 'reference',
-      width: 150,
+      width: 180,
       render: (_, record) => {
-        if (record.visitor_details?.reference_no) return <Text>{record.visitor_details.reference_no}</Text>;
-        if (record.so_number) return <Text>{record.so_number}</Text>;
-        if (record.dispatch_number) return <Text>{record.dispatch_number}</Text>;
-        return '-';
+        const hasVisitorRef = !!record.visitor_details?.reference_no;
+        const hasSoRef = !!record.so_number;
+        const hasDispatchRef = !!record.dispatch_number;
+        const visitorRef = record.visitor_details?.reference_no;
+
+        return (
+          <Space direction="vertical" size={2} style={{ width: '100%' }}>
+            {hasVisitorRef && <Text style={{ display: 'block' }}>{visitorRef}</Text>}
+            {hasSoRef && <Text style={{ display: 'block' }}>{record.so_number}</Text>}
+            {hasDispatchRef && <Text style={{ display: 'block' }}>{record.dispatch_number}</Text>}
+
+            {record.gate_type === 'inward' && record.outward_gate_pass_number && (
+              <Tag
+                color="orange"
+                icon={<LogoutOutlined />}
+                style={{ cursor: 'pointer', margin: 0 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleView({ id: record.outward_gate_pass_id });
+                }}
+              >
+                Linked Out: {record.outward_gate_pass_number}
+              </Tag>
+            )}
+
+            {record.gate_type === 'outward' && record.ref_gate_pass_number && (
+              <Tag
+                color="blue"
+                icon={<LoginOutlined />}
+                style={{ cursor: 'pointer', margin: 0 }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleView({ id: record.ref_gate_pass_id });
+                }}
+              >
+                Linked In: {record.ref_gate_pass_number}
+              </Tag>
+            )}
+
+            {!hasVisitorRef && !hasSoRef && !hasDispatchRef && !record.outward_gate_pass_number && !record.ref_gate_pass_number && '-'}
+          </Space>
+        );
       },
     },
     {
@@ -715,6 +753,24 @@ const GateEntry = () => {
               )}
               {viewData.dispatch_number && (
                 <Descriptions.Item label="Dispatch Reference">{viewData.dispatch_number}</Descriptions.Item>
+              )}
+              {viewData.gate_type === 'outward' && viewData.ref_gate_pass_number && (
+                <Descriptions.Item label="Reference Gate Pass (Inward)">
+                  <a onClick={() => handleView({ id: viewData.ref_gate_pass_id })}>
+                    <Tag color="blue" icon={<LoginOutlined />} style={{ cursor: 'pointer' }}>
+                      {viewData.ref_gate_pass_number}
+                    </Tag>
+                  </a>
+                </Descriptions.Item>
+              )}
+              {viewData.gate_type === 'inward' && viewData.outward_gate_pass_number && (
+                <Descriptions.Item label="Linked Gate Pass (Outward)">
+                  <a onClick={() => handleView({ id: viewData.outward_gate_pass_id })}>
+                    <Tag color="orange" icon={<LogoutOutlined />} style={{ cursor: 'pointer' }}>
+                      {viewData.outward_gate_pass_number}
+                    </Tag>
+                  </a>
+                </Descriptions.Item>
               )}
 
               {viewData.visitor_type === 'employee' && (

@@ -663,6 +663,8 @@ class GatePassResponse(BaseModel):
     visitor_details: Optional[dict] = None
     ref_gate_pass_id: Optional[int] = None
     ref_gate_pass_number: Optional[str] = None
+    outward_gate_pass_id: Optional[int] = None
+    outward_gate_pass_number: Optional[str] = None
     warehouse_name: Optional[str] = None
     created_by_name: Optional[str] = None
     model_config = {"from_attributes": True}

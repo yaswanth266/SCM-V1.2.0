@@ -4284,6 +4284,19 @@ async def get_gate_entry(gp_id: int, db: AsyncSession = Depends(get_db), current
         if ref_gp:
             data["ref_gate_pass_number"] = ref_gp.gate_pass_number
 
+    # Resolve referencing outward gate pass number (for inward gate pass)
+    if gp.gate_type == "inward":
+        out_res = await db.execute(
+            select(GatePass).where(
+                GatePass.ref_gate_pass_id == gp.id,
+                GatePass.gate_type == "outward"
+            )
+        )
+        out_gp = out_res.scalar_one_or_none()
+        if out_gp:
+            data["outward_gate_pass_id"] = out_gp.id
+            data["outward_gate_pass_number"] = out_gp.gate_pass_number
+
     return data
 
 @router.post("/gate-entries/{gp_id}/cancel")
@@ -4354,6 +4367,23 @@ async def list_gate_entries(
         for data in items_list:
             if data.get("ref_gate_pass_id"):
                 data["ref_gate_pass_number"] = ref_map.get(data["ref_gate_pass_id"])
+
+    # Bulk-resolve referencing outward gate pass number for inward entries
+    inward_ids = [e.id for e in entries if e.gate_type == "inward"]
+    if inward_ids:
+        out_result = await db.execute(
+            select(GatePass.ref_gate_pass_id, GatePass.id, GatePass.gate_pass_number)
+            .where(
+                GatePass.ref_gate_pass_id.in_(inward_ids),
+                GatePass.gate_type == "outward"
+            )
+        )
+        out_map = {row.ref_gate_pass_id: (row.id, row.gate_pass_number) for row in out_result.all()}
+        for data in items_list:
+            if data.get("gate_type") == "inward" and data.get("id") in out_map:
+                out_id, out_num = out_map[data["id"]]
+                data["outward_gate_pass_id"] = out_id
+                data["outward_gate_pass_number"] = out_num
 
     return build_paginated_response(items_list, total, page, page_size)
 

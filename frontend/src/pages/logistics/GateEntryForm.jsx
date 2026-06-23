@@ -324,9 +324,20 @@ const GateEntryForm = () => {
             </Descriptions.Item>
             {entry.gate_type === 'outward' && entry.ref_gate_pass_number && (
               <Descriptions.Item label="Reference Gate Pass (Inward)">
-                <Tag color="blue" icon={<LoginOutlined />}>
-                  {entry.ref_gate_pass_number}
-                </Tag>
+                <a onClick={() => navigate(`${modulePrefix}/gate-entry/${entry.ref_gate_pass_id}`)}>
+                  <Tag color="blue" icon={<LoginOutlined />} style={{ cursor: 'pointer' }}>
+                    {entry.ref_gate_pass_number}
+                  </Tag>
+                </a>
+              </Descriptions.Item>
+            )}
+            {entry.gate_type === 'inward' && entry.outward_gate_pass_number && (
+              <Descriptions.Item label="Linked Gate Pass (Outward)">
+                <a onClick={() => navigate(`${modulePrefix}/gate-entry/${entry.outward_gate_pass_id}`)}>
+                  <Tag color="orange" icon={<LogoutOutlined />} style={{ cursor: 'pointer' }}>
+                    {entry.outward_gate_pass_number}
+                  </Tag>
+                </a>
               </Descriptions.Item>
             )}
             {entry.so_number && (
