@@ -45,7 +45,7 @@ const WarehouseDashboard = () => {
       const [summaryRes, grnRes, qiRes] = await Promise.all([
         api.get('/dashboard/procurement-summary'),
         api.get('/warehouse/grn', { params: { page_size: 5 } }),
-        api.get('/warehouse/quality-inspection', { params: { page_size: 5 } }),
+        api.get('/warehouse/quality-inspections', { params: { page_size: 5 } }),
       ]);
 
       setProcSummary(summaryRes.data || {});
@@ -89,7 +89,9 @@ const WarehouseDashboard = () => {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
-        <Spin size="large" tip="Loading Warehouse Dashboard..." />
+        <Spin size="large">
+          <div style={{ padding: '64px', textAlign: 'center', color: '#6C757D' }}>Loading Warehouse Dashboard...</div>
+        </Spin>
       </div>
     );
   }
@@ -121,7 +123,7 @@ const WarehouseDashboard = () => {
         <Col xs={24} sm={12} md={6}>
           <Card 
             hoverable 
-            bodyStyle={{ padding: '20px' }}
+            styles={{ body: { padding: '20px' } }}
             style={{ borderRadius: '8px', borderLeft: '4px solid #F09000', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
             <Statistic
@@ -134,7 +136,7 @@ const WarehouseDashboard = () => {
         <Col xs={24} sm={12} md={6}>
           <Card 
             hoverable 
-            bodyStyle={{ padding: '20px' }}
+            styles={{ body: { padding: '20px' } }}
             style={{ borderRadius: '8px', borderLeft: '4px solid #fa8c16', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
             <Statistic
@@ -147,7 +149,7 @@ const WarehouseDashboard = () => {
         <Col xs={24} sm={12} md={6}>
           <Card 
             hoverable 
-            bodyStyle={{ padding: '20px' }}
+            styles={{ body: { padding: '20px' } }}
             style={{ borderRadius: '8px', borderLeft: '4px solid #52c41a', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
             <Statistic
@@ -160,7 +162,7 @@ const WarehouseDashboard = () => {
         <Col xs={24} sm={12} md={6}>
           <Card 
             hoverable 
-            bodyStyle={{ padding: '20px' }}
+            styles={{ body: { padding: '20px' } }}
             style={{ borderRadius: '8px', borderLeft: '4px solid #1890ff', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
             <Statistic
