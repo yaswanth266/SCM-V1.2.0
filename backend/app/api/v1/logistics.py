@@ -2803,6 +2803,12 @@ async def update_so_vehicle_status(vehicle_id: int, payload: VehicleStatusUpdate
         so.status = "IN_PROGRESS"
         db.add(so)
 
+    # Pre-resolve mdo so it is available globally in the status transitions
+    mdo = None
+    if so and so.mdo_id:
+        res_mdo = await db.execute(select(LogisticsMainDispatchOrder).where(LogisticsMainDispatchOrder.id == so.mdo_id))
+        mdo = res_mdo.scalar_one_or_none()
+
     next_status = payload.nextStatus
     v.vehicle_status = next_status
 
@@ -2881,9 +2887,114 @@ async def update_so_vehicle_status(vehicle_id: int, payload: VehicleStatusUpdate
 
             res_sdo = await db.execute(select(LogisticsSubDispatchOrder).where(LogisticsSubDispatchOrder.id == m.sdo_id))
             sdo = res_sdo.scalar_one_or_none()
-            if sdo:
+            if sdo and sdo.status != "IN_TRANSIT":
                 sdo.status = "IN_TRANSIT"
                 db.add(sdo)
+
+                # Check if multi-level intermediate leg handover (sequence > 1) to shift stock
+                if mdo and mdo.dispatch_mode == "multi-level":
+                    if sdo.sequence_number > 1:
+                        try:
+                            from app.api.v1.dispatch import get_warehouse_for_position
+                            from app.services.stock_service import _get_or_create_balance
+                            from decimal import Decimal
+
+                            sender_wh_id = await get_warehouse_for_position(db, sdo.custodian_position_id)
+                            if sender_wh_id:
+                                res_mats = await db.execute(
+                                    select(LogisticsDispatchMaterial).where(LogisticsDispatchMaterial.mdo_id == mdo.id)
+                                )
+                                mats = res_mats.scalars().all()
+
+                                for mat in mats:
+                                    batch_id = None
+                                    bin_id = None
+                                    if mdo.material_issue_id:
+                                        from app.models.issue import MaterialIssueItem
+                                        mi_item_res = await db.execute(
+                                            select(MaterialIssueItem).where(
+                                                MaterialIssueItem.issue_id == mdo.material_issue_id,
+                                                MaterialIssueItem.item_id == mat.material_id
+                                            ).limit(1)
+                                        )
+                                        mi_item = mi_item_res.scalar_one_or_none()
+                                        if mi_item:
+                                            batch_id = mi_item.batch_id
+                                            bin_id = mi_item.bin_id
+
+                                    qty = Decimal(str(mat.quantity))
+
+                                    # Shift available_qty → transit_qty at sender warehouse
+                                    sender_balance = await _get_or_create_balance(
+                                        db,
+                                        item_id=mat.material_id,
+                                        warehouse_id=sender_wh_id,
+                                        bin_id=bin_id,
+                                        batch_id=batch_id,
+                                        lock=True,
+                                    )
+                                    sender_balance.available_qty = max(
+                                        Decimal("0"),
+                                        (sender_balance.available_qty or Decimal("0")) - qty
+                                    )
+                                    sender_balance.transit_qty = (sender_balance.transit_qty or Decimal("0")) + qty
+                                await db.flush()
+                        except Exception as handover_err:
+                            import logging
+                            logging.getLogger(__name__).exception("Failed to perform intermediate 3PL handover transit stock transfer")
+
+                    # Dynamic creation of the next SDO leg (similar to handover_sdo)
+                    try:
+                        from app.api.v1.dispatch import get_destination_position_id
+                        from app.api.v1.logistics import resolve_mdo_project_id, resolve_indent_creator_position, build_logistics_custody_chain
+                        dest_pos_id = await get_destination_position_id(db, mdo.destination_warehouse_id, mdo.destination_user_id)
+                        project_id = await resolve_mdo_project_id(db, mdo.indent_id, mdo.material_issue_id)
+                        starting_pos_id = await resolve_indent_creator_position(db, mdo.indent_id, mdo.material_issue_id)
+
+                        chain_data = []
+                        if project_id and starting_pos_id:
+                            chain_data = await build_logistics_custody_chain(db, project_id, starting_pos_id, dest_pos_id)
+                        chain = [entry["position"] for entry in chain_data if entry.get("can_approve", False) or entry.get("is_destination", False)]
+
+                        if sdo.sequence_number < len(chain):
+                            next_pos = chain[sdo.sequence_number]
+                            # Avoid creating duplicate next leg SDOs
+                            existing_next_res = await db.execute(
+                                select(LogisticsSubDispatchOrder).where(
+                                    LogisticsSubDispatchOrder.mdo_id == mdo.id,
+                                    LogisticsSubDispatchOrder.sequence_number == sdo.sequence_number + 1
+                                )
+                            )
+                            if not existing_next_res.scalar_one_or_none():
+                                sdo_num = await generate_logistics_sequence_number(
+                                    db,
+                                    prefix="SDO",
+                                    document_type="sub_dispatch_order",
+                                )
+                                from datetime import timedelta
+                                next_sdo = LogisticsSubDispatchOrder(
+                                    sdo_number=sdo_num,
+                                    mdo_id=mdo.id,
+                                    route_id=None,
+                                    route_name=f"Custody Leg {sdo.sequence_number + 1}",
+                                    vehicle_type_required="Truck",
+                                    estimated_distance_km=100.0,
+                                    required_pickup_datetime=datetime.now(timezone.utc),
+                                    required_delivery_datetime=datetime.now(timezone.utc) + timedelta(days=2),
+                                    loading_time_minutes=30,
+                                    unloading_time_minutes=30,
+                                    requires_loading_helper=False,
+                                    status="PENDING",
+                                    custodian_position_id=next_pos.id,
+                                    sequence_number=sdo.sequence_number + 1,
+                                    estimated_weight_kg=sdo.estimated_weight_kg,
+                                    estimated_volume_cft=sdo.estimated_volume_cft
+                                )
+                                db.add(next_sdo)
+                                await db.flush()
+                    except Exception as next_leg_err:
+                        import logging
+                        logging.getLogger(__name__).exception("Failed to dynamically generate next SDO leg for 3PL dispatch")
 
         if so and so.mdo_id:
             await db.execute(
@@ -2922,8 +3033,114 @@ async def update_so_vehicle_status(vehicle_id: int, payload: VehicleStatusUpdate
             res_sdo = await db.execute(select(LogisticsSubDispatchOrder).where(LogisticsSubDispatchOrder.id == m.sdo_id))
             sdo = res_sdo.scalar_one_or_none()
             if sdo:
-                sdo.status = "DELIVERED"
-                db.add(sdo)
+                # Check if multi-level and not final leg to set to ACKNOWLEDGED and run stock transit receive
+                is_intermediate = False
+                if mdo and mdo.dispatch_mode == "multi-level":
+                    res_mdo_sdos = await db.execute(
+                        select(LogisticsSubDispatchOrder).where(LogisticsSubDispatchOrder.mdo_id == mdo.id)
+                    )
+                    mdo_sdos = res_mdo_sdos.scalars().all()
+                    max_seq = max((s.sequence_number for s in mdo_sdos), default=1)
+                    if sdo.sequence_number < max_seq:
+                        is_intermediate = True
+
+                if is_intermediate:
+                    sdo.status = "ACKNOWLEDGED"
+                    db.add(sdo)
+
+                    # Perform stock receive transit movement (analogous to sdo_receive)
+                    try:
+                        from app.api.v1.dispatch import get_warehouse_for_position
+                        from app.services.stock_service import _get_or_create_balance, post_stock_ledger
+                        from decimal import Decimal
+
+                        # Resolve previous warehouse
+                        prev_wh_id = mdo.warehouse_id
+                        if sdo.sequence_number > 1:
+                            prev_sdo_res = await db.execute(
+                                select(LogisticsSubDispatchOrder).where(
+                                    LogisticsSubDispatchOrder.mdo_id == mdo.id,
+                                    LogisticsSubDispatchOrder.sequence_number == sdo.sequence_number - 1
+                                ).order_by(LogisticsSubDispatchOrder.id.desc()).limit(1)
+                            )
+                            prev_sdo = prev_sdo_res.scalar_one_or_none()
+                            if prev_sdo and prev_sdo.custodian_position_id:
+                                resolved_prev_wh = await get_warehouse_for_position(db, prev_sdo.custodian_position_id)
+                                if resolved_prev_wh:
+                                    prev_wh_id = resolved_prev_wh
+                        
+                        # Resolve current warehouse
+                        curr_wh_id = await get_warehouse_for_position(db, sdo.custodian_position_id) or mdo.destination_warehouse_id
+
+                        if prev_wh_id and curr_wh_id:
+                            res_mats = await db.execute(
+                                select(LogisticsDispatchMaterial).where(LogisticsDispatchMaterial.mdo_id == mdo.id)
+                            )
+                            mats = res_mats.scalars().all()
+
+                            for mat in mats:
+                                batch_id = None
+                                bin_id = None
+                                if mdo.material_issue_id:
+                                    from app.models.issue import MaterialIssueItem
+                                    mi_item_res = await db.execute(
+                                        select(MaterialIssueItem).where(
+                                            MaterialIssueItem.issue_id == mdo.material_issue_id,
+                                            MaterialIssueItem.item_id == mat.material_id
+                                        ).limit(1)
+                                    )
+                                    mi_item = mi_item_res.scalar_one_or_none()
+                                    if mi_item:
+                                        batch_id = mi_item.batch_id
+                                        bin_id = mi_item.bin_id
+
+                                qty = Decimal(str(mat.quantity))
+
+                                if prev_wh_id != curr_wh_id:
+                                    prev_balance = await _get_or_create_balance(
+                                        db,
+                                        item_id=mat.material_id,
+                                        warehouse_id=prev_wh_id,
+                                        bin_id=bin_id,
+                                        batch_id=batch_id,
+                                        lock=True,
+                                    )
+                                    prev_balance.transit_qty = max(Decimal("0"), (prev_balance.transit_qty or Decimal("0")) - qty)
+                                    
+                                    await post_stock_ledger(
+                                        db,
+                                        item_id=mat.material_id,
+                                        warehouse_id=prev_wh_id,
+                                        transaction_type="transfer_out",
+                                        qty_out=qty,
+                                        batch_id=batch_id,
+                                        bin_id=bin_id,
+                                        reference_type="sub_dispatch_order",
+                                        reference_id=sdo.id,
+                                        uom_id=1,
+                                        created_by=current_user.id,
+                                    )
+
+                                await post_stock_ledger(
+                                    db,
+                                    item_id=mat.material_id,
+                                    warehouse_id=curr_wh_id,
+                                    transaction_type="transfer_in",
+                                    qty_in=qty,
+                                    batch_id=batch_id,
+                                    bin_id=bin_id,
+                                    reference_type="sub_dispatch_order",
+                                    reference_id=sdo.id,
+                                    uom_id=1,
+                                    created_by=current_user.id,
+                                )
+                            await db.flush()
+                    except Exception as receive_err:
+                        import logging
+                        logging.getLogger(__name__).exception("Failed to perform intermediate 3PL receive transit stock transfer")
+                else:
+                    sdo.status = "DELIVERED"
+                    db.add(sdo)
 
         # Check if all vehicles/SDOs in SO are completed
         res_all_v = await db.execute(select(LogisticsServiceOrderVehicle).where(LogisticsServiceOrderVehicle.so_id == v.so_id))
