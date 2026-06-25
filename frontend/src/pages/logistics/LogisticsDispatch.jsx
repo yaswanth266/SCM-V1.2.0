@@ -867,7 +867,7 @@ export default function LogisticsDispatch() {
           {/* Handover Details */}
           {mdo.handover ? (
             <>
-              {mdo.status === 'DISPATCHED' && (
+              {mdo.status === 'DISPATCHED' && mdo.dispatch_mode !== 'multi-level' && (
                 <div style={{
                   background: '#eff6ff',
                   border: '1px dashed #3b82f6',

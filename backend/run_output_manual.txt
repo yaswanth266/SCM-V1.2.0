@@ -1,0 +1,271 @@
+=== RUNNING MANUAL ISSUE ACKNOWLEDGEMENT VERIFICATION ===
+2026-06-25 17:01:52,381 INFO sqlalchemy.engine.Engine SELECT DATABASE()
+2026-06-25 17:01:52,381 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-25 17:01:52,381 INFO sqlalchemy.engine.Engine SELECT @@sql_mode
+2026-06-25 17:01:52,381 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-25 17:01:52,381 INFO sqlalchemy.engine.Engine SELECT @@lower_case_table_names
+2026-06-25 17:01:52,381 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-25 17:01:52,397 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-25 17:01:52,854 INFO sqlalchemy.engine.Engine SELECT warehouses.id, warehouses.organization_id, warehouses.code, warehouses.name, warehouses.type, warehouses.address_line1, warehouses.address_line2, warehouses.city, warehouses.state, warehouses.pincode, warehouses.contact_person, warehouses.phone, warehouses.is_active, warehouses.created_at, warehouses.updated_at, warehouses.parent_id 
+FROM warehouses 
+WHERE warehouses.name != %s AND warehouses.code != %s AND warehouses.is_active = true 
+ LIMIT %s
+2026-06-25 17:01:52,854 INFO sqlalchemy.engine.Engine [generated in 0.00030s] ('CENTRAL', '20070', 2)
+Source Warehouse: ANAKAPALLI District WAREHOUSE (ID: 43)
+Destination Warehouse: krishna district warehouse (ID: 36)
+2026-06-25 17:01:52,863 INFO sqlalchemy.engine.Engine SELECT items.id, items.category_id, items.item_code, items.readable_code, items.name, items.description, items.item_type, items.is_kit, items.uom_category_id, items.primary_uom_id, items.secondary_uom_id, items.hsn_code, items.sku, items.barcode_type, items.barcode_value, items.has_batch, items.has_serial, items.has_expiry, items.shelf_life_days, items.safety_stock, items.reorder_level, items.reorder_qty, items.lead_time_days, items.min_order_qty, items.max_order_qty, items.tax_rate, items.cgst_rate, items.sgst_rate, items.igst_rate, items.purchase_price, items.selling_price, items.mrp, items.image_url, items.brand, items.manufacturer, items.marketer, items.distributor, items.feature_id, items.ownership, items.dosage_form, items.valuation_method, items.dosage_form_code, items.coding_status, items.drug_schedule, items.is_schedule_h1, items.is_narcotic, items.requires_prescription, items.requires_cold_chain, items.min_storage_temp_c, items.max_storage_temp_c, items.regulatory_notes, items.special_storage_condition, items.storage_min_temp, items.storage_max_temp, items.storage_min_moisture, items.storage_max_moisture, items.storage_breakable, items.special_transport_condition, items.transport_min_temp, items.transport_max_temp, items.transport_min_moisture, items.transport_max_moisture, items.transport_breakable, items.is_active, items.created_by, items.created_at, items.updated_at 
+FROM items 
+WHERE items.is_active = true 
+ LIMIT %s
+2026-06-25 17:01:52,863 INFO sqlalchemy.engine.Engine [generated in 0.00021s] (1,)
+Item: CBC DILUENT REAGENT (ID: 175)
+2026-06-25 17:01:52,863 INFO sqlalchemy.engine.Engine SELECT users.id, users.organization_id, users.employee_code, users.username, users.email, users.password_hash, users.first_name, users.last_name, users.phone, users.avatar_url, users.user_type, users.department, users.designation, users.is_active, users.last_login, users.password_changed_at, users.failed_login_attempts, users.locked_until, users.tokens_revoked_after, users.active_role_id, users.employee_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.employee_id IS NOT NULL 
+ LIMIT %s
+2026-06-25 17:01:52,863 INFO sqlalchemy.engine.Engine [generated in 0.00017s] (1,)
+2026-06-25 17:01:52,878 INFO sqlalchemy.engine.Engine SELECT roles.id AS roles_id, roles.name AS roles_name, roles.code AS roles_code, roles.description AS roles_description, roles.role_type AS roles_role_type, roles.is_active AS roles_is_active, roles.organization_id AS roles_organization_id, roles.created_at AS roles_created_at, roles.updated_at AS roles_updated_at 
+FROM roles 
+WHERE roles.id IN (%s)
+2026-06-25 17:01:52,878 INFO sqlalchemy.engine.Engine [generated in 0.00023s] (37,)
+2026-06-25 17:01:52,878 INFO sqlalchemy.engine.Engine SELECT employees.id AS employees_id, employees.employee_code AS employees_employee_code, employees.name AS employees_name, employees.photo AS employees_photo, employees.status AS employees_status, employees.dob AS employees_dob, employees.gender AS employees_gender, employees.pan_number AS employees_pan_number, employees.aadhaar_number AS employees_aadhaar_number, employees.email AS employees_email, employees.phone AS employees_phone, employees.hire_date AS employees_hire_date, employees.bank_details AS employees_bank_details, employees.position_id AS employees_position_id, employees.created_at AS employees_created_at, employees.updated_at AS employees_updated_at 
+FROM employees 
+WHERE employees.id IN (%s)
+2026-06-25 17:01:52,878 INFO sqlalchemy.engine.Engine [generated in 0.00025s] (7103,)
+User: temp_user_test (ID: 50)
+2026-06-25 17:01:52,878 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s 
+ LIMIT %s
+2026-06-25 17:01:52,878 INFO sqlalchemy.engine.Engine [generated in 0.00015s] (175, 43, 1)
+2026-06-25 17:01:52,878 INFO sqlalchemy.engine.Engine INSERT INTO stock_balance (item_id, warehouse_id, bin_id, batch_id, available_qty, reserved_qty, transit_qty, total_qty, valuation_rate, stock_value, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 17:01:52,878 INFO sqlalchemy.engine.Engine [generated in 0.00018s] (175, 43, None, None, Decimal('10'), Decimal('0'), Decimal('0'), Decimal('10'), Decimal('100'), Decimal('1000'), datetime.datetime(2026, 6, 25, 11, 31, 52, 878736, tzinfo=datetime.timezone.utc))
+Created temporary stock balance at source: 10 units.
+2026-06-25 17:01:52,893 INFO sqlalchemy.engine.Engine INSERT INTO material_issues (issue_number, mr_id, indent_id, warehouse_id, destination_warehouse_id, issue_date, department, issued_to, status, remarks, issued_by, dispatched_at, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 17:01:52,893 INFO sqlalchemy.engine.Engine [generated in 0.00024s] ('TEST-MI-001', None, None, 43, 36, datetime.date(2026, 6, 25), 'Testing Department', 50, 'draft', 'Temp manual issue for verification', 50, None, datetime.datetime(2026, 6, 25, 11, 31, 52, 893967, tzinfo=datetime.timezone.utc), datetime.datetime(2026, 6, 25, 11, 31, 52, 893967, tzinfo=datetime.timezone.utc))
+Created draft MaterialIssue ID: 155
+2026-06-25 17:01:52,893 INFO sqlalchemy.engine.Engine INSERT INTO material_issue_items (issue_id, item_id, batch_id, qty, uom_id, bin_id, rate, amount, prescriber_name, prescriber_license, patient_name, patient_id_text) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 17:01:52,893 INFO sqlalchemy.engine.Engine [generated in 0.00017s] (155, 175, None, Decimal('3.000'), 12, None, Decimal('100'), Decimal('300'), None, None, None, None)
+Added item to MaterialIssue (Qty: 3.000)
+Issuing Material Issue...
+2026-06-25 17:01:52,893 INFO sqlalchemy.engine.Engine SELECT material_issues.id, material_issues.issue_number, material_issues.mr_id, material_issues.indent_id, material_issues.warehouse_id, material_issues.destination_warehouse_id, material_issues.issue_date, material_issues.department, material_issues.issued_to, material_issues.status, material_issues.remarks, material_issues.issued_by, material_issues.dispatched_at, material_issues.created_at, material_issues.updated_at 
+FROM material_issues 
+WHERE material_issues.id = %s FOR UPDATE
+2026-06-25 17:01:52,893 INFO sqlalchemy.engine.Engine [generated in 0.00017s] (155,)
+2026-06-25 17:01:52,912 INFO sqlalchemy.engine.Engine SELECT material_issue_items.issue_id AS material_issue_items_issue_id, material_issue_items.id AS material_issue_items_id, material_issue_items.item_id AS material_issue_items_item_id, material_issue_items.batch_id AS material_issue_items_batch_id, material_issue_items.qty AS material_issue_items_qty, material_issue_items.uom_id AS material_issue_items_uom_id, material_issue_items.bin_id AS material_issue_items_bin_id, material_issue_items.rate AS material_issue_items_rate, material_issue_items.amount AS material_issue_items_amount, material_issue_items.prescriber_name AS material_issue_items_prescriber_name, material_issue_items.prescriber_license AS material_issue_items_prescriber_license, material_issue_items.patient_name AS material_issue_items_patient_name, material_issue_items.patient_id_text AS material_issue_items_patient_id_text, material_issue_items.serial_numbers AS material_issue_items_serial_numbers 
+FROM material_issue_items 
+WHERE material_issue_items.issue_id IN (%s)
+2026-06-25 17:01:52,913 INFO sqlalchemy.engine.Engine [generated in 0.00062s] (155,)
+2026-06-25 17:01:52,913 INFO sqlalchemy.engine.Engine SELECT items.id AS items_id, items.category_id AS items_category_id, items.item_code AS items_item_code, items.readable_code AS items_readable_code, items.name AS items_name, items.description AS items_description, items.item_type AS items_item_type, items.is_kit AS items_is_kit, items.uom_category_id AS items_uom_category_id, items.primary_uom_id AS items_primary_uom_id, items.secondary_uom_id AS items_secondary_uom_id, items.hsn_code AS items_hsn_code, items.sku AS items_sku, items.barcode_type AS items_barcode_type, items.barcode_value AS items_barcode_value, items.has_batch AS items_has_batch, items.has_serial AS items_has_serial, items.has_expiry AS items_has_expiry, items.shelf_life_days AS items_shelf_life_days, items.safety_stock AS items_safety_stock, items.reorder_level AS items_reorder_level, items.reorder_qty AS items_reorder_qty, items.lead_time_days AS items_lead_time_days, items.min_order_qty AS items_min_order_qty, items.max_order_qty AS items_max_order_qty, items.tax_rate AS items_tax_rate, items.cgst_rate AS items_cgst_rate, items.sgst_rate AS items_sgst_rate, items.igst_rate AS items_igst_rate, items.purchase_price AS items_purchase_price, items.selling_price AS items_selling_price, items.mrp AS items_mrp, items.image_url AS items_image_url, items.brand AS items_brand, items.manufacturer AS items_manufacturer, items.marketer AS items_marketer, items.distributor AS items_distributor, items.feature_id AS items_feature_id, items.ownership AS items_ownership, items.dosage_form AS items_dosage_form, items.valuation_method AS items_valuation_method, items.dosage_form_code AS items_dosage_form_code, items.coding_status AS items_coding_status, items.drug_schedule AS items_drug_schedule, items.is_schedule_h1 AS items_is_schedule_h1, items.is_narcotic AS items_is_narcotic, items.requires_prescription AS items_requires_prescription, items.requires_cold_chain AS items_requires_cold_chain, items.min_storage_temp_c AS items_min_storage_temp_c, items.max_storage_temp_c AS items_max_storage_temp_c, items.regulatory_notes AS items_regulatory_notes, items.special_storage_condition AS items_special_storage_condition, items.storage_min_temp AS items_storage_min_temp, items.storage_max_temp AS items_storage_max_temp, items.storage_min_moisture AS items_storage_min_moisture, items.storage_max_moisture AS items_storage_max_moisture, items.storage_breakable AS items_storage_breakable, items.special_transport_condition AS items_special_transport_condition, items.transport_min_temp AS items_transport_min_temp, items.transport_max_temp AS items_transport_max_temp, items.transport_min_moisture AS items_transport_min_moisture, items.transport_max_moisture AS items_transport_max_moisture, items.transport_breakable AS items_transport_breakable, items.is_active AS items_is_active, items.created_by AS items_created_by, items.created_at AS items_created_at, items.updated_at AS items_updated_at 
+FROM items 
+WHERE items.id IN (%s)
+2026-06-25 17:01:52,913 INFO sqlalchemy.engine.Engine [generated in 0.00022s] (175,)
+2026-06-25 17:01:52,913 INFO sqlalchemy.engine.Engine SELECT warehouses.id, warehouses.organization_id, warehouses.code, warehouses.name, warehouses.type, warehouses.address_line1, warehouses.address_line2, warehouses.city, warehouses.state, warehouses.pincode, warehouses.contact_person, warehouses.phone, warehouses.is_active, warehouses.created_at, warehouses.updated_at, warehouses.parent_id 
+FROM warehouses 
+WHERE warehouses.id = %s
+2026-06-25 17:01:52,913 INFO sqlalchemy.engine.Engine [generated in 0.00014s] (43,)
+2026-06-25 17:01:52,913 INFO sqlalchemy.engine.Engine SELECT items.id, items.name, items.drug_schedule, items.requires_prescription, items.is_schedule_h1, items.is_narcotic 
+FROM items 
+WHERE items.id IN (%s) AND (items.requires_prescription = true OR items.is_schedule_h1 = true OR items.is_narcotic = true OR items.drug_schedule IN (%s, %s))
+2026-06-25 17:01:52,913 INFO sqlalchemy.engine.Engine [generated in 0.00018s] (175, 'H1', 'X')
+2026-06-25 17:01:52,913 INFO sqlalchemy.engine.Engine SELECT items.id, items.name, items.drug_schedule, items.requires_prescription, items.is_schedule_h1, items.is_narcotic 
+FROM items 
+WHERE items.id IN (%s) AND (items.requires_prescription = true OR items.is_schedule_h1 = true OR items.is_narcotic = true OR items.drug_schedule IN (%s, %s))
+2026-06-25 17:01:52,913 INFO sqlalchemy.engine.Engine [cached since 0.001227s ago] (175, 'H1', 'X')
+2026-06-25 17:01:52,913 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s
+2026-06-25 17:01:52,913 INFO sqlalchemy.engine.Engine [generated in 0.00014s] (175, 43)
+2026-06-25 17:01:52,913 INFO sqlalchemy.engine.Engine SELECT warehouses.id, warehouses.organization_id, warehouses.code, warehouses.name, warehouses.type, warehouses.address_line1, warehouses.address_line2, warehouses.city, warehouses.state, warehouses.pincode, warehouses.contact_person, warehouses.phone, warehouses.is_active, warehouses.created_at, warehouses.updated_at, warehouses.parent_id 
+FROM warehouses 
+WHERE warehouses.id = %s
+2026-06-25 17:01:52,913 INFO sqlalchemy.engine.Engine [cached since 0.006109s ago] (43,)
+2026-06-25 17:01:52,928 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s FOR UPDATE
+2026-06-25 17:01:52,928 INFO sqlalchemy.engine.Engine [generated in 0.00043s] (175, 43)
+2026-06-25 17:01:52,928 INFO sqlalchemy.engine.Engine UPDATE stock_balance SET available_qty=%s, reserved_qty=%s, last_updated=%s WHERE stock_balance.id = %s
+2026-06-25 17:01:52,928 INFO sqlalchemy.engine.Engine [generated in 0.00022s] (Decimal('7.000'), Decimal('3.000'), datetime.datetime(2026, 6, 25, 11, 31, 52, 928895, tzinfo=datetime.timezone.utc), 475)
+2026-06-25 17:01:52,928 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s AND stock_balance.bin_id IS NULL AND stock_balance.batch_id IS NULL
+2026-06-25 17:01:52,928 INFO sqlalchemy.engine.Engine [generated in 0.00015s] (175, 43)
+2026-06-25 17:01:52,928 INFO sqlalchemy.engine.Engine UPDATE material_issues SET status=%s, updated_at=%s WHERE material_issues.id = %s
+2026-06-25 17:01:52,928 INFO sqlalchemy.engine.Engine [generated in 0.00020s] ('issued', datetime.datetime(2026, 6, 25, 11, 31, 52, 928895, tzinfo=datetime.timezone.utc), 155)
+2026-06-25 17:01:52,928 INFO sqlalchemy.engine.Engine SELECT material_issues.id, material_issues.issue_number, material_issues.mr_id, material_issues.indent_id, material_issues.warehouse_id, material_issues.destination_warehouse_id, material_issues.issue_date, material_issues.department, material_issues.issued_to, material_issues.status, material_issues.remarks, material_issues.issued_by, material_issues.dispatched_at, material_issues.created_at, material_issues.updated_at 
+FROM material_issues 
+WHERE material_issues.id = %s
+2026-06-25 17:01:52,928 INFO sqlalchemy.engine.Engine [generated in 0.00014s] (155,)
+MaterialIssue status after issue: issued
+2026-06-25 17:01:52,928 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.id = %s
+2026-06-25 17:01:52,928 INFO sqlalchemy.engine.Engine [generated in 0.00012s] (475,)
+Source Warehouse balance: total=10.000, reserved=3.000, available=7.000
+Acknowledging Material Issue...
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine SELECT material_issues.id, material_issues.issue_number, material_issues.mr_id, material_issues.indent_id, material_issues.warehouse_id, material_issues.destination_warehouse_id, material_issues.issue_date, material_issues.department, material_issues.issued_to, material_issues.status, material_issues.remarks, material_issues.issued_by, material_issues.dispatched_at, material_issues.created_at, material_issues.updated_at 
+FROM material_issues 
+WHERE material_issues.id = %s
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine [generated in 0.00051s] (155,)
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine SELECT material_issue_items.issue_id AS material_issue_items_issue_id, material_issue_items.id AS material_issue_items_id, material_issue_items.item_id AS material_issue_items_item_id, material_issue_items.batch_id AS material_issue_items_batch_id, material_issue_items.qty AS material_issue_items_qty, material_issue_items.uom_id AS material_issue_items_uom_id, material_issue_items.bin_id AS material_issue_items_bin_id, material_issue_items.rate AS material_issue_items_rate, material_issue_items.amount AS material_issue_items_amount, material_issue_items.prescriber_name AS material_issue_items_prescriber_name, material_issue_items.prescriber_license AS material_issue_items_prescriber_license, material_issue_items.patient_name AS material_issue_items_patient_name, material_issue_items.patient_id_text AS material_issue_items_patient_id_text, material_issue_items.serial_numbers AS material_issue_items_serial_numbers 
+FROM material_issue_items 
+WHERE material_issue_items.issue_id IN (%s)
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine [generated in 0.00018s] (155,)
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine SELECT users.active_role_id 
+FROM users 
+WHERE users.id = %s
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine [generated in 0.00013s] (50,)
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine SELECT roles.code 
+FROM roles 
+WHERE roles.id = %s AND roles.is_active = true
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine [generated in 0.00011s] (37,)
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine SELECT warehouses.id, warehouses.organization_id, warehouses.code, warehouses.name, warehouses.type, warehouses.address_line1, warehouses.address_line2, warehouses.city, warehouses.state, warehouses.pincode, warehouses.contact_person, warehouses.phone, warehouses.is_active, warehouses.created_at, warehouses.updated_at, warehouses.parent_id 
+FROM warehouses 
+WHERE warehouses.id = %s
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine [cached since 0.03125s ago] (43,)
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s AND stock_balance.reserved_qty > %s FOR UPDATE
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine [generated in 0.00011s] (175, 43, 0)
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine UPDATE stock_balance SET available_qty=%s, reserved_qty=%s, last_updated=%s WHERE stock_balance.id = %s
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine [cached since 0.02102s ago] (Decimal('10.000'), Decimal('0.000'), datetime.datetime(2026, 6, 25, 11, 31, 52, 943798, tzinfo=datetime.timezone.utc), 475)
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine SELECT warehouses.id, warehouses.organization_id, warehouses.code, warehouses.name, warehouses.type, warehouses.address_line1, warehouses.address_line2, warehouses.city, warehouses.state, warehouses.pincode, warehouses.contact_person, warehouses.phone, warehouses.is_active, warehouses.created_at, warehouses.updated_at, warehouses.parent_id 
+FROM warehouses 
+WHERE warehouses.id = %s
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine [cached since 0.03416s ago] (43,)
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s AND stock_balance.total_qty > %s FOR UPDATE
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine [generated in 0.00011s] (175, 43, 0)
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine SELECT warehouses.id, warehouses.organization_id, warehouses.code, warehouses.name, warehouses.type, warehouses.address_line1, warehouses.address_line2, warehouses.city, warehouses.state, warehouses.pincode, warehouses.contact_person, warehouses.phone, warehouses.is_active, warehouses.created_at, warehouses.updated_at, warehouses.parent_id 
+FROM warehouses 
+WHERE warehouses.id = %s
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine [cached since 0.03612s ago] (43,)
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s AND stock_balance.bin_id IS NULL AND stock_balance.batch_id IS NULL FOR UPDATE
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine [generated in 0.00011s] (175, 43)
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine INSERT INTO stock_ledger (item_id, warehouse_id, bin_id, batch_id, transaction_type, reference_type, reference_id, qty_in, qty_out, balance_qty, uom_id, rate, value_in, value_out, balance_value, posting_date, posting_time, created_by, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 17:01:52,943 INFO sqlalchemy.engine.Engine [generated in 0.00019s] (175, 43, None, None, 'material_issue', 'material_issue', 155, Decimal('0'), Decimal('3.000'), Decimal('7.000'), 12, Decimal('100.00'), Decimal('0.00'), Decimal('300.00000'), Decimal('700.00000'), datetime.date(2026, 6, 25), datetime.time(11, 31, 52, 943798), 50, datetime.datetime(2026, 6, 25, 11, 31, 52, 943798, tzinfo=datetime.timezone.utc))
+2026-06-25 17:01:52,962 INFO sqlalchemy.engine.Engine SELECT stock_balance.reserved_qty, stock_balance.transit_qty 
+FROM stock_balance 
+WHERE stock_balance.id = %s
+2026-06-25 17:01:52,962 INFO sqlalchemy.engine.Engine [generated in 0.00018s] (475,)
+2026-06-25 17:01:52,962 INFO sqlalchemy.engine.Engine UPDATE stock_balance SET available_qty=%s, total_qty=%s, stock_value=%s, last_updated=%s WHERE stock_balance.id = %s
+2026-06-25 17:01:52,962 INFO sqlalchemy.engine.Engine [generated in 0.00014s] (Decimal('7.000'), Decimal('7.000'), Decimal('700.00000'), datetime.datetime(2026, 6, 25, 11, 31, 52, 962727, tzinfo=datetime.timezone.utc), 475)
+2026-06-25 17:01:52,962 INFO sqlalchemy.engine.Engine SELECT items.id, items.category_id, items.item_code, items.readable_code, items.name, items.description, items.item_type, items.is_kit, items.uom_category_id, items.primary_uom_id, items.secondary_uom_id, items.hsn_code, items.sku, items.barcode_type, items.barcode_value, items.has_batch, items.has_serial, items.has_expiry, items.shelf_life_days, items.safety_stock, items.reorder_level, items.reorder_qty, items.lead_time_days, items.min_order_qty, items.max_order_qty, items.tax_rate, items.cgst_rate, items.sgst_rate, items.igst_rate, items.purchase_price, items.selling_price, items.mrp, items.image_url, items.brand, items.manufacturer, items.marketer, items.distributor, items.feature_id, items.ownership, items.dosage_form, items.valuation_method, items.dosage_form_code, items.coding_status, items.drug_schedule, items.is_schedule_h1, items.is_narcotic, items.requires_prescription, items.requires_cold_chain, items.min_storage_temp_c, items.max_storage_temp_c, items.regulatory_notes, items.special_storage_condition, items.storage_min_temp, items.storage_max_temp, items.storage_min_moisture, items.storage_max_moisture, items.storage_breakable, items.special_transport_condition, items.transport_min_temp, items.transport_max_temp, items.transport_min_moisture, items.transport_max_moisture, items.transport_breakable, items.is_active, items.created_by, items.created_at, items.updated_at 
+FROM items 
+WHERE items.id = %s
+2026-06-25 17:01:52,962 INFO sqlalchemy.engine.Engine [generated in 0.00016s] (175,)
+Item model is missing 'min_stock_level' attr (schema drift?) — BRE will see 0
+2026-06-25 17:01:52,977 INFO sqlalchemy.engine.Engine SAVEPOINT sa_savepoint_1
+2026-06-25 17:01:52,977 INFO sqlalchemy.engine.Engine [no key 0.00075s] ()
+2026-06-25 17:01:52,978 INFO sqlalchemy.engine.Engine SELECT business_rules.id, business_rules.name, business_rules.description, business_rules.trigger_event, business_rules.condition_json, business_rules.action_type, business_rules.action_config, business_rules.is_active, business_rules.organization_id, business_rules.created_by, business_rules.created_at, business_rules.last_fired_at, business_rules.fire_count 
+FROM business_rules 
+WHERE business_rules.trigger_event = %s AND business_rules.is_active = true
+2026-06-25 17:01:52,978 INFO sqlalchemy.engine.Engine [generated in 0.00017s] ('stock.balance_changed',)
+2026-06-25 17:01:52,978 INFO sqlalchemy.engine.Engine RELEASE SAVEPOINT sa_savepoint_1
+2026-06-25 17:01:52,978 INFO sqlalchemy.engine.Engine [no key 0.00014s] ()
+2026-06-25 17:01:52,978 INFO sqlalchemy.engine.Engine SELECT items.category_id 
+FROM items 
+WHERE items.id = %s
+2026-06-25 17:01:52,978 INFO sqlalchemy.engine.Engine [generated in 0.00013s] (175,)
+2026-06-25 17:01:52,978 INFO sqlalchemy.engine.Engine SELECT account_mappings.id, account_mappings.organization_id, account_mappings.event, account_mappings.item_category_id, account_mappings.warehouse_id, account_mappings.debit_account_id, account_mappings.credit_account_id, account_mappings.is_active, account_mappings.created_at 
+FROM account_mappings 
+WHERE account_mappings.organization_id = %s AND account_mappings.event = %s AND account_mappings.is_active = true AND (account_mappings.item_category_id = %s OR account_mappings.item_category_id IS NULL) AND (account_mappings.warehouse_id = %s OR account_mappings.warehouse_id IS NULL)
+2026-06-25 17:01:52,978 INFO sqlalchemy.engine.Engine [generated in 0.00016s] (1, 'issue', 113, 43)
+2026-06-25 17:01:53,028 INFO sqlalchemy.engine.Engine SELECT fiscal_years.id, fiscal_years.organization_id, fiscal_years.year_label, fiscal_years.start_date, fiscal_years.end_date, fiscal_years.is_closed, fiscal_years.closed_at, fiscal_years.closed_by, fiscal_years.created_at 
+FROM fiscal_years 
+WHERE fiscal_years.organization_id = %s AND fiscal_years.start_date <= %s AND fiscal_years.end_date >= %s AND fiscal_years.is_closed = true
+2026-06-25 17:01:53,028 INFO sqlalchemy.engine.Engine [generated in 0.00019s] (1, datetime.date(2026, 6, 25), datetime.date(2026, 6, 25))
+2026-06-25 17:01:53,028 INFO sqlalchemy.engine.Engine SELECT number_series.id, number_series.prefix, number_series.module, number_series.document_type, number_series.current_number, number_series.pad_length, number_series.fiscal_year, number_series.org_prefix, number_series.format_template, number_series.organization_id, number_series.code 
+FROM number_series 
+WHERE number_series.module = %s AND number_series.document_type = %s AND number_series.fiscal_year = %s FOR UPDATE
+2026-06-25 17:01:53,028 INFO sqlalchemy.engine.Engine [generated in 0.00016s] ('accounts', 'journal_entry', '26-27')
+2026-06-25 17:01:53,043 INFO sqlalchemy.engine.Engine UPDATE number_series SET current_number=%s WHERE number_series.id = %s
+2026-06-25 17:01:53,043 INFO sqlalchemy.engine.Engine [generated in 0.00027s] (17, 156)
+2026-06-25 17:01:53,063 INFO sqlalchemy.engine.Engine INSERT INTO journal_entries (entry_number, entry_date, entry_type, organization_id, project_id, reference_type, reference_id, total_debit, total_credit, narration, status, created_by, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 17:01:53,063 INFO sqlalchemy.engine.Engine [generated in 0.00055s] ('BHSPL/26-27/JE/00017', datetime.date(2026, 6, 25), 'journal', None, None, 'material_issue', 155, Decimal('300.00'), Decimal('300.00'), 'Material Issue TEST-MI-001', 'posted', 50, datetime.datetime(2026, 6, 25, 11, 31, 53, 63899, tzinfo=datetime.timezone.utc))
+2026-06-25 17:01:53,078 INFO sqlalchemy.engine.Engine INSERT INTO account_ledger (account_id, posting_date, party_type, party_id, project_id, po_id, reference_type, reference_id, debit, credit, balance, narration, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 17:01:53,078 INFO sqlalchemy.engine.Engine [generated in 0.00060s] (73, datetime.date(2026, 6, 25), None, None, None, None, 'material_issue', 155, Decimal('300.00000'), Decimal('0'), Decimal('300.00000'), 'Issue TEST-MI-001 item 175', datetime.datetime(2026, 6, 25, 11, 31, 53, 78616, tzinfo=datetime.timezone.utc))
+2026-06-25 17:01:53,096 INFO sqlalchemy.engine.Engine INSERT INTO account_ledger (account_id, posting_date, party_type, party_id, project_id, po_id, reference_type, reference_id, debit, credit, balance, narration, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 17:01:53,096 INFO sqlalchemy.engine.Engine [cached since 0.02039s ago] (52, datetime.date(2026, 6, 25), None, None, None, None, 'material_issue', 155, Decimal('0'), Decimal('300.00000'), Decimal('-300.00000'), 'Issue TEST-MI-001 item 175', datetime.datetime(2026, 6, 25, 11, 31, 53, 96184, tzinfo=datetime.timezone.utc))
+2026-06-25 17:01:53,096 INFO sqlalchemy.engine.Engine INSERT INTO journal_entry_lines (je_id, account_id, debit, credit, party_type, party_id, narration) VALUES (%s, %s, %s, %s, %s, %s, %s)
+2026-06-25 17:01:53,096 INFO sqlalchemy.engine.Engine [generated in 0.00036s] (87, 73, Decimal('300.00000'), Decimal('0'), None, None, 'Issue TEST-MI-001 item 175')
+2026-06-25 17:01:53,110 INFO sqlalchemy.engine.Engine INSERT INTO journal_entry_lines (je_id, account_id, debit, credit, party_type, party_id, narration) VALUES (%s, %s, %s, %s, %s, %s, %s)
+2026-06-25 17:01:53,111 INFO sqlalchemy.engine.Engine [cached since 0.008097s ago] (87, 52, Decimal('0'), Decimal('300.00000'), None, None, 'Issue TEST-MI-001 item 175')
+2026-06-25 17:01:53,115 INFO sqlalchemy.engine.Engine UPDATE material_issues SET status=%s, updated_at=%s WHERE material_issues.id = %s
+2026-06-25 17:01:53,115 INFO sqlalchemy.engine.Engine [cached since 0.1774s ago] ('acknowledged', datetime.datetime(2026, 6, 25, 11, 31, 53, 115367, tzinfo=datetime.timezone.utc), 155)
+2026-06-25 17:01:53,117 INFO sqlalchemy.engine.Engine SELECT warehouses.id, warehouses.organization_id, warehouses.code, warehouses.name, warehouses.type, warehouses.address_line1, warehouses.address_line2, warehouses.city, warehouses.state, warehouses.pincode, warehouses.contact_person, warehouses.phone, warehouses.is_active, warehouses.created_at, warehouses.updated_at, warehouses.parent_id 
+FROM warehouses 
+WHERE warehouses.id = %s
+2026-06-25 17:01:53,118 INFO sqlalchemy.engine.Engine [cached since 0.1985s ago] (36,)
+2026-06-25 17:01:53,119 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s AND stock_balance.bin_id IS NULL AND stock_balance.batch_id IS NULL FOR UPDATE
+2026-06-25 17:01:53,119 INFO sqlalchemy.engine.Engine [cached since 0.1634s ago] (175, 36)
+2026-06-25 17:01:53,121 INFO sqlalchemy.engine.Engine SAVEPOINT sa_savepoint_2
+2026-06-25 17:01:53,121 INFO sqlalchemy.engine.Engine [no key 0.00033s] ()
+2026-06-25 17:01:53,122 INFO sqlalchemy.engine.Engine INSERT INTO stock_balance (item_id, warehouse_id, bin_id, batch_id, available_qty, reserved_qty, transit_qty, total_qty, valuation_rate, stock_value, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 17:01:53,122 INFO sqlalchemy.engine.Engine [cached since 0.2312s ago] (175, 36, None, None, Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'), datetime.datetime(2026, 6, 25, 11, 31, 53, 122170, tzinfo=datetime.timezone.utc))
+2026-06-25 17:01:53,124 INFO sqlalchemy.engine.Engine RELEASE SAVEPOINT sa_savepoint_2
+2026-06-25 17:01:53,124 INFO sqlalchemy.engine.Engine [no key 0.00016s] ()
+2026-06-25 17:01:53,124 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s AND stock_balance.bin_id IS NULL AND stock_balance.batch_id IS NULL FOR UPDATE
+2026-06-25 17:01:53,124 INFO sqlalchemy.engine.Engine [cached since 0.1682s ago] (175, 36)
+2026-06-25 17:01:53,127 INFO sqlalchemy.engine.Engine INSERT INTO stock_ledger (item_id, warehouse_id, bin_id, batch_id, transaction_type, reference_type, reference_id, qty_in, qty_out, balance_qty, uom_id, rate, value_in, value_out, balance_value, posting_date, posting_time, created_by, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 17:01:53,127 INFO sqlalchemy.engine.Engine [cached since 0.1694s ago] (175, 36, None, None, 'material_issue', 'material_issue', 155, Decimal('3.000'), Decimal('0'), Decimal('3.000'), 12, Decimal('100.00'), Decimal('300.00000'), Decimal('0.00'), Decimal('300.00000'), datetime.date(2026, 6, 25), datetime.time(11, 31, 53, 126485), 50, datetime.datetime(2026, 6, 25, 11, 31, 53, 127628, tzinfo=datetime.timezone.utc))
+2026-06-25 17:01:53,132 INFO sqlalchemy.engine.Engine SELECT stock_balance.reserved_qty, stock_balance.transit_qty 
+FROM stock_balance 
+WHERE stock_balance.id = %s
+2026-06-25 17:01:53,132 INFO sqlalchemy.engine.Engine [cached since 0.1634s ago] (476,)
+2026-06-25 17:01:53,134 INFO sqlalchemy.engine.Engine UPDATE stock_balance SET available_qty=%s, total_qty=%s, valuation_rate=%s, stock_value=%s, last_updated=%s WHERE stock_balance.id = %s
+2026-06-25 17:01:53,134 INFO sqlalchemy.engine.Engine [generated in 0.00020s] (Decimal('3.000'), Decimal('3.000'), Decimal('100.0000'), Decimal('300.00000'), datetime.datetime(2026, 6, 25, 11, 31, 53, 134263, tzinfo=datetime.timezone.utc), 476)
+2026-06-25 17:01:53,135 INFO sqlalchemy.engine.Engine SELECT items.id, items.category_id, items.item_code, items.readable_code, items.name, items.description, items.item_type, items.is_kit, items.uom_category_id, items.primary_uom_id, items.secondary_uom_id, items.hsn_code, items.sku, items.barcode_type, items.barcode_value, items.has_batch, items.has_serial, items.has_expiry, items.shelf_life_days, items.safety_stock, items.reorder_level, items.reorder_qty, items.lead_time_days, items.min_order_qty, items.max_order_qty, items.tax_rate, items.cgst_rate, items.sgst_rate, items.igst_rate, items.purchase_price, items.selling_price, items.mrp, items.image_url, items.brand, items.manufacturer, items.marketer, items.distributor, items.feature_id, items.ownership, items.dosage_form, items.valuation_method, items.dosage_form_code, items.coding_status, items.drug_schedule, items.is_schedule_h1, items.is_narcotic, items.requires_prescription, items.requires_cold_chain, items.min_storage_temp_c, items.max_storage_temp_c, items.regulatory_notes, items.special_storage_condition, items.storage_min_temp, items.storage_max_temp, items.storage_min_moisture, items.storage_max_moisture, items.storage_breakable, items.special_transport_condition, items.transport_min_temp, items.transport_max_temp, items.transport_min_moisture, items.transport_max_moisture, items.transport_breakable, items.is_active, items.created_by, items.created_at, items.updated_at 
+FROM items 
+WHERE items.id = %s
+2026-06-25 17:01:53,135 INFO sqlalchemy.engine.Engine [cached since 0.1609s ago] (175,)
+Item model is missing 'min_stock_level' attr (schema drift?) — BRE will see 0
+2026-06-25 17:01:53,137 INFO sqlalchemy.engine.Engine SAVEPOINT sa_savepoint_3
+2026-06-25 17:01:53,137 INFO sqlalchemy.engine.Engine [no key 0.00010s] ()
+2026-06-25 17:01:53,137 INFO sqlalchemy.engine.Engine SELECT business_rules.id, business_rules.name, business_rules.description, business_rules.trigger_event, business_rules.condition_json, business_rules.action_type, business_rules.action_config, business_rules.is_active, business_rules.organization_id, business_rules.created_by, business_rules.created_at, business_rules.last_fired_at, business_rules.fire_count 
+FROM business_rules 
+WHERE business_rules.trigger_event = %s AND business_rules.is_active = true
+2026-06-25 17:01:53,137 INFO sqlalchemy.engine.Engine [cached since 0.1555s ago] ('stock.balance_changed',)
+2026-06-25 17:01:53,138 INFO sqlalchemy.engine.Engine RELEASE SAVEPOINT sa_savepoint_3
+2026-06-25 17:01:53,138 INFO sqlalchemy.engine.Engine [no key 0.00009s] ()
+2026-06-25 17:01:53,138 INFO sqlalchemy.engine.Engine SELECT material_issues.id, material_issues.issue_number, material_issues.mr_id, material_issues.indent_id, material_issues.warehouse_id, material_issues.destination_warehouse_id, material_issues.issue_date, material_issues.department, material_issues.issued_to, material_issues.status, material_issues.remarks, material_issues.issued_by, material_issues.dispatched_at, material_issues.created_at, material_issues.updated_at 
+FROM material_issues 
+WHERE material_issues.id = %s
+2026-06-25 17:01:53,138 INFO sqlalchemy.engine.Engine [cached since 0.1977s ago] (155,)
+MaterialIssue status after acknowledgment: acknowledged
+2026-06-25 17:01:53,139 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.id = %s
+2026-06-25 17:01:53,139 INFO sqlalchemy.engine.Engine [cached since 0.1973s ago] (475,)
+Source Warehouse balance after ack: total=7.000, reserved=0.000, available=7.000
+2026-06-25 17:01:53,140 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s 
+ LIMIT %s
+2026-06-25 17:01:53,140 INFO sqlalchemy.engine.Engine [cached since 0.252s ago] (175, 36, 1)
+Destination Warehouse balance after ack: total=3.000, available=3.000
+2026-06-25 17:01:53,141 INFO sqlalchemy.engine.Engine SELECT stock_ledger.id, stock_ledger.item_id, stock_ledger.warehouse_id, stock_ledger.bin_id, stock_ledger.batch_id, stock_ledger.transaction_type, stock_ledger.reference_type, stock_ledger.reference_id, stock_ledger.qty_in, stock_ledger.qty_out, stock_ledger.balance_qty, stock_ledger.uom_id, stock_ledger.rate, stock_ledger.value_in, stock_ledger.value_out, stock_ledger.balance_value, stock_ledger.posting_date, stock_ledger.posting_time, stock_ledger.created_by, stock_ledger.created_at 
+FROM stock_ledger 
+WHERE stock_ledger.item_id = %s AND stock_ledger.reference_type = %s AND stock_ledger.reference_id = %s
+2026-06-25 17:01:53,141 INFO sqlalchemy.engine.Engine [generated in 0.00020s] (175, 'material_issue', 155)
+Ledger entries posted for this issue: 2
+  - Warehouse ID: 43, Qty In: 0.000, Qty Out: 3.000
+  - Warehouse ID: 36, Qty In: 3.000, Qty Out: 0.000
+=== VERIFICATION COMPLETED: ALL TESTS PASSED! ===
+2026-06-25 17:01:53,144 INFO sqlalchemy.engine.Engine ROLLBACK
+Rollback executed cleanly.
+Exception ignored in: <function Connection.__del__ at 0x000001DB68A18400>
+Traceback (most recent call last):
+  File "C:\Users\User-4\AppData\Local\Programs\Python\Python311\Lib\site-packages\aiomysql\connection.py", line 1131, in __del__
+  File "C:\Users\User-4\AppData\Local\Programs\Python\Python311\Lib\site-packages\aiomysql\connection.py", line 339, in close
+  File "C:\Users\User-4\AppData\Local\Programs\Python\Python311\Lib\asyncio\proactor_events.py", line 109, in close
+  File "C:\Users\User-4\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 761, in call_soon
+  File "C:\Users\User-4\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 519, in _check_closed
+RuntimeError: Event loop is closed

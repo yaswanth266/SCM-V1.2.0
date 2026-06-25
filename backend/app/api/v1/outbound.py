@@ -1214,6 +1214,24 @@ async def acknowledge_delivery(
         dest_wh_id = new_ack.destination_warehouse_id or d.destination_warehouse_id
         if dest_wh_id and dest_wh_id != d.warehouse_id:
             try:
+                # Check if already processed to avoid double posting
+                from app.models.stock import StockLedger
+                from app.models.dispatch import DispatchDeliveryAcknowledgement
+                ack_res = await db.execute(
+                    select(DispatchDeliveryAcknowledgement.id).where(DispatchDeliveryAcknowledgement.dispatch_id == d.id)
+                )
+                ack_ids = ack_res.scalars().all()
+                if ack_ids:
+                    dup_ledger_q = await db.execute(
+                        select(StockLedger).where(
+                            StockLedger.reference_type == "dispatch_acknowledgement",
+                            StockLedger.reference_id.in_(ack_ids),
+                            StockLedger.item_id == it.material_id,
+                        ).limit(1)
+                    )
+                    if dup_ledger_q.scalar_one_or_none():
+                        continue
+
                 batch_id = None
                 bin_id = None
                 

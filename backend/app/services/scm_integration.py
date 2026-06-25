@@ -187,8 +187,52 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
             db.add(indent)
 
             # 3.5 Stock Ledger Movement: If inter-warehouse transfer, transfer stock from transit to destination warehouse
+            # Check if ledger entries exist under dispatch_acknowledgement or sdo_final_delivery
+            # to prevent duplicate stock crediting at the destination warehouse.
+            dup_exists = False
+            try:
+                from app.models.stock import StockLedger
+                from sqlalchemy import or_
+                conds = []
+                
+                # Check for dispatch acknowledgement ids
+                if dispatch_order:
+                    from app.models.dispatch import DispatchDeliveryAcknowledgement
+                    ack_res = await db.execute(
+                        select(DispatchDeliveryAcknowledgement.id).where(DispatchDeliveryAcknowledgement.dispatch_id == dispatch_order.id)
+                    )
+                    ack_ids = ack_res.scalars().all()
+                    if ack_ids:
+                        conds.append(
+                            (StockLedger.reference_type == "dispatch_acknowledgement") &
+                            StockLedger.reference_id.in_(ack_ids)
+                        )
+                
+                # Check for SDO final delivery ids
+                sdo_ids = [s.id for s in mdo.sdos]
+                if sdo_ids:
+                    conds.append(
+                        (StockLedger.reference_type == "sdo_final_delivery") &
+                        StockLedger.reference_id.in_(sdo_ids)
+                    )
+                
+                if conds:
+                    dup_ledger_q = await db.execute(
+                        select(StockLedger).where(
+                            or_(*conds),
+                            StockLedger.qty_in > 0
+                        ).limit(1)
+                    )
+                    if dup_ledger_q.scalar_one_or_none():
+                        dup_exists = True
+            except Exception as ex:
+                print(f"[SCM Integration] Failed duplicate ledger check: {ex}")
+
             if dispatch_order and dispatch_order.delivery_acknowledged:
                 # Stock transfer is already handled by dispatch acknowledgment endpoint
+                pass
+            elif dup_exists:
+                # Stock transfer is already handled by dispatch acknowledgment or final leg receive
                 pass
             elif mdo.destination_warehouse_id and mdo.destination_warehouse_id != mdo.warehouse_id:
                 try:

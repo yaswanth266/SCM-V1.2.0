@@ -223,12 +223,13 @@ const MaterialIssueForm = () => {
       });
       const rows = res.data?.items || res.data?.data || res.data || [];
       if (!Array.isArray(rows)) {
-        setStockMap({});
-        setRateMap({});
         return;
       }
       const map = {};
       const rates = {};
+      itemIds.forEach((id) => {
+        map[id] = 0;
+      });
       rows.forEach((r) => {
         const k = r.item_id;
         const key = k || r.item_code;
@@ -239,11 +240,10 @@ const MaterialIssueForm = () => {
           }
         }
       });
-      setStockMap(map);
-      setRateMap(rates);
-    } catch {
-      setStockMap({});
-      setRateMap({});
+      setStockMap((prev) => ({ ...prev, ...map }));
+      setRateMap((prev) => ({ ...prev, ...rates }));
+    } catch (err) {
+      console.error('refreshStockForItems error:', err);
     }
   }, []);
 
@@ -258,7 +258,7 @@ const MaterialIssueForm = () => {
 
       const batchMap = new Map();
       const binMap = new Map();
-      
+
       rows.forEach((r) => {
         const bid = r.batch_id;
         const bName = r.batch_number || r.batch_name || (bid ? `Batch ${bid}` : 'No Batch');
@@ -322,8 +322,8 @@ const MaterialIssueForm = () => {
 
       // Auto-select if there is only one option to save user clicks
       const currentItems = form.getFieldValue('items') || [];
-      const hasUpdates = currentItems.some(it => 
-        it.item_id === itemId && 
+      const hasUpdates = currentItems.some(it =>
+        it.item_id === itemId &&
         ((batches.length === 1 && !it.batch_id) || (bins.length === 1 && !it.bin_id))
       );
 
@@ -395,7 +395,7 @@ const MaterialIssueForm = () => {
           Number(
             it.issue_remaining_qty ?? (
               (Number(it.approved_qty ?? it.requested_qty) || 0)
-                - (Number(it.issued_qty) || 0)
+              - (Number(it.issued_qty) || 0)
             ),
           ) || 0,
           0,
@@ -999,7 +999,7 @@ const MaterialIssueForm = () => {
                   rateUpdate = { rate: selectedBatch.rate };
                 }
               }
-              
+
               // Filter current bin selection to only bins that are valid for the new batch selection
               let updatedBinIds = record.bin_ids || (record.bin_id ? [record.bin_id] : []);
               if (selectedValues.length > 0) {
@@ -1055,7 +1055,7 @@ const MaterialIssueForm = () => {
             />
           );
         }
-        
+
         const selectedBatches = record.batch_ids || (record.batch_id ? [record.batch_id] : []);
         if (record.has_batch && selectedBatches.length === 0) {
           return (

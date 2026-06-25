@@ -643,6 +643,7 @@ class SoAcknowledge(BaseModel):
 class VehicleStatusUpdate(BaseModel):
     nextStatus: str
     gatePassNumber: Optional[str] = None
+    gateOutPassNumber: Optional[str] = None
     loadingBayNumber: Optional[str] = None
     lrNumber: Optional[str] = None
     ewayBillNumber: Optional[str] = None

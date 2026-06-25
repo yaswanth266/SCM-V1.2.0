@@ -101,16 +101,10 @@ const AcknowledgeDelivery = () => {
     const opWh = warehouses.find(w => w.id === selectedWarehouseId);
     if (!opWh) return false;
 
-    // Check if it is parent-less
-    if (opWh.parent_id === null || !opWh.parent_id) {
-      // Parent-less: see all dispatches, except those issued by itself
-      return d.warehouse_id !== selectedWarehouseId;
-    } else {
-      // Child sub-warehouse: see only dispatches destined to itself or its descendants
-      const descendants = getDescendantWarehouseIds(selectedWarehouseId, warehouses);
-      const allowedIds = [selectedWarehouseId, ...descendants];
-      return allowedIds.includes(d.destination_warehouse_id);
-    }
+    // See only dispatches destined to itself or its descendants
+    const descendants = getDescendantWarehouseIds(selectedWarehouseId, warehouses);
+    const allowedIds = [selectedWarehouseId, ...descendants];
+    return allowedIds.includes(d.destination_warehouse_id);
   });
 
   // Handle URL Deep link matching on load

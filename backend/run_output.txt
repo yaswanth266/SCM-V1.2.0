@@ -1,0 +1,658 @@
+--- RUNNING HIERARCHICAL ACKNOWLEDGEMENT VERIFICATION ---
+2026-06-25 16:48:43,605 INFO sqlalchemy.engine.Engine SELECT DATABASE()
+2026-06-25 16:48:43,609 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-25 16:48:43,613 INFO sqlalchemy.engine.Engine SELECT @@sql_mode
+2026-06-25 16:48:43,613 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-25 16:48:43,613 INFO sqlalchemy.engine.Engine SELECT @@lower_case_table_names
+2026-06-25 16:48:43,613 INFO sqlalchemy.engine.Engine [raw sql] ()
+2026-06-25 16:48:43,615 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-06-25 16:48:44,175 INFO sqlalchemy.engine.Engine SELECT material_issues.id, material_issues.issue_number, material_issues.mr_id, material_issues.indent_id, material_issues.warehouse_id, material_issues.destination_warehouse_id, material_issues.issue_date, material_issues.department, material_issues.issued_to, material_issues.status, material_issues.remarks, material_issues.issued_by, material_issues.dispatched_at, material_issues.created_at, material_issues.updated_at 
+FROM material_issues 
+WHERE material_issues.status = %s
+2026-06-25 16:48:44,175 INFO sqlalchemy.engine.Engine [generated in 0.00063s] ('dispatched',)
+Using MaterialIssue ID: 98, Issued To User ID: 49
+2026-06-25 16:48:44,188 INFO sqlalchemy.engine.Engine SELECT users.id, users.organization_id, users.employee_code, users.username, users.email, users.password_hash, users.first_name, users.last_name, users.phone, users.avatar_url, users.user_type, users.department, users.designation, users.is_active, users.last_login, users.password_changed_at, users.failed_login_attempts, users.locked_until, users.tokens_revoked_after, users.active_role_id, users.employee_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,188 INFO sqlalchemy.engine.Engine [generated in 0.00023s] (49,)
+2026-06-25 16:48:44,194 INFO sqlalchemy.engine.Engine SELECT roles.id AS roles_id, roles.name AS roles_name, roles.code AS roles_code, roles.description AS roles_description, roles.role_type AS roles_role_type, roles.is_active AS roles_is_active, roles.organization_id AS roles_organization_id, roles.created_at AS roles_created_at, roles.updated_at AS roles_updated_at 
+FROM roles 
+WHERE roles.id IN (%s)
+2026-06-25 16:48:44,194 INFO sqlalchemy.engine.Engine [generated in 0.00040s] (37,)
+2026-06-25 16:48:44,203 INFO sqlalchemy.engine.Engine SELECT employees.id AS employees_id, employees.employee_code AS employees_employee_code, employees.name AS employees_name, employees.photo AS employees_photo, employees.status AS employees_status, employees.dob AS employees_dob, employees.gender AS employees_gender, employees.pan_number AS employees_pan_number, employees.aadhaar_number AS employees_aadhaar_number, employees.email AS employees_email, employees.phone AS employees_phone, employees.hire_date AS employees_hire_date, employees.bank_details AS employees_bank_details, employees.position_id AS employees_position_id, employees.created_at AS employees_created_at, employees.updated_at AS employees_updated_at 
+FROM employees 
+WHERE employees.id IN (%s)
+2026-06-25 16:48:44,205 INFO sqlalchemy.engine.Engine [generated in 0.00028s] (11040,)
+Receiver: JOHN  (Emp ID: 11040)
+2026-06-25 16:48:44,209 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,210 INFO sqlalchemy.engine.Engine [generated in 0.00122s] (11040,)
+2026-06-25 16:48:44,212 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,212 INFO sqlalchemy.engine.Engine [generated in 0.00045s] (2375,)
+Receiver Position: LAB TECHNICIAN (Parent Position ID: 5863)
+2026-06-25 16:48:44,219 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,219 INFO sqlalchemy.engine.Engine [cached since 0.004729s ago] (5863,)
+Parent Position: OE-AP-104-MMU-KOVVUR
+2026-06-25 16:48:44,221 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.position_id = %s
+2026-06-25 16:48:44,222 INFO sqlalchemy.engine.Engine [generated in 0.00022s] (5863,)
+No employee occupies the parent position 5863. Let's find a non-admin user to temporarily map for testing.
+2026-06-25 16:48:44,223 INFO sqlalchemy.engine.Engine SELECT users.id, users.organization_id, users.employee_code, users.username, users.email, users.password_hash, users.first_name, users.last_name, users.phone, users.avatar_url, users.user_type, users.department, users.designation, users.is_active, users.last_login, users.password_changed_at, users.failed_login_attempts, users.locked_until, users.tokens_revoked_after, users.active_role_id, users.employee_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id != %s AND users.employee_id IS NOT NULL
+2026-06-25 16:48:44,223 INFO sqlalchemy.engine.Engine [generated in 0.00027s] (49,)
+2026-06-25 16:48:44,228 INFO sqlalchemy.engine.Engine SELECT roles.id AS roles_id, roles.name AS roles_name, roles.code AS roles_code, roles.description AS roles_description, roles.role_type AS roles_role_type, roles.is_active AS roles_is_active, roles.organization_id AS roles_organization_id, roles.created_at AS roles_created_at, roles.updated_at AS roles_updated_at 
+FROM roles 
+WHERE roles.id IN (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 16:48:44,228 INFO sqlalchemy.engine.Engine [cached since 0.03369s ago] (1, 4, 18, 19, 20, 22, 28, 34, 37)
+2026-06-25 16:48:44,233 INFO sqlalchemy.engine.Engine SELECT employees.id AS employees_id, employees.employee_code AS employees_employee_code, employees.name AS employees_name, employees.photo AS employees_photo, employees.status AS employees_status, employees.dob AS employees_dob, employees.gender AS employees_gender, employees.pan_number AS employees_pan_number, employees.aadhaar_number AS employees_aadhaar_number, employees.email AS employees_email, employees.phone AS employees_phone, employees.hire_date AS employees_hire_date, employees.bank_details AS employees_bank_details, employees.position_id AS employees_position_id, employees.created_at AS employees_created_at, employees.updated_at AS employees_updated_at 
+FROM employees 
+WHERE employees.id IN (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 16:48:44,234 INFO sqlalchemy.engine.Engine [cached since 0.02957s ago] (7103, 7106, 7112, 7113, 7114, 7115, 7135, 7136, 7137, 7138, 7415, 7416, 7587, 7690, 7693, 7694, 7695, 7696, 7698, 7699, 7704, 7706, 8243, 8557, 8623, 8761, 9154, 9294, 10193, 10194, 10388, 10475, 10581, 10884, 10885, 10887, 10906, 10907, 10908, 10909, 10910, 10925, 10926, 10927, 10928, 10929, 10950, 10951, 10952, 10953, 10954, 10978, 10979, 10980, 10982, 10989, 10990, 10991, 10992, 11000, 11002, 11003, 11019, 11021, 11022, 11023, 11024, 11029, 11030, 11031, 11032, 11037, 11038, 11039, 11041, 11076, 11077, 11080, 11081, 11085, 11096)
+2026-06-25 16:48:44,239 INFO sqlalchemy.engine.Engine SELECT users.active_role_id 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,239 INFO sqlalchemy.engine.Engine [generated in 0.00042s] (7,)
+2026-06-25 16:48:44,244 INFO sqlalchemy.engine.Engine SELECT roles.code 
+FROM roles 
+WHERE roles.id = %s AND roles.is_active = true
+2026-06-25 16:48:44,245 INFO sqlalchemy.engine.Engine [generated in 0.00047s] (1,)
+2026-06-25 16:48:44,245 INFO sqlalchemy.engine.Engine SELECT users.active_role_id 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,245 INFO sqlalchemy.engine.Engine [cached since 0.006618s ago] (45,)
+2026-06-25 16:48:44,245 INFO sqlalchemy.engine.Engine SELECT roles.code 
+FROM roles 
+WHERE roles.id = %s AND roles.is_active = true
+2026-06-25 16:48:44,245 INFO sqlalchemy.engine.Engine [cached since 0.004793s ago] (37,)
+Found non-admin candidate user: ID=45, Name=Naveen_m
+2026-06-25 16:48:44,251 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,251 INFO sqlalchemy.engine.Engine [cached since 0.04219s ago] (11041,)
+2026-06-25 16:48:44,253 INFO sqlalchemy.engine.Engine UPDATE employees SET position_id=%s, updated_at=%s WHERE employees.id = %s
+2026-06-25 16:48:44,253 INFO sqlalchemy.engine.Engine [generated in 0.00025s] (5863, datetime.datetime(2026, 6, 25, 11, 18, 44, 253951, tzinfo=datetime.timezone.utc), 11041)
+Temporarily mapped User 45 (Naveen_m) to Position 5863
+1. Testing Manager Acknowledgment (should succeed or raise non-403)...
+2026-06-25 16:48:44,256 INFO sqlalchemy.engine.Engine SAVEPOINT sa_savepoint_1
+2026-06-25 16:48:44,256 INFO sqlalchemy.engine.Engine [no key 0.00016s] ()
+2026-06-25 16:48:44,261 INFO sqlalchemy.engine.Engine SELECT material_issues.id, material_issues.issue_number, material_issues.mr_id, material_issues.indent_id, material_issues.warehouse_id, material_issues.destination_warehouse_id, material_issues.issue_date, material_issues.department, material_issues.issued_to, material_issues.status, material_issues.remarks, material_issues.issued_by, material_issues.dispatched_at, material_issues.created_at, material_issues.updated_at 
+FROM material_issues 
+WHERE material_issues.id = %s
+2026-06-25 16:48:44,261 INFO sqlalchemy.engine.Engine [generated in 0.00057s] (98,)
+2026-06-25 16:48:44,267 INFO sqlalchemy.engine.Engine SELECT material_issue_items.issue_id AS material_issue_items_issue_id, material_issue_items.id AS material_issue_items_id, material_issue_items.item_id AS material_issue_items_item_id, material_issue_items.batch_id AS material_issue_items_batch_id, material_issue_items.qty AS material_issue_items_qty, material_issue_items.uom_id AS material_issue_items_uom_id, material_issue_items.bin_id AS material_issue_items_bin_id, material_issue_items.rate AS material_issue_items_rate, material_issue_items.amount AS material_issue_items_amount, material_issue_items.prescriber_name AS material_issue_items_prescriber_name, material_issue_items.prescriber_license AS material_issue_items_prescriber_license, material_issue_items.patient_name AS material_issue_items_patient_name, material_issue_items.patient_id_text AS material_issue_items_patient_id_text, material_issue_items.serial_numbers AS material_issue_items_serial_numbers 
+FROM material_issue_items 
+WHERE material_issue_items.issue_id IN (%s)
+2026-06-25 16:48:44,267 INFO sqlalchemy.engine.Engine [generated in 0.00028s] (98,)
+2026-06-25 16:48:44,270 INFO sqlalchemy.engine.Engine SELECT users.active_role_id 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,270 INFO sqlalchemy.engine.Engine [cached since 0.03071s ago] (45,)
+2026-06-25 16:48:44,272 INFO sqlalchemy.engine.Engine SELECT roles.code 
+FROM roles 
+WHERE roles.id = %s AND roles.is_active = true
+2026-06-25 16:48:44,272 INFO sqlalchemy.engine.Engine [cached since 0.028s ago] (37,)
+2026-06-25 16:48:44,272 INFO sqlalchemy.engine.Engine SELECT users.id, users.organization_id, users.employee_code, users.username, users.email, users.password_hash, users.first_name, users.last_name, users.phone, users.avatar_url, users.user_type, users.department, users.designation, users.is_active, users.last_login, users.password_changed_at, users.failed_login_attempts, users.locked_until, users.tokens_revoked_after, users.active_role_id, users.employee_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,277 INFO sqlalchemy.engine.Engine [cached since 0.08902s ago] (49,)
+2026-06-25 16:48:44,279 INFO sqlalchemy.engine.Engine SELECT roles.id AS roles_id, roles.name AS roles_name, roles.code AS roles_code, roles.description AS roles_description, roles.role_type AS roles_role_type, roles.is_active AS roles_is_active, roles.organization_id AS roles_organization_id, roles.created_at AS roles_created_at, roles.updated_at AS roles_updated_at 
+FROM roles 
+WHERE roles.id IN (%s)
+2026-06-25 16:48:44,279 INFO sqlalchemy.engine.Engine [cached since 0.08274s ago] (37,)
+2026-06-25 16:48:44,279 INFO sqlalchemy.engine.Engine SELECT employees.id AS employees_id, employees.employee_code AS employees_employee_code, employees.name AS employees_name, employees.photo AS employees_photo, employees.status AS employees_status, employees.dob AS employees_dob, employees.gender AS employees_gender, employees.pan_number AS employees_pan_number, employees.aadhaar_number AS employees_aadhaar_number, employees.email AS employees_email, employees.phone AS employees_phone, employees.hire_date AS employees_hire_date, employees.bank_details AS employees_bank_details, employees.position_id AS employees_position_id, employees.created_at AS employees_created_at, employees.updated_at AS employees_updated_at 
+FROM employees 
+WHERE employees.id IN (%s)
+2026-06-25 16:48:44,279 INFO sqlalchemy.engine.Engine [cached since 0.07873s ago] (11040,)
+2026-06-25 16:48:44,286 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,286 INFO sqlalchemy.engine.Engine [cached since 0.07655s ago] (11040,)
+2026-06-25 16:48:44,287 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,287 INFO sqlalchemy.engine.Engine [cached since 0.07254s ago] (2375,)
+2026-06-25 16:48:44,289 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,289 INFO sqlalchemy.engine.Engine [cached since 0.0745s ago] (5863,)
+2026-06-25 16:48:44,289 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,289 INFO sqlalchemy.engine.Engine [cached since 0.07594s ago] (5917,)
+2026-06-25 16:48:44,289 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,289 INFO sqlalchemy.engine.Engine [cached since 0.07699s ago] (3,)
+2026-06-25 16:48:44,294 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,294 INFO sqlalchemy.engine.Engine [cached since 0.08029s ago] (5929,)
+2026-06-25 16:48:44,294 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,294 INFO sqlalchemy.engine.Engine [cached since 0.08846s ago] (11041,)
+2026-06-25 16:48:44,300 INFO sqlalchemy.engine.Engine SELECT positions.id 
+FROM positions 
+WHERE positions.employee_id = %s
+2026-06-25 16:48:44,300 INFO sqlalchemy.engine.Engine [generated in 0.00021s] (11041,)
+2026-06-25 16:48:44,303 INFO sqlalchemy.engine.Engine UPDATE material_issues SET status=%s, updated_at=%s WHERE material_issues.id = %s
+2026-06-25 16:48:44,303 INFO sqlalchemy.engine.Engine [generated in 0.00023s] ('acknowledged', datetime.datetime(2026, 6, 25, 11, 18, 44, 303539, tzinfo=datetime.timezone.utc), 98)
+2026-06-25 16:48:44,304 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s AND stock_balance.bin_id = %s AND stock_balance.batch_id = %s FOR UPDATE
+2026-06-25 16:48:44,304 INFO sqlalchemy.engine.Engine [generated in 0.00025s] (181, 18, 288, 81)
+2026-06-25 16:48:44,312 INFO sqlalchemy.engine.Engine UPDATE stock_balance SET transit_qty=%s, last_updated=%s WHERE stock_balance.id = %s
+2026-06-25 16:48:44,312 INFO sqlalchemy.engine.Engine [generated in 0.00029s] (Decimal('0'), datetime.datetime(2026, 6, 25, 11, 18, 44, 312922, tzinfo=datetime.timezone.utc), 110)
+2026-06-25 16:48:44,319 INFO sqlalchemy.engine.Engine SELECT warehouses.id, warehouses.organization_id, warehouses.code, warehouses.name, warehouses.type, warehouses.address_line1, warehouses.address_line2, warehouses.city, warehouses.state, warehouses.pincode, warehouses.contact_person, warehouses.phone, warehouses.is_active, warehouses.created_at, warehouses.updated_at, warehouses.parent_id 
+FROM warehouses 
+WHERE warehouses.id = %s
+2026-06-25 16:48:44,319 INFO sqlalchemy.engine.Engine [generated in 0.00022s] (1,)
+2026-06-25 16:48:44,322 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s AND stock_balance.bin_id IS NULL AND stock_balance.batch_id = %s FOR UPDATE
+2026-06-25 16:48:44,322 INFO sqlalchemy.engine.Engine [generated in 0.00019s] (181, 1, 81)
+2026-06-25 16:48:44,322 INFO sqlalchemy.engine.Engine SAVEPOINT sa_savepoint_2
+2026-06-25 16:48:44,322 INFO sqlalchemy.engine.Engine [no key 0.00014s] ()
+2026-06-25 16:48:44,327 INFO sqlalchemy.engine.Engine INSERT INTO stock_balance (item_id, warehouse_id, bin_id, batch_id, available_qty, reserved_qty, transit_qty, total_qty, valuation_rate, stock_value, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 16:48:44,327 INFO sqlalchemy.engine.Engine [generated in 0.00084s] (181, 1, None, 81, Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'), datetime.datetime(2026, 6, 25, 11, 18, 44, 327431, tzinfo=datetime.timezone.utc))
+2026-06-25 16:48:44,328 INFO sqlalchemy.engine.Engine RELEASE SAVEPOINT sa_savepoint_2
+2026-06-25 16:48:44,328 INFO sqlalchemy.engine.Engine [no key 0.00028s] ()
+2026-06-25 16:48:44,328 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s AND stock_balance.bin_id IS NULL AND stock_balance.batch_id = %s FOR UPDATE
+2026-06-25 16:48:44,328 INFO sqlalchemy.engine.Engine [cached since 0.009613s ago] (181, 1, 81)
+2026-06-25 16:48:44,335 INFO sqlalchemy.engine.Engine INSERT INTO stock_ledger (item_id, warehouse_id, bin_id, batch_id, transaction_type, reference_type, reference_id, qty_in, qty_out, balance_qty, uom_id, rate, value_in, value_out, balance_value, posting_date, posting_time, created_by, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 16:48:44,335 INFO sqlalchemy.engine.Engine [generated in 0.00035s] (181, 1, None, 81, 'material_issue', 'material_issue', 98, Decimal('1.000'), Decimal('0'), Decimal('1.000'), 12, Decimal('495.00'), Decimal('495.00000'), Decimal('0.00'), Decimal('495.00000'), datetime.date(2026, 6, 25), datetime.time(11, 18, 44, 333908), 45, datetime.datetime(2026, 6, 25, 11, 18, 44, 335931, tzinfo=datetime.timezone.utc))
+2026-06-25 16:48:44,345 INFO sqlalchemy.engine.Engine SELECT stock_balance.reserved_qty, stock_balance.transit_qty 
+FROM stock_balance 
+WHERE stock_balance.id = %s
+2026-06-25 16:48:44,345 INFO sqlalchemy.engine.Engine [generated in 0.00044s] (470,)
+2026-06-25 16:48:44,349 INFO sqlalchemy.engine.Engine UPDATE stock_balance SET available_qty=%s, total_qty=%s, stock_value=%s, last_updated=%s WHERE stock_balance.id = %s
+2026-06-25 16:48:44,349 INFO sqlalchemy.engine.Engine [generated in 0.00031s] (Decimal('1.000'), Decimal('1.000'), Decimal('495.00000'), datetime.datetime(2026, 6, 25, 11, 18, 44, 349941, tzinfo=datetime.timezone.utc), 470)
+2026-06-25 16:48:44,354 INFO sqlalchemy.engine.Engine SELECT items.id AS items_id, items.category_id AS items_category_id, items.item_code AS items_item_code, items.readable_code AS items_readable_code, items.name AS items_name, items.description AS items_description, items.item_type AS items_item_type, items.is_kit AS items_is_kit, items.uom_category_id AS items_uom_category_id, items.primary_uom_id AS items_primary_uom_id, items.secondary_uom_id AS items_secondary_uom_id, items.hsn_code AS items_hsn_code, items.sku AS items_sku, items.barcode_type AS items_barcode_type, items.barcode_value AS items_barcode_value, items.has_batch AS items_has_batch, items.has_serial AS items_has_serial, items.has_expiry AS items_has_expiry, items.shelf_life_days AS items_shelf_life_days, items.safety_stock AS items_safety_stock, items.reorder_level AS items_reorder_level, items.reorder_qty AS items_reorder_qty, items.lead_time_days AS items_lead_time_days, items.min_order_qty AS items_min_order_qty, items.max_order_qty AS items_max_order_qty, items.tax_rate AS items_tax_rate, items.cgst_rate AS items_cgst_rate, items.sgst_rate AS items_sgst_rate, items.igst_rate AS items_igst_rate, items.purchase_price AS items_purchase_price, items.selling_price AS items_selling_price, items.mrp AS items_mrp, items.image_url AS items_image_url, items.brand AS items_brand, items.manufacturer AS items_manufacturer, items.marketer AS items_marketer, items.distributor AS items_distributor, items.feature_id AS items_feature_id, items.ownership AS items_ownership, items.dosage_form AS items_dosage_form, items.valuation_method AS items_valuation_method, items.dosage_form_code AS items_dosage_form_code, items.coding_status AS items_coding_status, items.drug_schedule AS items_drug_schedule, items.is_schedule_h1 AS items_is_schedule_h1, items.is_narcotic AS items_is_narcotic, items.requires_prescription AS items_requires_prescription, items.requires_cold_chain AS items_requires_cold_chain, items.min_storage_temp_c AS items_min_storage_temp_c, items.max_storage_temp_c AS items_max_storage_temp_c, items.regulatory_notes AS items_regulatory_notes, items.special_storage_condition AS items_special_storage_condition, items.storage_min_temp AS items_storage_min_temp, items.storage_max_temp AS items_storage_max_temp, items.storage_min_moisture AS items_storage_min_moisture, items.storage_max_moisture AS items_storage_max_moisture, items.storage_breakable AS items_storage_breakable, items.special_transport_condition AS items_special_transport_condition, items.transport_min_temp AS items_transport_min_temp, items.transport_max_temp AS items_transport_max_temp, items.transport_min_moisture AS items_transport_min_moisture, items.transport_max_moisture AS items_transport_max_moisture, items.transport_breakable AS items_transport_breakable, items.is_active AS items_is_active, items.created_by AS items_created_by, items.created_at AS items_created_at, items.updated_at AS items_updated_at 
+FROM items 
+WHERE items.id = %s
+2026-06-25 16:48:44,355 INFO sqlalchemy.engine.Engine [generated in 0.00025s] (181,)
+2026-06-25 16:48:44,363 INFO sqlalchemy.engine.Engine UPDATE stock_balance SET valuation_rate=%s, last_updated=%s WHERE stock_balance.id = %s
+2026-06-25 16:48:44,363 INFO sqlalchemy.engine.Engine [generated in 0.00025s] (Decimal('495.0000'), datetime.datetime(2026, 6, 25, 11, 18, 44, 363152, tzinfo=datetime.timezone.utc), 470)
+2026-06-25 16:48:44,363 INFO sqlalchemy.engine.Engine SELECT items.id, items.category_id, items.item_code, items.readable_code, items.name, items.description, items.item_type, items.is_kit, items.uom_category_id, items.primary_uom_id, items.secondary_uom_id, items.hsn_code, items.sku, items.barcode_type, items.barcode_value, items.has_batch, items.has_serial, items.has_expiry, items.shelf_life_days, items.safety_stock, items.reorder_level, items.reorder_qty, items.lead_time_days, items.min_order_qty, items.max_order_qty, items.tax_rate, items.cgst_rate, items.sgst_rate, items.igst_rate, items.purchase_price, items.selling_price, items.mrp, items.image_url, items.brand, items.manufacturer, items.marketer, items.distributor, items.feature_id, items.ownership, items.dosage_form, items.valuation_method, items.dosage_form_code, items.coding_status, items.drug_schedule, items.is_schedule_h1, items.is_narcotic, items.requires_prescription, items.requires_cold_chain, items.min_storage_temp_c, items.max_storage_temp_c, items.regulatory_notes, items.special_storage_condition, items.storage_min_temp, items.storage_max_temp, items.storage_min_moisture, items.storage_max_moisture, items.storage_breakable, items.special_transport_condition, items.transport_min_temp, items.transport_max_temp, items.transport_min_moisture, items.transport_max_moisture, items.transport_breakable, items.is_active, items.created_by, items.created_at, items.updated_at 
+FROM items 
+WHERE items.id = %s
+2026-06-25 16:48:44,363 INFO sqlalchemy.engine.Engine [generated in 0.00020s] (181,)
+Item model is missing 'min_stock_level' attr (schema drift?) — BRE will see 0
+2026-06-25 16:48:44,363 INFO sqlalchemy.engine.Engine SAVEPOINT sa_savepoint_3
+2026-06-25 16:48:44,363 INFO sqlalchemy.engine.Engine [no key 0.00012s] ()
+2026-06-25 16:48:44,363 INFO sqlalchemy.engine.Engine SELECT business_rules.id, business_rules.name, business_rules.description, business_rules.trigger_event, business_rules.condition_json, business_rules.action_type, business_rules.action_config, business_rules.is_active, business_rules.organization_id, business_rules.created_by, business_rules.created_at, business_rules.last_fired_at, business_rules.fire_count 
+FROM business_rules 
+WHERE business_rules.trigger_event = %s AND business_rules.is_active = true
+2026-06-25 16:48:44,363 INFO sqlalchemy.engine.Engine [generated in 0.00015s] ('stock.balance_changed',)
+2026-06-25 16:48:44,378 INFO sqlalchemy.engine.Engine RELEASE SAVEPOINT sa_savepoint_3
+2026-06-25 16:48:44,378 INFO sqlalchemy.engine.Engine [no key 0.00021s] ()
+2026-06-25 16:48:44,378 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s AND stock_balance.bin_id = %s AND stock_balance.batch_id = %s FOR UPDATE
+2026-06-25 16:48:44,378 INFO sqlalchemy.engine.Engine [cached since 0.07434s ago] (181, 18, 289, 83)
+2026-06-25 16:48:44,383 INFO sqlalchemy.engine.Engine UPDATE stock_balance SET transit_qty=%s, last_updated=%s WHERE stock_balance.id = %s
+2026-06-25 16:48:44,383 INFO sqlalchemy.engine.Engine [cached since 0.06857s ago] (Decimal('0'), datetime.datetime(2026, 6, 25, 11, 18, 44, 383801, tzinfo=datetime.timezone.utc), 112)
+2026-06-25 16:48:44,384 INFO sqlalchemy.engine.Engine SELECT warehouses.id, warehouses.organization_id, warehouses.code, warehouses.name, warehouses.type, warehouses.address_line1, warehouses.address_line2, warehouses.city, warehouses.state, warehouses.pincode, warehouses.contact_person, warehouses.phone, warehouses.is_active, warehouses.created_at, warehouses.updated_at, warehouses.parent_id 
+FROM warehouses 
+WHERE warehouses.id = %s
+2026-06-25 16:48:44,384 INFO sqlalchemy.engine.Engine [cached since 0.06576s ago] (1,)
+2026-06-25 16:48:44,385 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s AND stock_balance.bin_id IS NULL AND stock_balance.batch_id = %s FOR UPDATE
+2026-06-25 16:48:44,386 INFO sqlalchemy.engine.Engine [cached since 0.06374s ago] (181, 1, 83)
+2026-06-25 16:48:44,387 INFO sqlalchemy.engine.Engine SAVEPOINT sa_savepoint_4
+2026-06-25 16:48:44,387 INFO sqlalchemy.engine.Engine [no key 0.00013s] ()
+2026-06-25 16:48:44,387 INFO sqlalchemy.engine.Engine INSERT INTO stock_balance (item_id, warehouse_id, bin_id, batch_id, available_qty, reserved_qty, transit_qty, total_qty, valuation_rate, stock_value, last_updated) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 16:48:44,387 INFO sqlalchemy.engine.Engine [cached since 0.06167s ago] (181, 1, None, 83, Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'), Decimal('0'), datetime.datetime(2026, 6, 25, 11, 18, 44, 387800, tzinfo=datetime.timezone.utc))
+2026-06-25 16:48:44,387 INFO sqlalchemy.engine.Engine RELEASE SAVEPOINT sa_savepoint_4
+2026-06-25 16:48:44,387 INFO sqlalchemy.engine.Engine [no key 0.00010s] ()
+2026-06-25 16:48:44,387 INFO sqlalchemy.engine.Engine SELECT stock_balance.id, stock_balance.item_id, stock_balance.warehouse_id, stock_balance.bin_id, stock_balance.batch_id, stock_balance.available_qty, stock_balance.reserved_qty, stock_balance.transit_qty, stock_balance.total_qty, stock_balance.valuation_rate, stock_balance.stock_value, stock_balance.last_updated 
+FROM stock_balance 
+WHERE stock_balance.item_id = %s AND stock_balance.warehouse_id = %s AND stock_balance.bin_id IS NULL AND stock_balance.batch_id = %s FOR UPDATE
+2026-06-25 16:48:44,387 INFO sqlalchemy.engine.Engine [cached since 0.06749s ago] (181, 1, 83)
+2026-06-25 16:48:44,387 INFO sqlalchemy.engine.Engine INSERT INTO stock_ledger (item_id, warehouse_id, bin_id, batch_id, transaction_type, reference_type, reference_id, qty_in, qty_out, balance_qty, uom_id, rate, value_in, value_out, balance_value, posting_date, posting_time, created_by, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 16:48:44,387 INFO sqlalchemy.engine.Engine [cached since 0.05554s ago] (181, 1, None, 83, 'material_issue', 'material_issue', 98, Decimal('3.000'), Decimal('0'), Decimal('3.000'), 12, Decimal('540.00'), Decimal('1620.00000'), Decimal('0.00'), Decimal('1620.00000'), datetime.date(2026, 6, 25), datetime.time(11, 18, 44, 387800), 45, datetime.datetime(2026, 6, 25, 11, 18, 44, 387800, tzinfo=datetime.timezone.utc))
+2026-06-25 16:48:44,394 INFO sqlalchemy.engine.Engine SELECT stock_balance.reserved_qty, stock_balance.transit_qty 
+FROM stock_balance 
+WHERE stock_balance.id = %s
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine [cached since 0.04966s ago] (471,)
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine UPDATE stock_balance SET available_qty=%s, total_qty=%s, stock_value=%s, last_updated=%s WHERE stock_balance.id = %s
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine [cached since 0.04814s ago] (Decimal('3.000'), Decimal('3.000'), Decimal('1620.00000'), datetime.datetime(2026, 6, 25, 11, 18, 44, 395761, tzinfo=datetime.timezone.utc), 471)
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine SELECT items.id AS items_id, items.category_id AS items_category_id, items.item_code AS items_item_code, items.readable_code AS items_readable_code, items.name AS items_name, items.description AS items_description, items.item_type AS items_item_type, items.is_kit AS items_is_kit, items.uom_category_id AS items_uom_category_id, items.primary_uom_id AS items_primary_uom_id, items.secondary_uom_id AS items_secondary_uom_id, items.hsn_code AS items_hsn_code, items.sku AS items_sku, items.barcode_type AS items_barcode_type, items.barcode_value AS items_barcode_value, items.has_batch AS items_has_batch, items.has_serial AS items_has_serial, items.has_expiry AS items_has_expiry, items.shelf_life_days AS items_shelf_life_days, items.safety_stock AS items_safety_stock, items.reorder_level AS items_reorder_level, items.reorder_qty AS items_reorder_qty, items.lead_time_days AS items_lead_time_days, items.min_order_qty AS items_min_order_qty, items.max_order_qty AS items_max_order_qty, items.tax_rate AS items_tax_rate, items.cgst_rate AS items_cgst_rate, items.sgst_rate AS items_sgst_rate, items.igst_rate AS items_igst_rate, items.purchase_price AS items_purchase_price, items.selling_price AS items_selling_price, items.mrp AS items_mrp, items.image_url AS items_image_url, items.brand AS items_brand, items.manufacturer AS items_manufacturer, items.marketer AS items_marketer, items.distributor AS items_distributor, items.feature_id AS items_feature_id, items.ownership AS items_ownership, items.dosage_form AS items_dosage_form, items.valuation_method AS items_valuation_method, items.dosage_form_code AS items_dosage_form_code, items.coding_status AS items_coding_status, items.drug_schedule AS items_drug_schedule, items.is_schedule_h1 AS items_is_schedule_h1, items.is_narcotic AS items_is_narcotic, items.requires_prescription AS items_requires_prescription, items.requires_cold_chain AS items_requires_cold_chain, items.min_storage_temp_c AS items_min_storage_temp_c, items.max_storage_temp_c AS items_max_storage_temp_c, items.regulatory_notes AS items_regulatory_notes, items.special_storage_condition AS items_special_storage_condition, items.storage_min_temp AS items_storage_min_temp, items.storage_max_temp AS items_storage_max_temp, items.storage_min_moisture AS items_storage_min_moisture, items.storage_max_moisture AS items_storage_max_moisture, items.storage_breakable AS items_storage_breakable, items.special_transport_condition AS items_special_transport_condition, items.transport_min_temp AS items_transport_min_temp, items.transport_max_temp AS items_transport_max_temp, items.transport_min_moisture AS items_transport_min_moisture, items.transport_max_moisture AS items_transport_max_moisture, items.transport_breakable AS items_transport_breakable, items.is_active AS items_is_active, items.created_by AS items_created_by, items.created_at AS items_created_at, items.updated_at AS items_updated_at 
+FROM items 
+WHERE items.id = %s
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine [cached since 0.04463s ago] (181,)
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine UPDATE stock_balance SET valuation_rate=%s, last_updated=%s WHERE stock_balance.id = %s
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine [cached since 0.03673s ago] (Decimal('540.0000'), datetime.datetime(2026, 6, 25, 11, 18, 44, 395761, tzinfo=datetime.timezone.utc), 471)
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine SELECT items.id, items.category_id, items.item_code, items.readable_code, items.name, items.description, items.item_type, items.is_kit, items.uom_category_id, items.primary_uom_id, items.secondary_uom_id, items.hsn_code, items.sku, items.barcode_type, items.barcode_value, items.has_batch, items.has_serial, items.has_expiry, items.shelf_life_days, items.safety_stock, items.reorder_level, items.reorder_qty, items.lead_time_days, items.min_order_qty, items.max_order_qty, items.tax_rate, items.cgst_rate, items.sgst_rate, items.igst_rate, items.purchase_price, items.selling_price, items.mrp, items.image_url, items.brand, items.manufacturer, items.marketer, items.distributor, items.feature_id, items.ownership, items.dosage_form, items.valuation_method, items.dosage_form_code, items.coding_status, items.drug_schedule, items.is_schedule_h1, items.is_narcotic, items.requires_prescription, items.requires_cold_chain, items.min_storage_temp_c, items.max_storage_temp_c, items.regulatory_notes, items.special_storage_condition, items.storage_min_temp, items.storage_max_temp, items.storage_min_moisture, items.storage_max_moisture, items.storage_breakable, items.special_transport_condition, items.transport_min_temp, items.transport_max_temp, items.transport_min_moisture, items.transport_max_moisture, items.transport_breakable, items.is_active, items.created_by, items.created_at, items.updated_at 
+FROM items 
+WHERE items.id = %s
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine [cached since 0.03393s ago] (181,)
+Item model is missing 'min_stock_level' attr (schema drift?) — BRE will see 0
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine SAVEPOINT sa_savepoint_5
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine [no key 0.00017s] ()
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine SELECT business_rules.id, business_rules.name, business_rules.description, business_rules.trigger_event, business_rules.condition_json, business_rules.action_type, business_rules.action_config, business_rules.is_active, business_rules.organization_id, business_rules.created_by, business_rules.created_at, business_rules.last_fired_at, business_rules.fire_count 
+FROM business_rules 
+WHERE business_rules.trigger_event = %s AND business_rules.is_active = true
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine [cached since 0.03329s ago] ('stock.balance_changed',)
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine RELEASE SAVEPOINT sa_savepoint_5
+2026-06-25 16:48:44,395 INFO sqlalchemy.engine.Engine [no key 0.00019s] ()
+2026-06-25 16:48:44,411 INFO sqlalchemy.engine.Engine SELECT indents.id, indents.indent_number, indents.project_id, indents.source_bom_id, indents.warehouse_id, indents.indent_date, indents.required_date, indents.department, indents.indent_type, indents.status, indents.raised_by, indents.approved_by, indents.approved_date, indents.remarks, indents.created_at, indents.updated_at 
+FROM indents 
+WHERE indents.id = %s
+2026-06-25 16:48:44,411 INFO sqlalchemy.engine.Engine [generated in 0.00021s] (64,)
+2026-06-25 16:48:44,415 INFO sqlalchemy.engine.Engine SELECT indent_items.indent_id AS indent_items_indent_id, indent_items.id AS indent_items_id, indent_items.item_id AS indent_items_item_id, indent_items.requested_qty AS indent_items_requested_qty, indent_items.approved_qty AS indent_items_approved_qty, indent_items.issued_qty AS indent_items_issued_qty, indent_items.uom_id AS indent_items_uom_id, indent_items.remarks AS indent_items_remarks, indent_items.fulfillment_route AS indent_items_fulfillment_route, indent_items.fulfillment_status AS indent_items_fulfillment_status, indent_items.parent_item_id AS indent_items_parent_item_id, indent_items.reserved_at AS indent_items_reserved_at 
+FROM indent_items 
+WHERE indent_items.indent_id IN (%s)
+2026-06-25 16:48:44,418 INFO sqlalchemy.engine.Engine [generated in 0.00036s] (64,)
+2026-06-25 16:48:44,423 INFO sqlalchemy.engine.Engine SELECT indent_acknowledgement_items.indent_item_id, sum(indent_acknowledgement_items.received_qty) AS total_acked 
+FROM indent_acknowledgement_items 
+WHERE indent_acknowledgement_items.indent_item_id IN (%s, %s) GROUP BY indent_acknowledgement_items.indent_item_id
+2026-06-25 16:48:44,423 INFO sqlalchemy.engine.Engine [generated in 0.00025s] (74, 75)
+SUCCESS: Manager was allowed to acknowledge.
+2026-06-25 16:48:44,429 INFO sqlalchemy.engine.Engine ROLLBACK TO SAVEPOINT sa_savepoint_1
+2026-06-25 16:48:44,429 INFO sqlalchemy.engine.Engine [no key 0.00036s] ()
+2026-06-25 16:48:44,429 INFO sqlalchemy.engine.Engine UPDATE employees SET position_id=%s, updated_at=%s WHERE employees.id = %s
+2026-06-25 16:48:44,429 INFO sqlalchemy.engine.Engine [cached since 0.1794s ago] (None, datetime.datetime(2026, 6, 25, 11, 18, 44, 429244, tzinfo=datetime.timezone.utc), 11041)
+2. Testing Unrelated User Acknowledgment (should raise 403)...
+2026-06-25 16:48:44,429 INFO sqlalchemy.engine.Engine SAVEPOINT sa_savepoint_6
+2026-06-25 16:48:44,429 INFO sqlalchemy.engine.Engine [no key 0.00013s] ()
+2026-06-25 16:48:44,429 INFO sqlalchemy.engine.Engine SELECT material_issues.id, material_issues.issue_number, material_issues.mr_id, material_issues.indent_id, material_issues.warehouse_id, material_issues.destination_warehouse_id, material_issues.issue_date, material_issues.department, material_issues.issued_to, material_issues.status, material_issues.remarks, material_issues.issued_by, material_issues.dispatched_at, material_issues.created_at, material_issues.updated_at 
+FROM material_issues 
+WHERE material_issues.id = %s
+2026-06-25 16:48:44,429 INFO sqlalchemy.engine.Engine [cached since 0.1736s ago] (98,)
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine SELECT material_issue_items.issue_id AS material_issue_items_issue_id, material_issue_items.id AS material_issue_items_id, material_issue_items.item_id AS material_issue_items_item_id, material_issue_items.batch_id AS material_issue_items_batch_id, material_issue_items.qty AS material_issue_items_qty, material_issue_items.uom_id AS material_issue_items_uom_id, material_issue_items.bin_id AS material_issue_items_bin_id, material_issue_items.rate AS material_issue_items_rate, material_issue_items.amount AS material_issue_items_amount, material_issue_items.prescriber_name AS material_issue_items_prescriber_name, material_issue_items.prescriber_license AS material_issue_items_prescriber_license, material_issue_items.patient_name AS material_issue_items_patient_name, material_issue_items.patient_id_text AS material_issue_items_patient_id_text, material_issue_items.serial_numbers AS material_issue_items_serial_numbers 
+FROM material_issue_items 
+WHERE material_issue_items.issue_id IN (%s)
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine [cached since 0.1692s ago] (98,)
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine SELECT users.active_role_id 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine [cached since 0.1971s ago] (45,)
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine SELECT roles.code 
+FROM roles 
+WHERE roles.id = %s AND roles.is_active = true
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine [cached since 0.1937s ago] (37,)
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine SELECT users.id, users.organization_id, users.employee_code, users.username, users.email, users.password_hash, users.first_name, users.last_name, users.phone, users.avatar_url, users.user_type, users.department, users.designation, users.is_active, users.last_login, users.password_changed_at, users.failed_login_attempts, users.locked_until, users.tokens_revoked_after, users.active_role_id, users.employee_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine [cached since 0.251s ago] (49,)
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine SELECT roles.id AS roles_id, roles.name AS roles_name, roles.code AS roles_code, roles.description AS roles_description, roles.role_type AS roles_role_type, roles.is_active AS roles_is_active, roles.organization_id AS roles_organization_id, roles.created_at AS roles_created_at, roles.updated_at AS roles_updated_at 
+FROM roles 
+WHERE roles.id IN (%s)
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine [cached since 0.2416s ago] (37,)
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine SELECT employees.id AS employees_id, employees.employee_code AS employees_employee_code, employees.name AS employees_name, employees.photo AS employees_photo, employees.status AS employees_status, employees.dob AS employees_dob, employees.gender AS employees_gender, employees.pan_number AS employees_pan_number, employees.aadhaar_number AS employees_aadhaar_number, employees.email AS employees_email, employees.phone AS employees_phone, employees.hire_date AS employees_hire_date, employees.bank_details AS employees_bank_details, employees.position_id AS employees_position_id, employees.created_at AS employees_created_at, employees.updated_at AS employees_updated_at 
+FROM employees 
+WHERE employees.id IN (%s)
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine [cached since 0.2361s ago] (11040,)
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,436 INFO sqlalchemy.engine.Engine [cached since 0.2322s ago] (11040,)
+2026-06-25 16:48:44,444 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,444 INFO sqlalchemy.engine.Engine [cached since 0.2297s ago] (2375,)
+2026-06-25 16:48:44,446 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,446 INFO sqlalchemy.engine.Engine [cached since 0.2322s ago] (5863,)
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine [cached since 0.2334s ago] (5917,)
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine [cached since 0.2347s ago] (3,)
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine [cached since 0.2357s ago] (5929,)
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine [cached since 0.242s ago] (11041,)
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine SELECT positions.id 
+FROM positions 
+WHERE positions.employee_id = %s
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine [cached since 0.1521s ago] (11041,)
+SUCCESS: Unrelated user was correctly rejected with 403: Only the recipient, a warehouse manager, or their reporting manager can acknowledge this issue
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine UPDATE employees SET position_id=%s, updated_at=%s WHERE employees.id = %s
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine [cached since 0.1995s ago] (2380, datetime.datetime(2026, 6, 25, 11, 18, 44, 448226, tzinfo=datetime.timezone.utc), 11041)
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine SELECT dispatch_custody_transfers.id, dispatch_custody_transfers.dispatch_order_id, dispatch_custody_transfers.position_id, dispatch_custody_transfers.status, dispatch_custody_transfers.acknowledged_by_id, dispatch_custody_transfers.acknowledged_at, dispatch_custody_transfers.sequence, dispatch_custody_transfers.seal_intact, dispatch_custody_transfers.packaging_condition, dispatch_custody_transfers.discrepancy_reported, dispatch_custody_transfers.remarks 
+FROM dispatch_custody_transfers 
+WHERE dispatch_custody_transfers.status = %s
+2026-06-25 16:48:44,448 INFO sqlalchemy.engine.Engine [generated in 0.00015s] ('pending',)
+No pending custody transfer found. Creating a dummy pending custody step for testing...
+2026-06-25 16:48:44,463 INFO sqlalchemy.engine.Engine SELECT dispatch_orders.id, dispatch_orders.dispatch_number, dispatch_orders.do_id, dispatch_orders.pack_id, dispatch_orders.warehouse_id, dispatch_orders.customer_id, dispatch_orders.destination_user_id, dispatch_orders.destination_warehouse_id, dispatch_orders.destination_type, dispatch_orders.dispatch_type, dispatch_orders.delivery_acknowledged, dispatch_orders.delivery_acknowledged_at, dispatch_orders.delivery_acknowledged_by_id, dispatch_orders.delivery_acknowledged_by_name, dispatch_orders.delivery_acknowledged_by_designation, dispatch_orders.delivery_acknowledged_by_phone, dispatch_orders.delivery_acknowledged_by_email, dispatch_orders.receiver_signature_url, dispatch_orders.receiver_id_proof_type, dispatch_orders.receiver_id_proof_number, dispatch_orders.delivery_photo_urls, dispatch_orders.goods_condition_on_delivery, dispatch_orders.delivery_remarks, dispatch_orders.material_issue_id, dispatch_orders.delivery_location_latitude, dispatch_orders.delivery_location_longitude, dispatch_orders.delivery_location_verified, dispatch_orders.vehicle_number, dispatch_orders.vehicle_type, dispatch_orders.driver_name, dispatch_orders.driver_contact, dispatch_orders.transport_vendor_id, dispatch_orders.lr_number, dispatch_orders.docket_number, dispatch_orders.dispatch_date, dispatch_orders.expected_delivery_date, dispatch_orders.loading_confirmed, dispatch_orders.loading_confirmed_at, dispatch_orders.dispatch_mode, dispatch_orders.status, dispatch_orders.remarks, dispatch_orders.dispatched_by, dispatch_orders.created_at 
+FROM dispatch_orders
+2026-06-25 16:48:44,463 INFO sqlalchemy.engine.Engine [generated in 0.00055s] ()
+2026-06-25 16:48:44,463 INFO sqlalchemy.engine.Engine INSERT INTO dispatch_custody_transfers (dispatch_order_id, position_id, status, acknowledged_by_id, acknowledged_at, sequence, seal_intact, packaging_condition, discrepancy_reported, remarks) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 16:48:44,463 INFO sqlalchemy.engine.Engine [generated in 0.00028s] (195, 5926, 'pending', None, None, 1, None, None, None, None)
+Created temporary pending custody transfer for Dispatch ID 195
+Custody Step Position ID: 5926
+2026-06-25 16:48:44,463 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,463 INFO sqlalchemy.engine.Engine [cached since 0.2554s ago] (5926,)
+Step Position: DISTRICT MANAGER-AP-104-MMU-PALNADU (Parent Position ID: 136)
+2026-06-25 16:48:44,463 INFO sqlalchemy.engine.Engine SELECT users.id, users.organization_id, users.employee_code, users.username, users.email, users.password_hash, users.first_name, users.last_name, users.phone, users.avatar_url, users.user_type, users.department, users.designation, users.is_active, users.last_login, users.password_changed_at, users.failed_login_attempts, users.locked_until, users.tokens_revoked_after, users.active_role_id, users.employee_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.employee_id IS NOT NULL
+2026-06-25 16:48:44,463 INFO sqlalchemy.engine.Engine [generated in 0.00016s] ()
+2026-06-25 16:48:44,463 INFO sqlalchemy.engine.Engine SELECT roles.id AS roles_id, roles.name AS roles_name, roles.code AS roles_code, roles.description AS roles_description, roles.role_type AS roles_role_type, roles.is_active AS roles_is_active, roles.organization_id AS roles_organization_id, roles.created_at AS roles_created_at, roles.updated_at AS roles_updated_at 
+FROM roles 
+WHERE roles.id IN (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 16:48:44,463 INFO sqlalchemy.engine.Engine [cached since 0.2768s ago] (1, 4, 18, 19, 20, 22, 28, 34, 37)
+2026-06-25 16:48:44,478 INFO sqlalchemy.engine.Engine SELECT employees.id AS employees_id, employees.employee_code AS employees_employee_code, employees.name AS employees_name, employees.photo AS employees_photo, employees.status AS employees_status, employees.dob AS employees_dob, employees.gender AS employees_gender, employees.pan_number AS employees_pan_number, employees.aadhaar_number AS employees_aadhaar_number, employees.email AS employees_email, employees.phone AS employees_phone, employees.hire_date AS employees_hire_date, employees.bank_details AS employees_bank_details, employees.position_id AS employees_position_id, employees.created_at AS employees_created_at, employees.updated_at AS employees_updated_at 
+FROM employees 
+WHERE employees.id IN (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+2026-06-25 16:48:44,478 INFO sqlalchemy.engine.Engine [cached since 0.2742s ago] (7103, 7106, 7112, 7113, 7114, 7115, 7135, 7136, 7137, 7138, 7415, 7416, 7587, 7690, 7693, 7694, 7695, 7696, 7698, 7699, 7704, 7706, 8243, 8557, 8623, 8761, 9154, 9294, 10193, 10194, 10388, 10475, 10581, 10884, 10885, 10887, 10906, 10907, 10908, 10909, 10910, 10925, 10926, 10927, 10928, 10929, 10950, 10951, 10952, 10953, 10954, 10978, 10979, 10980, 10982, 10989, 10990, 10991, 10992, 11000, 11002, 11003, 11019, 11021, 11022, 11023, 11024, 11029, 11030, 11031, 11032, 11037, 11038, 11039, 11040, 11041, 11076, 11077, 11080, 11081, 11085, 11096)
+2026-06-25 16:48:44,483 INFO sqlalchemy.engine.Engine SELECT users.active_role_id 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,483 INFO sqlalchemy.engine.Engine [cached since 0.243s ago] (7,)
+2026-06-25 16:48:44,485 INFO sqlalchemy.engine.Engine SELECT roles.code 
+FROM roles 
+WHERE roles.id = %s AND roles.is_active = true
+2026-06-25 16:48:44,485 INFO sqlalchemy.engine.Engine [cached since 0.2404s ago] (1,)
+2026-06-25 16:48:44,486 INFO sqlalchemy.engine.Engine SELECT users.active_role_id 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,486 INFO sqlalchemy.engine.Engine [cached since 0.2456s ago] (45,)
+2026-06-25 16:48:44,487 INFO sqlalchemy.engine.Engine SELECT roles.code 
+FROM roles 
+WHERE roles.id = %s AND roles.is_active = true
+2026-06-25 16:48:44,487 INFO sqlalchemy.engine.Engine [cached since 0.2423s ago] (37,)
+Found non-admin candidate user for custody test: ID=45, Name=Naveen_m
+2026-06-25 16:48:44,487 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,487 INFO sqlalchemy.engine.Engine [cached since 0.2783s ago] (11041,)
+2026-06-25 16:48:44,489 INFO sqlalchemy.engine.Engine UPDATE employees SET position_id=%s, updated_at=%s WHERE employees.id = %s
+2026-06-25 16:48:44,489 INFO sqlalchemy.engine.Engine [cached since 0.2352s ago] (136, datetime.datetime(2026, 6, 25, 11, 18, 44, 489304, tzinfo=datetime.timezone.utc), 11041)
+3. Testing custody chain can_acknowledge on frontend...
+2026-06-25 16:48:44,491 INFO sqlalchemy.engine.Engine SELECT dispatch_orders.id, dispatch_orders.dispatch_number, dispatch_orders.do_id, dispatch_orders.pack_id, dispatch_orders.warehouse_id, dispatch_orders.customer_id, dispatch_orders.destination_user_id, dispatch_orders.destination_warehouse_id, dispatch_orders.destination_type, dispatch_orders.dispatch_type, dispatch_orders.delivery_acknowledged, dispatch_orders.delivery_acknowledged_at, dispatch_orders.delivery_acknowledged_by_id, dispatch_orders.delivery_acknowledged_by_name, dispatch_orders.delivery_acknowledged_by_designation, dispatch_orders.delivery_acknowledged_by_phone, dispatch_orders.delivery_acknowledged_by_email, dispatch_orders.receiver_signature_url, dispatch_orders.receiver_id_proof_type, dispatch_orders.receiver_id_proof_number, dispatch_orders.delivery_photo_urls, dispatch_orders.goods_condition_on_delivery, dispatch_orders.delivery_remarks, dispatch_orders.material_issue_id, dispatch_orders.delivery_location_latitude, dispatch_orders.delivery_location_longitude, dispatch_orders.delivery_location_verified, dispatch_orders.vehicle_number, dispatch_orders.vehicle_type, dispatch_orders.driver_name, dispatch_orders.driver_contact, dispatch_orders.transport_vendor_id, dispatch_orders.lr_number, dispatch_orders.docket_number, dispatch_orders.dispatch_date, dispatch_orders.expected_delivery_date, dispatch_orders.loading_confirmed, dispatch_orders.loading_confirmed_at, dispatch_orders.dispatch_mode, dispatch_orders.status, dispatch_orders.remarks, dispatch_orders.dispatched_by, dispatch_orders.created_at 
+FROM dispatch_orders 
+WHERE dispatch_orders.id = %s
+2026-06-25 16:48:44,491 INFO sqlalchemy.engine.Engine [generated in 0.00020s] (195,)
+2026-06-25 16:48:44,495 INFO sqlalchemy.engine.Engine SELECT dispatch_custody_transfers.id, dispatch_custody_transfers.dispatch_order_id, dispatch_custody_transfers.position_id, dispatch_custody_transfers.status, dispatch_custody_transfers.acknowledged_by_id, dispatch_custody_transfers.acknowledged_at, dispatch_custody_transfers.sequence, dispatch_custody_transfers.seal_intact, dispatch_custody_transfers.packaging_condition, dispatch_custody_transfers.discrepancy_reported, dispatch_custody_transfers.remarks 
+FROM dispatch_custody_transfers 
+WHERE dispatch_custody_transfers.dispatch_order_id = %s ORDER BY dispatch_custody_transfers.sequence ASC
+2026-06-25 16:48:44,495 INFO sqlalchemy.engine.Engine [generated in 0.00051s] (195,)
+2026-06-25 16:48:44,497 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,497 INFO sqlalchemy.engine.Engine [cached since 0.2885s ago] (11041,)
+2026-06-25 16:48:44,498 INFO sqlalchemy.engine.Engine SELECT users.active_role_id 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,498 INFO sqlalchemy.engine.Engine [cached since 0.2588s ago] (45,)
+2026-06-25 16:48:44,499 INFO sqlalchemy.engine.Engine SELECT roles.code 
+FROM roles 
+WHERE roles.id = %s AND roles.is_active = true
+2026-06-25 16:48:44,499 INFO sqlalchemy.engine.Engine [cached since 0.2557s ago] (37,)
+2026-06-25 16:48:44,500 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,500 INFO sqlalchemy.engine.Engine [cached since 0.2865s ago] (5926,)
+2026-06-25 16:48:44,502 INFO sqlalchemy.engine.Engine SELECT roles.id, roles.name, roles.code, roles.description, roles.role_type, roles.is_active, roles.organization_id, roles.created_at, roles.updated_at 
+FROM roles 
+WHERE roles.id = %s
+2026-06-25 16:48:44,502 INFO sqlalchemy.engine.Engine [generated in 0.00018s] (19,)
+2026-06-25 16:48:44,503 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,503 INFO sqlalchemy.engine.Engine [cached since 0.2949s ago] (7129,)
+2026-06-25 16:48:44,504 INFO sqlalchemy.engine.Engine SELECT users.id, users.organization_id, users.employee_code, users.username, users.email, users.password_hash, users.first_name, users.last_name, users.phone, users.avatar_url, users.user_type, users.department, users.designation, users.is_active, users.last_login, users.password_changed_at, users.failed_login_attempts, users.locked_until, users.tokens_revoked_after, users.active_role_id, users.employee_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,504 INFO sqlalchemy.engine.Engine [cached since 0.3175s ago] (50,)
+2026-06-25 16:48:44,506 INFO sqlalchemy.engine.Engine SELECT roles.id AS roles_id, roles.name AS roles_name, roles.code AS roles_code, roles.description AS roles_description, roles.role_type AS roles_role_type, roles.is_active AS roles_is_active, roles.organization_id AS roles_organization_id, roles.created_at AS roles_created_at, roles.updated_at AS roles_updated_at 
+FROM roles 
+WHERE roles.id IN (%s)
+2026-06-25 16:48:44,506 INFO sqlalchemy.engine.Engine [cached since 0.3085s ago] (37,)
+2026-06-25 16:48:44,507 INFO sqlalchemy.engine.Engine SELECT employees.id AS employees_id, employees.employee_code AS employees_employee_code, employees.name AS employees_name, employees.photo AS employees_photo, employees.status AS employees_status, employees.dob AS employees_dob, employees.gender AS employees_gender, employees.pan_number AS employees_pan_number, employees.aadhaar_number AS employees_aadhaar_number, employees.email AS employees_email, employees.phone AS employees_phone, employees.hire_date AS employees_hire_date, employees.bank_details AS employees_bank_details, employees.position_id AS employees_position_id, employees.created_at AS employees_created_at, employees.updated_at AS employees_updated_at 
+FROM employees 
+WHERE employees.id IN (%s)
+2026-06-25 16:48:44,507 INFO sqlalchemy.engine.Engine [cached since 0.3033s ago] (7103,)
+2026-06-25 16:48:44,508 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,509 INFO sqlalchemy.engine.Engine [cached since 0.2945s ago] (5926,)
+2026-06-25 16:48:44,510 INFO sqlalchemy.engine.Engine SELECT roles.id, roles.name, roles.code, roles.description, roles.role_type, roles.is_active, roles.organization_id, roles.created_at, roles.updated_at 
+FROM roles 
+WHERE roles.id = %s
+2026-06-25 16:48:44,510 INFO sqlalchemy.engine.Engine [cached since 0.009363s ago] (19,)
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine [cached since 0.3063s ago] (7129,)
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine SELECT users.id, users.organization_id, users.employee_code, users.username, users.email, users.password_hash, users.first_name, users.last_name, users.phone, users.avatar_url, users.user_type, users.department, users.designation, users.is_active, users.last_login, users.password_changed_at, users.failed_login_attempts, users.locked_until, users.tokens_revoked_after, users.active_role_id, users.employee_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine [cached since 0.3295s ago] (50,)
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine SELECT roles.id AS roles_id, roles.name AS roles_name, roles.code AS roles_code, roles.description AS roles_description, roles.role_type AS roles_role_type, roles.is_active AS roles_is_active, roles.organization_id AS roles_organization_id, roles.created_at AS roles_created_at, roles.updated_at AS roles_updated_at 
+FROM roles 
+WHERE roles.id IN (%s)
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine [cached since 0.3209s ago] (37,)
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine SELECT employees.id AS employees_id, employees.employee_code AS employees_employee_code, employees.name AS employees_name, employees.photo AS employees_photo, employees.status AS employees_status, employees.dob AS employees_dob, employees.gender AS employees_gender, employees.pan_number AS employees_pan_number, employees.aadhaar_number AS employees_aadhaar_number, employees.email AS employees_email, employees.phone AS employees_phone, employees.hire_date AS employees_hire_date, employees.bank_details AS employees_bank_details, employees.position_id AS employees_position_id, employees.created_at AS employees_created_at, employees.updated_at AS employees_updated_at 
+FROM employees 
+WHERE employees.id IN (%s)
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine [cached since 0.3161s ago] (7103,)
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine [cached since 0.3075s ago] (5926,)
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine SELECT roles.id, roles.name, roles.code, roles.description, roles.role_type, roles.is_active, roles.organization_id, roles.created_at, roles.updated_at 
+FROM roles 
+WHERE roles.id = %s
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine [cached since 0.02062s ago] (19,)
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,513 INFO sqlalchemy.engine.Engine [cached since 0.3155s ago] (7129,)
+2026-06-25 16:48:44,527 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,527 INFO sqlalchemy.engine.Engine [cached since 0.3132s ago] (5926,)
+2026-06-25 16:48:44,529 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,529 INFO sqlalchemy.engine.Engine [cached since 0.3164s ago] (136,)
+2026-06-25 16:48:44,529 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,529 INFO sqlalchemy.engine.Engine [cached since 0.3192s ago] (5929,)
+2026-06-25 16:48:44,529 INFO sqlalchemy.engine.Engine SELECT positions.id 
+FROM positions 
+WHERE positions.employee_id = %s
+2026-06-25 16:48:44,529 INFO sqlalchemy.engine.Engine [cached since 0.2351s ago] (11041,)
+can_acknowledge resolved as: True
+SUCCESS: Manager can acknowledge custody step on frontend.
+4. Testing custody chain acknowledge API (should succeed or raise non-403)...
+2026-06-25 16:48:44,536 INFO sqlalchemy.engine.Engine SAVEPOINT sa_savepoint_7
+2026-06-25 16:48:44,536 INFO sqlalchemy.engine.Engine [no key 0.00015s] ()
+2026-06-25 16:48:44,536 INFO sqlalchemy.engine.Engine SELECT dispatch_orders.id, dispatch_orders.dispatch_number, dispatch_orders.do_id, dispatch_orders.pack_id, dispatch_orders.warehouse_id, dispatch_orders.customer_id, dispatch_orders.destination_user_id, dispatch_orders.destination_warehouse_id, dispatch_orders.destination_type, dispatch_orders.dispatch_type, dispatch_orders.delivery_acknowledged, dispatch_orders.delivery_acknowledged_at, dispatch_orders.delivery_acknowledged_by_id, dispatch_orders.delivery_acknowledged_by_name, dispatch_orders.delivery_acknowledged_by_designation, dispatch_orders.delivery_acknowledged_by_phone, dispatch_orders.delivery_acknowledged_by_email, dispatch_orders.receiver_signature_url, dispatch_orders.receiver_id_proof_type, dispatch_orders.receiver_id_proof_number, dispatch_orders.delivery_photo_urls, dispatch_orders.goods_condition_on_delivery, dispatch_orders.delivery_remarks, dispatch_orders.material_issue_id, dispatch_orders.delivery_location_latitude, dispatch_orders.delivery_location_longitude, dispatch_orders.delivery_location_verified, dispatch_orders.vehicle_number, dispatch_orders.vehicle_type, dispatch_orders.driver_name, dispatch_orders.driver_contact, dispatch_orders.transport_vendor_id, dispatch_orders.lr_number, dispatch_orders.docket_number, dispatch_orders.dispatch_date, dispatch_orders.expected_delivery_date, dispatch_orders.loading_confirmed, dispatch_orders.loading_confirmed_at, dispatch_orders.dispatch_mode, dispatch_orders.status, dispatch_orders.remarks, dispatch_orders.dispatched_by, dispatch_orders.created_at 
+FROM dispatch_orders 
+WHERE dispatch_orders.id = %s FOR UPDATE
+2026-06-25 16:48:44,536 INFO sqlalchemy.engine.Engine [generated in 0.00022s] (195,)
+2026-06-25 16:48:44,536 INFO sqlalchemy.engine.Engine SELECT dispatch_custody_transfers.id, dispatch_custody_transfers.dispatch_order_id, dispatch_custody_transfers.position_id, dispatch_custody_transfers.status, dispatch_custody_transfers.acknowledged_by_id, dispatch_custody_transfers.acknowledged_at, dispatch_custody_transfers.sequence, dispatch_custody_transfers.seal_intact, dispatch_custody_transfers.packaging_condition, dispatch_custody_transfers.discrepancy_reported, dispatch_custody_transfers.remarks 
+FROM dispatch_custody_transfers 
+WHERE dispatch_custody_transfers.dispatch_order_id = %s AND dispatch_custody_transfers.status = %s ORDER BY dispatch_custody_transfers.sequence ASC 
+ LIMIT %s
+2026-06-25 16:48:44,536 INFO sqlalchemy.engine.Engine [generated in 0.00017s] (195, 'pending', 1)
+2026-06-25 16:48:44,536 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,536 INFO sqlalchemy.engine.Engine [cached since 0.3329s ago] (11041,)
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine SELECT users.active_role_id 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine [cached since 0.3042s ago] (45,)
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine SELECT roles.code 
+FROM roles 
+WHERE roles.id = %s AND roles.is_active = true
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine [cached since 0.3014s ago] (37,)
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine [cached since 0.3322s ago] (5926,)
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine [cached since 0.3331s ago] (136,)
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine [cached since 0.3342s ago] (5929,)
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine SELECT positions.id 
+FROM positions 
+WHERE positions.employee_id = %s
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine [cached since 0.2496s ago] (11041,)
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine UPDATE dispatch_custody_transfers SET status=%s, acknowledged_by_id=%s, acknowledged_at=%s, seal_intact=%s, packaging_condition=%s, discrepancy_reported=%s, remarks=%s WHERE dispatch_custody_transfers.id = %s
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine [generated in 0.00016s] ('acknowledged', 45, datetime.datetime(2026, 6, 25, 11, 18, 44, 544079, tzinfo=datetime.timezone.utc), 1, 'INTACT', 0, 'Test ack', 11)
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine SELECT dispatch_custody_transfers.id, dispatch_custody_transfers.dispatch_order_id, dispatch_custody_transfers.position_id, dispatch_custody_transfers.status, dispatch_custody_transfers.acknowledged_by_id, dispatch_custody_transfers.acknowledged_at, dispatch_custody_transfers.sequence, dispatch_custody_transfers.seal_intact, dispatch_custody_transfers.packaging_condition, dispatch_custody_transfers.discrepancy_reported, dispatch_custody_transfers.remarks 
+FROM dispatch_custody_transfers 
+WHERE dispatch_custody_transfers.dispatch_order_id = %s AND dispatch_custody_transfers.status = %s ORDER BY dispatch_custody_transfers.sequence ASC 
+ LIMIT %s
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine [cached since 0.0123s ago] (195, 'pending', 1)
+SUCCESS: Manager was allowed to acknowledge custody.
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine ROLLBACK TO SAVEPOINT sa_savepoint_7
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine [no key 0.00018s] ()
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine UPDATE employees SET position_id=%s, updated_at=%s WHERE employees.id = %s
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine [cached since 0.3021s ago] (None, datetime.datetime(2026, 6, 25, 11, 18, 44, 544079, tzinfo=datetime.timezone.utc), 11041)
+5. Testing unrelated user custody chain can_acknowledge on frontend...
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine SELECT dispatch_orders.id, dispatch_orders.dispatch_number, dispatch_orders.do_id, dispatch_orders.pack_id, dispatch_orders.warehouse_id, dispatch_orders.customer_id, dispatch_orders.destination_user_id, dispatch_orders.destination_warehouse_id, dispatch_orders.destination_type, dispatch_orders.dispatch_type, dispatch_orders.delivery_acknowledged, dispatch_orders.delivery_acknowledged_at, dispatch_orders.delivery_acknowledged_by_id, dispatch_orders.delivery_acknowledged_by_name, dispatch_orders.delivery_acknowledged_by_designation, dispatch_orders.delivery_acknowledged_by_phone, dispatch_orders.delivery_acknowledged_by_email, dispatch_orders.receiver_signature_url, dispatch_orders.receiver_id_proof_type, dispatch_orders.receiver_id_proof_number, dispatch_orders.delivery_photo_urls, dispatch_orders.goods_condition_on_delivery, dispatch_orders.delivery_remarks, dispatch_orders.material_issue_id, dispatch_orders.delivery_location_latitude, dispatch_orders.delivery_location_longitude, dispatch_orders.delivery_location_verified, dispatch_orders.vehicle_number, dispatch_orders.vehicle_type, dispatch_orders.driver_name, dispatch_orders.driver_contact, dispatch_orders.transport_vendor_id, dispatch_orders.lr_number, dispatch_orders.docket_number, dispatch_orders.dispatch_date, dispatch_orders.expected_delivery_date, dispatch_orders.loading_confirmed, dispatch_orders.loading_confirmed_at, dispatch_orders.dispatch_mode, dispatch_orders.status, dispatch_orders.remarks, dispatch_orders.dispatched_by, dispatch_orders.created_at 
+FROM dispatch_orders 
+WHERE dispatch_orders.id = %s
+2026-06-25 16:48:44,544 INFO sqlalchemy.engine.Engine [cached since 0.06688s ago] (195,)
+2026-06-25 16:48:44,560 INFO sqlalchemy.engine.Engine SELECT dispatch_custody_transfers.id, dispatch_custody_transfers.dispatch_order_id, dispatch_custody_transfers.position_id, dispatch_custody_transfers.status, dispatch_custody_transfers.acknowledged_by_id, dispatch_custody_transfers.acknowledged_at, dispatch_custody_transfers.sequence, dispatch_custody_transfers.seal_intact, dispatch_custody_transfers.packaging_condition, dispatch_custody_transfers.discrepancy_reported, dispatch_custody_transfers.remarks 
+FROM dispatch_custody_transfers 
+WHERE dispatch_custody_transfers.dispatch_order_id = %s ORDER BY dispatch_custody_transfers.sequence ASC
+2026-06-25 16:48:44,560 INFO sqlalchemy.engine.Engine [cached since 0.06552s ago] (195,)
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine [cached since 0.3539s ago] (11041,)
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine SELECT users.active_role_id 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine [cached since 0.324s ago] (45,)
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine SELECT roles.code 
+FROM roles 
+WHERE roles.id = %s AND roles.is_active = true
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine [cached since 0.3205s ago] (37,)
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine [cached since 0.3512s ago] (5926,)
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine SELECT roles.id, roles.name, roles.code, roles.description, roles.role_type, roles.is_active, roles.organization_id, roles.created_at, roles.updated_at 
+FROM roles 
+WHERE roles.id = %s
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine [cached since 0.06421s ago] (19,)
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine [cached since 0.3588s ago] (7129,)
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine SELECT users.id, users.organization_id, users.employee_code, users.username, users.email, users.password_hash, users.first_name, users.last_name, users.phone, users.avatar_url, users.user_type, users.department, users.designation, users.is_active, users.last_login, users.password_changed_at, users.failed_login_attempts, users.locked_until, users.tokens_revoked_after, users.active_role_id, users.employee_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine [cached since 0.3816s ago] (50,)
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine SELECT roles.id AS roles_id, roles.name AS roles_name, roles.code AS roles_code, roles.description AS roles_description, roles.role_type AS roles_role_type, roles.is_active AS roles_is_active, roles.organization_id AS roles_organization_id, roles.created_at AS roles_created_at, roles.updated_at AS roles_updated_at 
+FROM roles 
+WHERE roles.id IN (%s)
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine [cached since 0.3727s ago] (37,)
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine SELECT employees.id AS employees_id, employees.employee_code AS employees_employee_code, employees.name AS employees_name, employees.photo AS employees_photo, employees.status AS employees_status, employees.dob AS employees_dob, employees.gender AS employees_gender, employees.pan_number AS employees_pan_number, employees.aadhaar_number AS employees_aadhaar_number, employees.email AS employees_email, employees.phone AS employees_phone, employees.hire_date AS employees_hire_date, employees.bank_details AS employees_bank_details, employees.position_id AS employees_position_id, employees.created_at AS employees_created_at, employees.updated_at AS employees_updated_at 
+FROM employees 
+WHERE employees.id IN (%s)
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine [cached since 0.3679s ago] (7103,)
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine [cached since 0.359s ago] (5926,)
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine SELECT roles.id, roles.name, roles.code, roles.description, roles.role_type, roles.is_active, roles.organization_id, roles.created_at, roles.updated_at 
+FROM roles 
+WHERE roles.id = %s
+2026-06-25 16:48:44,563 INFO sqlalchemy.engine.Engine [cached since 0.07206s ago] (19,)
+2026-06-25 16:48:44,577 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,577 INFO sqlalchemy.engine.Engine [cached since 0.3683s ago] (7129,)
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine SELECT users.id, users.organization_id, users.employee_code, users.username, users.email, users.password_hash, users.first_name, users.last_name, users.phone, users.avatar_url, users.user_type, users.department, users.designation, users.is_active, users.last_login, users.password_changed_at, users.failed_login_attempts, users.locked_until, users.tokens_revoked_after, users.active_role_id, users.employee_id, users.created_at, users.updated_at 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [cached since 0.3919s ago] (50,)
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine SELECT roles.id AS roles_id, roles.name AS roles_name, roles.code AS roles_code, roles.description AS roles_description, roles.role_type AS roles_role_type, roles.is_active AS roles_is_active, roles.organization_id AS roles_organization_id, roles.created_at AS roles_created_at, roles.updated_at AS roles_updated_at 
+FROM roles 
+WHERE roles.id IN (%s)
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [cached since 0.383s ago] (37,)
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine SELECT employees.id AS employees_id, employees.employee_code AS employees_employee_code, employees.name AS employees_name, employees.photo AS employees_photo, employees.status AS employees_status, employees.dob AS employees_dob, employees.gender AS employees_gender, employees.pan_number AS employees_pan_number, employees.aadhaar_number AS employees_aadhaar_number, employees.email AS employees_email, employees.phone AS employees_phone, employees.hire_date AS employees_hire_date, employees.bank_details AS employees_bank_details, employees.position_id AS employees_position_id, employees.created_at AS employees_created_at, employees.updated_at AS employees_updated_at 
+FROM employees 
+WHERE employees.id IN (%s)
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [cached since 0.3775s ago] (7103,)
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine SELECT positions.id, positions.name, positions.code, positions.role_name, positions.role_id, positions.level_name, positions.level_rank, positions.department, positions.section, positions.job_name, positions.job_family_name, positions.job_family_id, positions.role_type_id, positions.status, positions.start_date, positions.project_id, positions.office_id, positions.parent_position_id, positions.employee_id, positions.created_at, positions.updated_at 
+FROM positions 
+WHERE positions.id = %s
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [cached since 0.3682s ago] (5926,)
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine SELECT roles.id, roles.name, roles.code, roles.description, roles.role_type, roles.is_active, roles.organization_id, roles.created_at, roles.updated_at 
+FROM roles 
+WHERE roles.id = %s
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [cached since 0.08089s ago] (19,)
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [cached since 0.3752s ago] (7129,)
+can_acknowledge resolved as: False
+SUCCESS: Unrelated user can NOT acknowledge custody step on frontend.
+6. Testing unrelated user custody chain acknowledge API (should raise 403)...
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine SAVEPOINT sa_savepoint_8
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [no key 0.00010s] ()
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine SELECT dispatch_orders.id, dispatch_orders.dispatch_number, dispatch_orders.do_id, dispatch_orders.pack_id, dispatch_orders.warehouse_id, dispatch_orders.customer_id, dispatch_orders.destination_user_id, dispatch_orders.destination_warehouse_id, dispatch_orders.destination_type, dispatch_orders.dispatch_type, dispatch_orders.delivery_acknowledged, dispatch_orders.delivery_acknowledged_at, dispatch_orders.delivery_acknowledged_by_id, dispatch_orders.delivery_acknowledged_by_name, dispatch_orders.delivery_acknowledged_by_designation, dispatch_orders.delivery_acknowledged_by_phone, dispatch_orders.delivery_acknowledged_by_email, dispatch_orders.receiver_signature_url, dispatch_orders.receiver_id_proof_type, dispatch_orders.receiver_id_proof_number, dispatch_orders.delivery_photo_urls, dispatch_orders.goods_condition_on_delivery, dispatch_orders.delivery_remarks, dispatch_orders.material_issue_id, dispatch_orders.delivery_location_latitude, dispatch_orders.delivery_location_longitude, dispatch_orders.delivery_location_verified, dispatch_orders.vehicle_number, dispatch_orders.vehicle_type, dispatch_orders.driver_name, dispatch_orders.driver_contact, dispatch_orders.transport_vendor_id, dispatch_orders.lr_number, dispatch_orders.docket_number, dispatch_orders.dispatch_date, dispatch_orders.expected_delivery_date, dispatch_orders.loading_confirmed, dispatch_orders.loading_confirmed_at, dispatch_orders.dispatch_mode, dispatch_orders.status, dispatch_orders.remarks, dispatch_orders.dispatched_by, dispatch_orders.created_at 
+FROM dispatch_orders 
+WHERE dispatch_orders.id = %s FOR UPDATE
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [cached since 0.0479s ago] (195,)
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine SELECT dispatch_custody_transfers.id, dispatch_custody_transfers.dispatch_order_id, dispatch_custody_transfers.position_id, dispatch_custody_transfers.status, dispatch_custody_transfers.acknowledged_by_id, dispatch_custody_transfers.acknowledged_at, dispatch_custody_transfers.sequence, dispatch_custody_transfers.seal_intact, dispatch_custody_transfers.packaging_condition, dispatch_custody_transfers.discrepancy_reported, dispatch_custody_transfers.remarks 
+FROM dispatch_custody_transfers 
+WHERE dispatch_custody_transfers.dispatch_order_id = %s AND dispatch_custody_transfers.status = %s ORDER BY dispatch_custody_transfers.sequence ASC 
+ LIMIT %s
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [cached since 0.04694s ago] (195, 'pending', 1)
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine SELECT employees.id, employees.employee_code, employees.name, employees.photo, employees.status, employees.dob, employees.gender, employees.pan_number, employees.aadhaar_number, employees.email, employees.phone, employees.hire_date, employees.bank_details, employees.position_id, employees.created_at, employees.updated_at 
+FROM employees 
+WHERE employees.id = %s
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [cached since 0.3791s ago] (11041,)
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine SELECT users.active_role_id 
+FROM users 
+WHERE users.id = %s
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [cached since 0.3489s ago] (45,)
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine SELECT roles.code 
+FROM roles 
+WHERE roles.id = %s AND roles.is_active = true
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [cached since 0.3454s ago] (37,)
+SUCCESS: Unrelated user was correctly rejected with 403: You do not occupy the active position required to acknowledge custody for this step.
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine UPDATE employees SET position_id=%s, updated_at=%s WHERE employees.id = %s
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [cached since 0.337s ago] (2380, datetime.datetime(2026, 6, 25, 11, 18, 44, 578648, tzinfo=datetime.timezone.utc), 11041)
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine ROLLBACK TO SAVEPOINT sa_savepoint_8
+2026-06-25 16:48:44,578 INFO sqlalchemy.engine.Engine [no key 0.00010s] ()
+2026-06-25 16:48:44,592 INFO sqlalchemy.engine.Engine ROLLBACK TO SAVEPOINT sa_savepoint_6
+2026-06-25 16:48:44,593 INFO sqlalchemy.engine.Engine [no key 0.00028s] ()
+2026-06-25 16:48:44,593 INFO sqlalchemy.engine.Engine ROLLBACK
+--- VERIFICATION COMPLETED ---
+Exception ignored in: <function Connection.__del__ at 0x000002734C7B0540>
+Traceback (most recent call last):
+  File "C:\Users\User-4\AppData\Local\Programs\Python\Python311\Lib\site-packages\aiomysql\connection.py", line 1131, in __del__
+  File "C:\Users\User-4\AppData\Local\Programs\Python\Python311\Lib\site-packages\aiomysql\connection.py", line 339, in close
+  File "C:\Users\User-4\AppData\Local\Programs\Python\Python311\Lib\asyncio\proactor_events.py", line 109, in close
+  File "C:\Users\User-4\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 761, in call_soon
+  File "C:\Users\User-4\AppData\Local\Programs\Python\Python311\Lib\asyncio\base_events.py", line 519, in _check_closed
+RuntimeError: Event loop is closed

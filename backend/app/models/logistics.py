@@ -432,6 +432,7 @@ class LogisticsServiceOrderVehicle(Base):
     gate_entry_time = Column(DateTime)
     gate_entry_by = Column(BigInteger, ForeignKey("users.id"))
     gate_pass_number = Column(String(50))
+    gate_out_pass_number = Column(String(50))
     loading_bay_number = Column(String(50))
     loading_supervisor = Column(BigInteger, ForeignKey("users.id"))
     loading_start_time = Column(DateTime)

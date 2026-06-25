@@ -216,10 +216,17 @@ async def allowed_keys_for_role(db: AsyncSession, role: Role) -> List[str]:
     if role.code in {"super_admin", "admin"}:
         return sorted(_allowed_for_role(role.code))
 
+    role_codes = [role.code]
+    if role.code == "storekeeper":
+        role_codes.append("store_keeper")
+    elif role.code == "store_keeper":
+        role_codes.append("storekeeper")
+
     result = await db.execute(
         select(Permission.module, Permission.action)
         .join(RolePermission, RolePermission.permission_id == Permission.id)
-        .where(RolePermission.role_id == role.id)
+        .join(Role, Role.id == RolePermission.role_id)
+        .where(Role.code.in_(role_codes))
     )
     dynamic_keys = set()
     for module, action in result.all():

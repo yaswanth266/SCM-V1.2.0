@@ -21,7 +21,7 @@ async def process_dispatch_stock_deduction(db: AsyncSession, d: DispatchOrder, c
     from app.models.stock import StockLedger
     ledger_check = await db.execute(
         select(StockLedger).where(
-            StockLedger.reference_type == "dispatch_order",
+            StockLedger.reference_type.in_(["dispatch_order", "logistics_mdo", "mdo"]),
             StockLedger.reference_id == d.id,
             StockLedger.qty_out > 0
         ).limit(1)
@@ -60,6 +60,83 @@ async def process_dispatch_stock_deduction(db: AsyncSession, d: DispatchOrder, c
         )
         mi_items = list(mi_items_res.scalars().all())
 
+    # Pre-fetch MDO for stock deduction rules
+    from app.models.logistics import LogisticsMainDispatchOrder
+    
+    parent_mdo = None
+    mdo_res = await db.execute(
+        select(LogisticsMainDispatchOrder).where(LogisticsMainDispatchOrder.mdo_number == d.dispatch_number).limit(1)
+    )
+    parent_mdo = mdo_res.scalar_one_or_none()
+
+    dispatch_mode_val = getattr(d, "dispatch_mode", "direct") or "direct"
+    is_multi = dispatch_mode_val.lower() == "multi-level"
+    is_tp = False
+    if parent_mdo:
+        is_tp = (parent_mdo.dispatch_type or "THIRD_PARTY") == "THIRD_PARTY"
+    else:
+        is_tp = (d.dispatch_type or "THIRD_PARTY") == "THIRD_PARTY"
+
+    # FLOW 1: Non-TP Multi-level dispatches. Skip entirely (L-1/SDO handles everything).
+    if is_multi and not is_tp:
+        return
+
+    # FLOW 2: TP Multi-level dispatches. Release reservation and increment transit ONLY.
+    if is_multi and is_tp:
+        for item in items:
+            batch_id = None
+            bin_id = None
+            rate = Decimal("0")
+            uom_id = 1
+            
+            # Match with the first unused mi_item for this material
+            mi_item = None
+            target_mi_id = item.material_issue_id or d.material_issue_id
+            for mi_it in mi_items:
+                if mi_it.item_id == item.material_id and mi_it.issue_id == target_mi_id and mi_it.id not in used_mi_item_ids:
+                    mi_item = mi_it
+                    used_mi_item_ids.add(mi_it.id)
+                    break
+                    
+            if not mi_item and target_mi_id:
+                mi_item = next((mi_it for mi_it in mi_items if mi_it.item_id == item.material_id and mi_it.issue_id == target_mi_id), None)
+                
+            if mi_item:
+                batch_id = mi_item.batch_id
+                bin_id = mi_item.bin_id
+                rate = mi_item.rate or Decimal("0")
+                uom_id = mi_item.uom_id or 1
+
+            # Release reservation (R↓)
+            await release_reservation(
+                db,
+                item_id=item.material_id,
+                warehouse_id=d.warehouse_id,
+                qty=item.dispatched_quantity,
+                bin_id=bin_id,
+                batch_id=batch_id,
+            )
+
+            # Increment transit_qty (Tr↑)
+            from app.services.stock_service import _get_or_create_balance
+            src_balance = await _get_or_create_balance(
+                db,
+                item_id=item.material_id,
+                warehouse_id=d.warehouse_id,
+                bin_id=bin_id,
+                batch_id=batch_id,
+                lock=True,
+            )
+            src_balance.transit_qty = (src_balance.transit_qty or Decimal("0")) + Decimal(str(item.dispatched_quantity))
+            src_balance.available_qty = max(
+                Decimal("0"),
+                (src_balance.total_qty or Decimal("0"))
+                - (src_balance.reserved_qty or Decimal("0"))
+                - (src_balance.transit_qty or Decimal("0"))
+            )
+        return
+
+    # DIRECT DISPATCH (Standard Flow): Release reservation (R↓), post stock ledger (T↓), and increment transit if inter-warehouse.
     for item in items:
         batch_id = None
         bin_id = None
@@ -76,7 +153,6 @@ async def process_dispatch_stock_deduction(db: AsyncSession, d: DispatchOrder, c
                 break
                 
         if not mi_item and target_mi_id:
-            # Fallback to the first matching one
             mi_item = next((mi_it for mi_it in mi_items if mi_it.item_id == item.material_id and mi_it.issue_id == target_mi_id), None)
             
         if mi_item:
@@ -84,8 +160,8 @@ async def process_dispatch_stock_deduction(db: AsyncSession, d: DispatchOrder, c
             bin_id = mi_item.bin_id
             rate = mi_item.rate or Decimal("0")
             uom_id = mi_item.uom_id or 1
-                
-        # 1. Release reservation in source warehouse
+
+        # Release reservation (R↓)
         await release_reservation(
             db,
             item_id=item.material_id,
@@ -95,7 +171,7 @@ async def process_dispatch_stock_deduction(db: AsyncSession, d: DispatchOrder, c
             batch_id=batch_id,
         )
         
-        # 2. Post stock ledger entry to physically deduct stock from source warehouse
+        # Post stock ledger (T↓)
         await post_stock_ledger(
             db,
             item_id=item.material_id,
@@ -111,14 +187,8 @@ async def process_dispatch_stock_deduction(db: AsyncSession, d: DispatchOrder, c
             created_by=created_by_id,
         )
 
-        # 3. For inter-warehouse transfers, increase the transit_qty in the source warehouse.
-        #    MULTI-LEVEL DISPATCH: transit_qty is managed by the SDO handover/receive workflow
-        #    (see sdo_handover and sdo_receive in logistics.py). Do NOT double-count transit_qty
-        #    here for multi-level dispatches — the SDO flow handles available→transit→available
-        #    transitions at each intermediate warehouse.
-        #    DIRECT DISPATCH: set transit_qty at source to reflect goods in transit.
-        dispatch_mode_val = getattr(d, "dispatch_mode", "direct") or "direct"
-        if d.destination_warehouse_id and d.destination_warehouse_id != d.warehouse_id and dispatch_mode_val.lower() != "multi-level":
+        # Increment transit_qty if inter-warehouse (Tr↑)
+        if d.destination_warehouse_id and d.destination_warehouse_id != d.warehouse_id:
             from app.services.stock_service import _get_or_create_balance
             src_balance = await _get_or_create_balance(
                 db,
@@ -129,6 +199,12 @@ async def process_dispatch_stock_deduction(db: AsyncSession, d: DispatchOrder, c
                 lock=True,
             )
             src_balance.transit_qty = (src_balance.transit_qty or Decimal("0")) + Decimal(str(item.dispatched_quantity))
+            src_balance.available_qty = max(
+                Decimal("0"),
+                (src_balance.total_qty or Decimal("0"))
+                - (src_balance.reserved_qty or Decimal("0"))
+                - (src_balance.transit_qty or Decimal("0"))
+            )
 
     # Automatically transition the linked MaterialIssue status to "dispatched"
     if d.material_issue_id:
@@ -146,9 +222,24 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
         from app.models.issue import MaterialIssueItem
         from datetime import datetime, timezone
         
-        # Select all MDOs that are in active/terminal status
-        stmt = select(LogisticsMainDispatchOrder).where(
-            LogisticsMainDispatchOrder.status.in_(["DISPATCHED", "IN_TRANSIT", "COMPLETED", "ACKNOWLEDGED"])
+        # Select only MDOs that either do not have a DispatchOrder, or are out of sync
+        from sqlalchemy import or_, and_
+        stmt = (
+            select(LogisticsMainDispatchOrder)
+            .outerjoin(DispatchOrder, DispatchOrder.dispatch_number == LogisticsMainDispatchOrder.mdo_number)
+            .where(
+                LogisticsMainDispatchOrder.status.in_(["DISPATCHED", "IN_TRANSIT", "COMPLETED", "ACKNOWLEDGED"]),
+                or_(
+                    DispatchOrder.id.is_(None),
+                    and_(LogisticsMainDispatchOrder.status == "DISPATCHED", DispatchOrder.status != "dispatched"),
+                    and_(LogisticsMainDispatchOrder.status == "IN_TRANSIT", DispatchOrder.status != "in_transit"),
+                    and_(LogisticsMainDispatchOrder.status == "TRANSPORTER_ACKNOWLEDGED", DispatchOrder.status != "in_transit"),
+                    and_(LogisticsMainDispatchOrder.status == "COMPLETED", DispatchOrder.status != "delivered"),
+                    and_(LogisticsMainDispatchOrder.status == "ACKNOWLEDGED", DispatchOrder.status != "acknowledged"),
+                    LogisticsMainDispatchOrder.dispatch_mode != DispatchOrder.dispatch_mode,
+                    DispatchOrder.expected_delivery_date != LogisticsMainDispatchOrder.required_delivery_date
+                )
+            )
         )
         res = await db.execute(stmt)
         mdos = res.scalars().all()
@@ -623,8 +714,10 @@ from pydantic import BaseModel
 from datetime import datetime, timezone
 
 async def get_destination_position_id(db: AsyncSession, destination_warehouse_id: Optional[int], destination_user_id: Optional[int]) -> Optional[int]:
-    from app.models.user import User
-    from app.models.settings_master import Employee
+    from app.models.user import User, UserRole, Role
+    from app.models.settings_master import Employee, Position
+    
+    resolved_pos_id = None
     
     if destination_user_id:
         user_q = await db.execute(select(User).where(User.id == destination_user_id))
@@ -633,9 +726,9 @@ async def get_destination_position_id(db: AsyncSession, destination_warehouse_id
             emp_q = await db.execute(select(Employee).where(Employee.id == user.employee_id))
             emp = emp_q.scalar_one_or_none()
             if emp and emp.position_id:
-                return emp.position_id
+                resolved_pos_id = emp.position_id
 
-    if destination_warehouse_id:
+    if not resolved_pos_id and destination_warehouse_id:
         from app.models.user import UserWarehouse
         uw_q = await db.execute(select(UserWarehouse.user_id).where(UserWarehouse.warehouse_id == destination_warehouse_id))
         user_ids = [r[0] for r in uw_q.all()]
@@ -646,19 +739,161 @@ async def get_destination_position_id(db: AsyncSession, destination_warehouse_id
                 .where(User.id.in_(user_ids), Employee.position_id.is_not(None))
                 .limit(1)
             )
-            return res.scalar_one_or_none()
-            
-    return None
+            resolved_pos_id = res.scalar_one_or_none()
+
+    # If the resolved position is view-only/OE, override it with the Storekeeper position (role ID 34)
+    if resolved_pos_id:
+        pos_q = await db.execute(select(Position).where(Position.id == resolved_pos_id))
+        pos = pos_q.scalar_one_or_none()
+        if pos and pos.role_id in (18, 49):  # OE / View Only roles
+            # A. Try to find a Storekeeper (role ID 34) user mapped to the destination warehouse
+            if destination_warehouse_id:
+                from app.models.user import UserWarehouse
+                uw_q = await db.execute(select(UserWarehouse.user_id).where(UserWarehouse.warehouse_id == destination_warehouse_id))
+                user_ids = [r[0] for r in uw_q.all()]
+                if user_ids:
+                    sk_res = await db.execute(
+                        select(Employee.position_id)
+                        .join(User, User.employee_id == Employee.id)
+                        .join(UserRole, UserRole.user_id == User.id)
+                        .where(
+                            User.id.in_(user_ids),
+                            UserRole.role_id == 34,
+                            Employee.position_id.is_not(None)
+                        )
+                        .limit(1)
+                    )
+                    sk_pos_id = sk_res.scalar_one_or_none()
+                    if sk_pos_id:
+                        return sk_pos_id
+
+            # B. If no Storekeeper user is mapped, locate a Storekeeper position by location name matching from the OE position's name!
+            if pos.name:
+                suffix = None
+                if "-" in pos.name:
+                    suffix = pos.name.split("-")[-1].strip()
+                elif "@" in pos.name:
+                    suffix = pos.name.split("@")[-1].strip()
+                else:
+                    tokens = [t.strip() for t in pos.name.split() if len(t.strip()) > 3]
+                    if tokens:
+                        suffix = tokens[-1]
+                
+                if suffix:
+                    sk_pos_q = await db.execute(
+                        select(Position.id)
+                        .where(
+                            Position.role_id == 34,
+                            (Position.name.ilike(f"%{suffix}%") | Position.code.ilike(f"%{suffix}%"))
+                        )
+                        .limit(1)
+                    )
+                    sk_pos_id = sk_pos_q.scalar_one_or_none()
+                    if sk_pos_id:
+                        return sk_pos_id
+
+            # C. If that fails, try matching location tokens from the destination warehouse name
+            if destination_warehouse_id:
+                from app.models.warehouse import Warehouse
+                wh_res = await db.execute(select(Warehouse).where(Warehouse.id == destination_warehouse_id))
+                wh = wh_res.scalar_one_or_none()
+                if wh and wh.name:
+                    suffix = None
+                    if "@" in wh.name:
+                        suffix = wh.name.split("@")[-1].strip()
+                    elif "-" in wh.name:
+                        suffix = wh.name.split("-")[-1].strip()
+                    else:
+                        tokens = [t.strip() for t in wh.name.split() if len(t.strip()) > 3]
+                        if tokens:
+                            suffix = tokens[-1]
+                    
+                    if suffix:
+                        sk_pos_q = await db.execute(
+                            select(Position.id)
+                            .where(
+                                Position.role_id == 34,
+                                (Position.name.ilike(f"%{suffix}%") | Position.code.ilike(f"%{suffix}%"))
+                            )
+                            .limit(1)
+                        )
+                        sk_pos_id = sk_pos_q.scalar_one_or_none()
+                        if sk_pos_id:
+                            return sk_pos_id
+
+    return resolved_pos_id
+
 
 async def get_warehouse_for_position(db: AsyncSession, position_id: int) -> Optional[int]:
     from app.models.settings_master import Employee, Position
     from app.models.user import User, UserWarehouse
+    from app.models.warehouse import Warehouse
     
-    # 1. Try to find via the assignee (employee_id) directly set on the Position row
+    # Get the position row
     pos_res = await db.execute(
-        select(Position.employee_id).where(Position.id == position_id)
+        select(Position).where(Position.id == position_id)
     )
-    emp_id = pos_res.scalar_one_or_none()
+    pos = pos_res.scalar_one_or_none()
+    
+    # First priority: Match by Position name to avoid incorrect database user-warehouse mappings
+    if pos and pos.name:
+        pos_name_upper = pos.name.upper()
+        # 1. Look for Regional Manager and Regional Warehouse match
+        if "REGIONAL MANAGER" in pos_name_upper:
+            suffix = pos_name_upper.replace("REGIONAL MANAGER", "").strip(" -")
+            if suffix:
+                res = await db.execute(
+                    select(Warehouse.id)
+                    .where(
+                        Warehouse.name.like(f"%REGIONAL%"),
+                        Warehouse.name.like(f"%{suffix}%")
+                    )
+                    .limit(1)
+                )
+                wh_id = res.scalar_one_or_none()
+                if wh_id:
+                    return wh_id
+                
+                res = await db.execute(
+                    select(Warehouse.id)
+                    .where(Warehouse.name.like(f"%{suffix}%"))
+                    .limit(1)
+                )
+                wh_id = res.scalar_one_or_none()
+                if wh_id:
+                    return wh_id
+
+        # 2. Look for District Manager and District Warehouse match
+        if "DISTRICT" in pos_name_upper:
+            parts = pos_name_upper.split("-")
+            loc = parts[-1].strip() if parts else ""
+            if loc:
+                res = await db.execute(
+                    select(Warehouse.id)
+                    .where(
+                        Warehouse.name.like(f"%DISTRICT%"),
+                        Warehouse.name.like(f"%{loc}%")
+                    )
+                    .limit(1)
+                )
+                wh_id = res.scalar_one_or_none()
+                if wh_id:
+                    return wh_id
+                
+                res = await db.execute(
+                    select(Warehouse.id)
+                    .where(
+                        (Warehouse.name.like(f"%{loc}%")) |
+                        (Warehouse.code.like(f"%{loc}%"))
+                    )
+                    .limit(1)
+                )
+                wh_id = res.scalar_one_or_none()
+                if wh_id:
+                    return wh_id
+    
+    # 2. Try to find via the assignee (employee_id) directly set on the Position row
+    emp_id = pos.employee_id if pos else None
     if emp_id:
         res = await db.execute(
             select(UserWarehouse.warehouse_id)
@@ -670,7 +905,7 @@ async def get_warehouse_for_position(db: AsyncSession, position_id: int) -> Opti
         if wh_id:
             return wh_id
 
-    # 2. Try to find via UserWarehouse mapping for users occupying this position via Employee.position_id
+    # 3. Try to find via UserWarehouse mapping for users occupying this position via Employee.position_id
     res = await db.execute(
         select(UserWarehouse.warehouse_id)
         .join(User, User.id == UserWarehouse.user_id)
@@ -682,7 +917,7 @@ async def get_warehouse_for_position(db: AsyncSession, position_id: int) -> Opti
     if wh_id:
         return wh_id
         
-    # 2. Try searching by employee's active position or sub-positions
+    # 4. Try searching by employee's active position or sub-positions
     res_pos = await db.execute(
         select(Employee.id)
         .where(Employee.position_id == position_id)
@@ -1119,11 +1354,12 @@ async def get_dispatch_custody_chain(
     
     # Check current user's position and admin status for can_acknowledge check
     user_pos_id = None
+    current_user_emp = None
     if current_user.employee_id:
         emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
-        emp = emp_res.scalar_one_or_none()
-        if emp:
-            user_pos_id = emp.position_id
+        current_user_emp = emp_res.scalar_one_or_none()
+        if current_user_emp:
+            user_pos_id = current_user_emp.position_id
             
     from app.utils.dependencies import get_user_role_codes
     role_codes = set(await get_user_role_codes(db, current_user.id))
@@ -1155,7 +1391,7 @@ async def get_dispatch_custody_chain(
                 emp_q = await db.execute(select(Employee).where(Employee.id == pos.employee_id))
                 emp = emp_q.scalar_one_or_none()
                 if emp:
-                    emp_name = f"{emp.first_name} {emp.last_name or ''}".strip()
+                    emp_name = emp.name.strip() if emp.name else "Unknown"
                     
         ack_by_name = None
         if t.acknowledged_by_id:
@@ -1167,7 +1403,18 @@ async def get_dispatch_custody_chain(
                 
         can_ack = False
         if t.status == "pending" and t.sequence == active_seq:
-            can_ack = (user_pos_id == t.position_id or is_admin)
+            is_authorized = (user_pos_id == t.position_id or is_admin)
+            if not is_authorized and user_pos_id and t.position_id:
+                from app.services.approval_service import get_position_ancestors
+                ancestors = await get_position_ancestors(db, t.position_id)
+                ancestor_ids = {a.id for a in ancestors}
+                if current_user_emp:
+                    from app.models.settings_master import Position as PositionModel
+                    pos_rows = await db.execute(select(PositionModel.id).where(PositionModel.employee_id == current_user_emp.id))
+                    curr_pos_ids = {r[0] for r in pos_rows.all()} | ({current_user_emp.position_id} if current_user_emp.position_id else set())
+                    if curr_pos_ids & ancestor_ids:
+                        is_authorized = True
+            can_ack = is_authorized
             
         out.append({
             "id": t.id,
@@ -1219,17 +1466,30 @@ async def acknowledge_custody(
         
     from app.models.settings_master import Employee
     user_pos_id = None
+    current_user_emp = None
     if current_user.employee_id:
         emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
-        emp = emp_res.scalar_one_or_none()
-        if emp:
-            user_pos_id = emp.position_id
+        current_user_emp = emp_res.scalar_one_or_none()
+        if current_user_emp:
+            user_pos_id = current_user_emp.position_id
             
     from app.utils.dependencies import get_user_role_codes
     role_codes = set(await get_user_role_codes(db, current_user.id))
     is_admin = bool({"super_admin", "admin"} & role_codes)
     
-    if user_pos_id != active_step.position_id and not is_admin:
+    is_authorized = (user_pos_id == active_step.position_id or is_admin)
+    if not is_authorized and user_pos_id and active_step.position_id:
+        from app.services.approval_service import get_position_ancestors
+        ancestors = await get_position_ancestors(db, active_step.position_id)
+        ancestor_ids = {a.id for a in ancestors}
+        if current_user_emp:
+            from app.models.settings_master import Position as PositionModel
+            pos_rows = await db.execute(select(PositionModel.id).where(PositionModel.employee_id == current_user_emp.id))
+            curr_pos_ids = {r[0] for r in pos_rows.all()} | ({current_user_emp.position_id} if current_user_emp.position_id else set())
+            if curr_pos_ids & ancestor_ids:
+                is_authorized = True
+
+    if not is_authorized:
         raise HTTPException(
             status_code=403,
             detail="You do not occupy the active position required to acknowledge custody for this step."

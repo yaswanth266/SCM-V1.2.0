@@ -207,6 +207,7 @@ export default function LogisticsSO() {
         gatePassNumber: values.gatePassNumber,
         lrNumber: values.lrNumber,
         ewayBillNumber: values.ewayBillNumber,
+        gateOutPassNumber: values.gateOutPassNumber,
         podReceivedBy: values.podReceivedBy,
         podDocumentUrl: values.podDocumentUrl || '/pod_document_signed.pdf',
         feedbackText: values.feedbackText,
@@ -471,7 +472,8 @@ export default function LogisticsSO() {
                         <Row gutter={[16, 12]} style={{ fontSize: '12px', color: '#334155' }}>
                           <Col xs={12}>Driver Mobile: <strong style={{ color: '#0f172a', fontFamily: 'monospace' }}>{selectedVehicle.driver_mobile}</strong></Col>
                           <Col xs={12}>Vehicle Type: <strong style={{ color: '#0284c7' }}>{selectedVehicle.vehicle_type}</strong></Col>
-                          {selectedVehicle.gate_pass_number && <Col xs={12}>Gate Pass: <strong style={{ color: '#059669', fontFamily: 'monospace' }}>{selectedVehicle.gate_pass_number}</strong></Col>}
+                          {selectedVehicle.gate_pass_number && <Col xs={12}>Gate Entry Pass: <strong style={{ color: '#059669', fontFamily: 'monospace' }}>{selectedVehicle.gate_pass_number}</strong></Col>}
+                          {selectedVehicle.gate_out_pass_number && <Col xs={12}>Gate Out Pass: <strong style={{ color: '#0284c7', fontFamily: 'monospace' }}>{selectedVehicle.gate_out_pass_number}</strong></Col>}
                           {selectedVehicle.lr_number && <Col xs={12}>Lorry Receipt: <strong style={{ color: '#4f46e5', fontFamily: 'monospace' }}>{selectedVehicle.lr_number}</strong></Col>}
                           {selectedVehicle.eway_bill_number && <Col xs={12}>Eway Bill: <strong style={{ color: '#e11d48', fontFamily: 'monospace' }}>{selectedVehicle.eway_bill_number}</strong></Col>}
                         </Row>
@@ -521,9 +523,9 @@ export default function LogisticsSO() {
                                    setLoading(false);
                                  }
                                }}>
-                                 <Form.Item name="gatePassNumber" label="Gate Pass Number" rules={[{ required: true, message: 'Please enter Gate Pass Number!' }]}>
-                                   <Input placeholder={`e.g. GP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`} style={{ fontFamily: 'monospace' }} />
-                                 </Form.Item>
+                                 <Form.Item name="gatePassNumber" label="Gate Entry Pass Number" rules={[{ required: true, message: 'Please enter Gate Entry Pass Number!' }]}>
+                                    <Input placeholder={`e.g. GP-IN-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`} style={{ fontFamily: 'monospace' }} />
+                                  </Form.Item>
                                  <Alert message="This will mark the vehicle as GATE_IN and log the gate entry timestamp." type="info" showIcon style={{ marginBottom: '16px' }} />
                                  <Button type="primary" htmlType="submit" icon={<CheckCircleOutlined />} block loading={loading}>
                                    Confirm Check-In (Mark as GATE_IN)
@@ -548,83 +550,86 @@ export default function LogisticsSO() {
                            )}
 
                            {selectedVehicle.vehicle_status === 'LOADING' && (
-                             <div>
-                               <Form form={gatingForm} layout="vertical" onFinish={async (values) => {
-                                 await handleGatingSubmit({ ...values, nextStatus: 'GATE_OUT' });
-                               }} initialValues={{
-                                 lrNumber: `LR-MUM-${Math.floor(10000 + Math.random() * 90000)}`,
-                                 ewayBillNumber: `EW-2026-${Math.floor(100000 + Math.random() * 900000)}`
-                               }}>
-                                 <Form.Item name="lrNumber" label="Lorry Receipt (LR) Number" rules={[{ required: true }]}>
-                                   <Input placeholder="E.g. LR-2026-9812" />
-                                 </Form.Item>
-                                 <Form.Item name="ewayBillNumber" label="E-Way Bill Number" rules={[{ required: true }]}>
-                                   <Input placeholder="E.g. EW-2026-928122" />
-                                 </Form.Item>
-                                 <Button type="primary" htmlType="submit" icon={<AuditOutlined />} block loading={loading}>
-                                   Complete Loading & Gate-Out (Generates Outward GP)
-                                 </Button>
-                               </Form>
-                             </div>
-                           )}
+                              <div>
+                                <Form form={gatingForm} layout="vertical" onFinish={async (values) => {
+                                  await handleGatingSubmit({ ...values, nextStatus: 'GATE_OUT' });
+                                }} initialValues={{
+                                  lrNumber: `LR-MUM-${Math.floor(10000 + Math.random() * 90000)}`,
+                                  ewayBillNumber: `EW-2026-${Math.floor(100000 + Math.random() * 900000)}`,
+                                  gateOutPassNumber: `GP-OUT-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`
+                                }}>
+                                  <Form.Item name="lrNumber" label="Lorry Receipt (LR) Number" rules={[{ required: true }]}>
+                                    <Input placeholder="E.g. LR-2026-9812" />
+                                  </Form.Item>
+                                  <Form.Item name="ewayBillNumber" label="E-Way Bill Number" rules={[{ required: true }]}>
+                                    <Input placeholder="E.g. EW-2026-928122" />
+                                  </Form.Item>
+                                  <Form.Item name="gateOutPassNumber" label="Gate Out Pass Number (Outward GP)" rules={[{ required: true, message: 'Please enter Gate Out Pass Number!' }]}>
+                                    <Input placeholder="E.g. GP-OUT-2026-9812" style={{ fontFamily: 'monospace' }} />
+                                  </Form.Item>
+                                  <Button type="primary" htmlType="submit" icon={<AuditOutlined />} block loading={loading}>
+                                    Complete Loading & Gate-Out (Assign Out Pass)
+                                  </Button>
+                                </Form>
+                              </div>
+                            )}
 
                            {selectedVehicle.vehicle_status === 'GATE_OUT' && (
-                             <div>
-                               <Form 
-                                 key={`${selectedVehicle.id}-gateout`}
-                                 layout="vertical" 
-                                 onFinish={async (values) => {
-                                   await handleGatingSubmit({ ...values, nextStatus: 'IN_TRANSIT' });
-                                 }}
-                                 initialValues={{
-                                   gatePassNumber: selectedVehicle.gate_pass_number
-                                 }}
-                               >
-                                 <Form.Item 
-                                   name="gatePassNumber" 
-                                   label={<span style={{ fontWeight: 600, color: '#334155' }}>Gate Pass Out Number</span>}
-                                   tooltip="The Gate Pass associated with this vehicle dispatch. Completing transit simulation transitions the Gate Pass to Gate Pass Out status."
-                                 >
-                                   <Input 
-                                     prefix={<AuditOutlined style={{ color: '#64748b' }} />} 
-                                     disabled 
-                                     style={{ 
-                                       fontFamily: 'monospace', 
-                                       background: '#f8fafc', 
-                                       color: '#0f172a', 
-                                       fontWeight: 600,
-                                       borderColor: '#cbd5e1'
-                                     }} 
-                                   />
-                                 </Form.Item>
-
-                                 <Alert 
-                                   message="Ready for Dispatch Transit" 
-                                   description="Loading complete and vehicle cleared to leave the gate. Transition to Transit simulation."
-                                   type="info" 
-                                   showIcon 
-                                   style={{ marginBottom: '16px' }}
-                                 />
-                                 <Button 
-                                   type="primary" 
-                                   htmlType="submit"
-                                   icon={<SendOutlined />} 
-                                   block 
-                                   loading={loading}
-                                   style={{
-                                     background: 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)',
-                                     borderColor: '#4f46e5',
-                                     height: '40px',
-                                     fontWeight: 600,
-                                     borderRadius: '6px',
-                                     boxShadow: '0 4px 6px -1px rgba(79, 70, 229, 0.2)'
+                               <div>
+                                 <Form 
+                                   key={`${selectedVehicle.id}-gateout`}
+                                   layout="vertical" 
+                                   onFinish={async (values) => {
+                                     await handleGatingSubmit({ ...values, nextStatus: 'IN_TRANSIT' });
+                                   }}
+                                   initialValues={{
+                                     gateOutPassNumber: selectedVehicle.gate_out_pass_number || `GP-OUT-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`
                                    }}
                                  >
-                                   Start Transit Journey (IN_TRANSIT)
-                                 </Button>
-                               </Form>
-                             </div>
-                           )}
+                                   <Form.Item 
+                                     name="gateOutPassNumber" 
+                                     label={<span style={{ fontWeight: 600, color: '#334155' }}>Gate Out Pass Number (Outward GP)</span>}
+                                     rules={[{ required: true, message: 'Please enter Gate Out Pass Number!' }]}
+                                     tooltip="The Gate Out Pass associated with this vehicle exit."
+                                   >
+                                     <Input 
+                                       prefix={<AuditOutlined style={{ color: '#64748b' }} />} 
+                                       style={{ 
+                                         fontFamily: 'monospace', 
+                                         color: '#0f172a', 
+                                         fontWeight: 600,
+                                         borderColor: '#cbd5e1'
+                                       }} 
+                                     />
+                                   </Form.Item>
+
+                                  <Alert 
+                                    message="Ready for Dispatch Transit" 
+                                    description="Loading complete and vehicle cleared to leave the gate. Transition to Transit simulation."
+                                    type="info" 
+                                    showIcon 
+                                    style={{ marginBottom: '16px' }}
+                                  />
+                                  <Button 
+                                    type="primary" 
+                                    htmlType="submit"
+                                    icon={<SendOutlined />} 
+                                    block 
+                                    loading={loading}
+                                    style={{
+                                      background: 'linear-gradient(135deg, #4f46e5 0%, #3730a3 100%)',
+                                      borderColor: '#4f46e5',
+                                      height: '40px',
+                                      fontWeight: 600,
+                                      borderRadius: '6px',
+                                      boxShadow: '0 4px 6px -1px rgba(79, 70, 229, 0.2)'
+                                    }}
+                                  >
+                                    Start Transit Journey (IN_TRANSIT)
+                                  </Button>
+                                </Form>
+                              </div>
+                            )}
 
                            {selectedVehicle.vehicle_status === 'IN_TRANSIT' && (
                              <div>
@@ -738,7 +743,8 @@ export default function LogisticsSO() {
                         <Row gutter={[16, 12]} style={{ fontSize: '12px', color: '#334155' }}>
                           <Col xs={12}>Driver Mobile: <strong style={{ color: '#0f172a', fontFamily: 'monospace' }}>{selectedVehicle.driver_mobile}</strong></Col>
                           <Col xs={12}>Vehicle Type: <strong style={{ color: '#0284c7' }}>{selectedVehicle.vehicle_type}</strong></Col>
-                          {selectedVehicle.gate_pass_number && <Col xs={12}>Gate Pass: <strong style={{ color: '#059669', fontFamily: 'monospace' }}>{selectedVehicle.gate_pass_number}</strong></Col>}
+                          {selectedVehicle.gate_pass_number && <Col xs={12}>Gate Entry Pass: <strong style={{ color: '#059669', fontFamily: 'monospace' }}>{selectedVehicle.gate_pass_number}</strong></Col>}
+                          {selectedVehicle.gate_out_pass_number && <Col xs={12}>Gate Out Pass: <strong style={{ color: '#0284c7', fontFamily: 'monospace' }}>{selectedVehicle.gate_out_pass_number}</strong></Col>}
                           {selectedVehicle.lr_number && <Col xs={12}>Lorry Receipt: <strong style={{ color: '#4f46e5', fontFamily: 'monospace' }}>{selectedVehicle.lr_number}</strong></Col>}
                           {selectedVehicle.eway_bill_number && <Col xs={12}>Eway Bill: <strong style={{ color: '#e11d48', fontFamily: 'monospace' }}>{selectedVehicle.eway_bill_number}</strong></Col>}
                         </Row>

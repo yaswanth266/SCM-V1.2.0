@@ -155,26 +155,17 @@ async def get_user_permissions(db: AsyncSession, user_id: int) -> List[str]:
     before joining; permission seeds should not contain them in the first
     place but defensive normalisation prevents silent privilege drift.
     """
-    user_res = await db.execute(select(User.active_role_id).where(User.id == user_id))
-    active_role_id = user_res.scalar_one_or_none()
+    role_codes = await get_user_role_codes(db, user_id)
+    if not role_codes:
+        return []
 
-    if active_role_id is not None:
-        result = await db.execute(
-            select(Permission.module, Permission.action, Permission.resource)
-            .join(RolePermission, RolePermission.permission_id == Permission.id)
-            .join(Role, Role.id == RolePermission.role_id)
-            .where(Role.id == active_role_id)
-            .where(Role.is_active == True)  # noqa: E712
-        )
-    else:
-        result = await db.execute(
-            select(Permission.module, Permission.action, Permission.resource)
-            .join(RolePermission, RolePermission.permission_id == Permission.id)
-            .join(UserRole, UserRole.role_id == RolePermission.role_id)
-            .join(Role, Role.id == UserRole.role_id)
-            .where(UserRole.user_id == user_id)
-            .where(Role.is_active == True)  # noqa: E712
-        )
+    result = await db.execute(
+        select(Permission.module, Permission.action, Permission.resource)
+        .join(RolePermission, RolePermission.permission_id == Permission.id)
+        .join(Role, Role.id == RolePermission.role_id)
+        .where(Role.code.in_(role_codes))
+        .where(Role.is_active == True)  # noqa: E712
+    )
     permissions = result.all()
 
     def _clean(s):
@@ -246,6 +237,13 @@ def require_permission(module: str, action: str, resource: str):
         for act in action_keys:
             allowed.add(f"{module}.{act}.{resource}")
             allowed.add(f"{module}-{resource_key}.{act}.{module}-{resource_key}")
+            # Map grouped transaction permissions
+            if module.startswith("warehouse-"):
+                allowed.add(f"warehouse-transactions.{act}.warehouse-transactions")
+            if module.startswith("inventory-"):
+                allowed.add(f"inventory-transactions.{act}.inventory-transactions")
+            if module.startswith("indent-"):
+                allowed.add(f"indent-transactions.{act}.indent-transactions")
 
         if not (allowed & permissions):
             raise HTTPException(
@@ -560,7 +558,7 @@ async def user_warehouse_ids(db: AsyncSession, user_id: int) -> List[int]:
     pos_role_name = pos_res.scalar_one_or_none()
 
     stmt = select(UserWarehouse.warehouse_id).where(UserWarehouse.user_id == user_id)
-    if pos_role_name == "STOREKEEPER":
+    if pos_role_name in ("STOREKEEPER", "LAB TECHNICIAN"):
         # Bypass active role filter to show all their mapped warehouses (their own warehouses)
         pass
     elif active_role_id is not None:

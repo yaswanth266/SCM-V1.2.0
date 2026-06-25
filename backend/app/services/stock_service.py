@@ -65,6 +65,81 @@ async def post_stock_ledger(
     if qty_out is not None and Decimal(str(qty_out)) < 0:
         raise ValueError(f"post_stock_ledger: qty_out must be >= 0 (got {qty_out})")
 
+    # Check if warehouse is central
+    from app.models.warehouse import Warehouse
+    wh_row = await db.execute(select(Warehouse).where(Warehouse.id == warehouse_id))
+    wh = wh_row.scalar_one_or_none()
+    is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+
+    if not is_central and qty_out > 0 and batch_id is None and bin_id is None:
+        # Distribute the outbound stock ledger posting across existing stock balances for this item in this warehouse.
+        stmt = select(StockBalance).where(
+            StockBalance.item_id == item_id,
+            StockBalance.warehouse_id == warehouse_id,
+            StockBalance.total_qty > 0
+        ).with_for_update()
+        result = await db.execute(stmt)
+        balances = result.scalars().all()
+
+        if balances:
+            total_stock = sum((bal.total_qty or Decimal("0")) for bal in balances)
+            if not allow_negative and total_stock < qty_out:
+                raise InsufficientStockError(
+                    item_id=item_id,
+                    warehouse_id=warehouse_id,
+                    available=total_stock,
+                    requested=qty_out,
+                )
+
+            remaining = qty_out
+            last_ledger = None
+            for bal in balances:
+                if remaining <= 0:
+                    break
+                qty_in_bal = bal.total_qty or Decimal("0")
+                if qty_in_bal > 0:
+                    take = min(qty_in_bal, remaining)
+                    last_ledger = await post_stock_ledger(
+                        db,
+                        item_id=item_id,
+                        warehouse_id=warehouse_id,
+                        transaction_type=transaction_type,
+                        qty_in=Decimal("0"),
+                        qty_out=take,
+                        rate=rate,
+                        bin_id=bal.bin_id,
+                        batch_id=bal.batch_id,
+                        reference_type=reference_type,
+                        reference_id=reference_id,
+                        uom_id=uom_id,
+                        posting_date=posting_date,
+                        created_by=created_by,
+                        allow_negative=allow_negative,
+                    )
+                    remaining -= take
+
+            if remaining > 0:
+                first_bal = balances[0]
+                last_ledger = await post_stock_ledger(
+                    db,
+                    item_id=item_id,
+                    warehouse_id=warehouse_id,
+                    transaction_type=transaction_type,
+                    qty_in=Decimal("0"),
+                    qty_out=remaining,
+                    rate=rate,
+                    bin_id=first_bal.bin_id,
+                    batch_id=first_bal.batch_id,
+                    reference_type=reference_type,
+                    reference_id=reference_id,
+                    uom_id=uom_id,
+                    posting_date=posting_date,
+                    created_by=created_by,
+                    allow_negative=allow_negative,
+                )
+
+            return last_ledger
+
     # Get current balance with row-level locking to prevent race conditions
     balance = await _get_or_create_balance(db, item_id, warehouse_id, bin_id, batch_id, lock=True)
 
@@ -403,6 +478,53 @@ async def reserve_stock(
         raise ValueError(f"reserve_stock qty must be >= 0 (got {qty})")
     if qty == 0:
         return True
+
+    # Check if warehouse is central
+    from app.models.warehouse import Warehouse
+    wh_row = await db.execute(select(Warehouse).where(Warehouse.id == warehouse_id))
+    wh = wh_row.scalar_one_or_none()
+    is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+
+    if not is_central and batch_id is None and bin_id is None:
+        # Distribute reservation across existing balances in the warehouse
+        stmt = select(StockBalance).where(
+            StockBalance.item_id == item_id,
+            StockBalance.warehouse_id == warehouse_id,
+        ).with_for_update()
+        result = await db.execute(stmt)
+        balances = result.scalars().all()
+
+        total_avail = Decimal("0")
+        for bal in balances:
+            avail = max(
+                Decimal("0"),
+                (bal.total_qty or Decimal("0"))
+                - (bal.reserved_qty or Decimal("0"))
+                - (bal.transit_qty or Decimal("0"))
+            )
+            total_avail += avail
+
+        if total_avail < qty:
+            return False
+
+        remaining = qty
+        for bal in balances:
+            if remaining <= 0:
+                break
+            avail = max(
+                Decimal("0"),
+                (bal.total_qty or Decimal("0"))
+                - (bal.reserved_qty or Decimal("0"))
+                - (bal.transit_qty or Decimal("0"))
+            )
+            if avail > 0:
+                take = min(avail, remaining)
+                bal.reserved_qty = (bal.reserved_qty or Decimal("0")) + take
+                bal.available_qty = max(Decimal("0"), (bal.available_qty or Decimal("0")) - take)
+                remaining -= take
+        await db.flush()
+        return True
+
     balance = await _get_or_create_balance(db, item_id, warehouse_id, bin_id, batch_id, lock=True)
     # True pickable available = total - already reserved - already in transit
     available = max(
@@ -434,6 +556,34 @@ async def release_reservation(
         raise ValueError(f"release_reservation qty must be >= 0 (got {qty})")
     if qty == 0:
         return
+
+    # Check if warehouse is central
+    from app.models.warehouse import Warehouse
+    wh_row = await db.execute(select(Warehouse).where(Warehouse.id == warehouse_id))
+    wh = wh_row.scalar_one_or_none()
+    is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+
+    if not is_central and batch_id is None and bin_id is None:
+        stmt = select(StockBalance).where(
+            StockBalance.item_id == item_id,
+            StockBalance.warehouse_id == warehouse_id,
+            StockBalance.reserved_qty > 0
+        ).with_for_update()
+        result = await db.execute(stmt)
+        balances = result.scalars().all()
+
+        remaining = qty
+        for bal in balances:
+            if remaining <= 0:
+                break
+            reserved = bal.reserved_qty or Decimal("0")
+            take = min(reserved, remaining)
+            bal.reserved_qty = reserved - take
+            bal.available_qty = (bal.available_qty or Decimal("0")) + take
+            remaining -= take
+        await db.flush()
+        return
+
     balance = await _get_or_create_balance(db, item_id, warehouse_id, bin_id, batch_id, lock=True)
     reserved = balance.reserved_qty or Decimal("0")
     release_qty = min(reserved, qty)

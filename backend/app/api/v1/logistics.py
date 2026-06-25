@@ -89,15 +89,29 @@ async def generate_logistics_sequence_number(
     new_num = (series.current_number or 0) + 1
     series.current_number = new_num
     series.prefix = prefix
-    if not series.pad_length or series.pad_length < 7:
-        series.pad_length = 7
-    series.format_template = f"{prefix}-{{fy}}-{{seq}}"
+    if document_type == "main_dispatch_order":
+        series.pad_length = 10
+        series.format_template = "DO-BHSPL-{fy}-{seq}"
+    else:
+        if not series.pad_length or series.pad_length < 7:
+            series.pad_length = 7
+        series.format_template = f"{prefix}-{{fy}}-{{seq}}"
     await db.flush()
 
     seq = str(new_num).zfill(series.pad_length or 7)
+    today = date.today()
+    if today.month >= 4:
+        fy_start = today.year
+    else:
+        fy_start = today.year - 1
+    fy_end = fy_start + 1
+    fy_str = f"FY{str(fy_start)[2:]}-{str(fy_end)[2:]}"
+
+    fy_val = fy_str if document_type == "main_dispatch_order" else year
+
     return (
         series.format_template
-        .replace("{fy}", year)
+        .replace("{fy}", fy_val)
         .replace("{seq}", seq)
         .replace("{type}", prefix)
         .replace("{org}", "")
@@ -1189,9 +1203,8 @@ async def create_mdo(payload: MdoCreate, db: AsyncSession = Depends(get_db), cur
                 is_central_warehouse = True
 
         # Run the reserved→transit conversion for:
-        #   • Central Warehouse (any dispatch mode, has Material Issue reservation)
-        #   • Multi-level dispatches from other warehouses
-        if src_wh_id and (is_central_warehouse or is_multi_level):
+        #   • Multi-level dispatches from any warehouse (when not THIRD_PARTY)
+        if src_wh_id and is_multi_level and (payload.dispatch_type or "THIRD_PARTY") != "THIRD_PARTY":
             for mat in payload.materials:
                 batch_id_r = None
                 bin_id_r = None
@@ -1291,7 +1304,7 @@ async def sdo_handover(
             chain_data = await build_logistics_custody_chain(db, project_id, starting_pos_id, dest_pos_id)
         chain = [entry["position"] for entry in chain_data if entry.get("can_approve", False) or entry.get("is_destination", False)]
 
-        if chain and sdo.sequence_number >= len(chain):
+        if chain and sdo.sequence_number > len(chain):
             raise HTTPException(400, "Handover is not allowed on the final delivery leg.")
     except HTTPException:
         raise
@@ -1368,7 +1381,20 @@ async def sdo_handover(
             from app.services.stock_service import _get_or_create_balance
             from decimal import Decimal
 
-            sender_wh_id = await get_warehouse_for_position(db, sdo.custodian_position_id)
+            sender_wh_id = None
+            if sdo.sequence_number > 1:
+                prev_sdo_res = await db.execute(
+                    select(LogisticsSubDispatchOrder).where(
+                        LogisticsSubDispatchOrder.mdo_id == mdo.id,
+                        LogisticsSubDispatchOrder.sequence_number == sdo.sequence_number - 1
+                    ).order_by(LogisticsSubDispatchOrder.id.desc()).limit(1)
+                )
+                prev_sdo = prev_sdo_res.scalar_one_or_none()
+                if prev_sdo and prev_sdo.custodian_position_id:
+                    sender_wh_id = await get_warehouse_for_position(db, prev_sdo.custodian_position_id)
+                if not sender_wh_id:
+                    sender_wh_id = mdo.warehouse_id
+
             if sender_wh_id:
                 res_mats = await db.execute(
                     select(LogisticsDispatchMaterial).where(LogisticsDispatchMaterial.mdo_id == mdo.id)
@@ -1459,30 +1485,38 @@ async def sdo_handover(
 
     if sdo.sequence_number < len(chain):
         next_pos = chain[sdo.sequence_number]
-        sdo_num = await generate_logistics_sequence_number(
-            db,
-            prefix="SDO",
-            document_type="sub_dispatch_order",
+        # Avoid creating duplicate next leg SDOs
+        existing_next_res = await db.execute(
+            select(LogisticsSubDispatchOrder).where(
+                LogisticsSubDispatchOrder.mdo_id == mdo.id,
+                LogisticsSubDispatchOrder.sequence_number == sdo.sequence_number + 1
+            )
         )
-        next_sdo = LogisticsSubDispatchOrder(
-            sdo_number=sdo_num,
-            mdo_id=mdo.id,
-            route_id=None,
-            route_name=f"Custody Leg {sdo.sequence_number + 1}",
-            vehicle_type_required="Truck",
-            estimated_distance_km=100.0,
-            required_pickup_datetime=datetime.now(timezone.utc),
-            required_delivery_datetime=datetime.now(timezone.utc) + timedelta(days=2),
-            loading_time_minutes=30,
-            unloading_time_minutes=30,
-            requires_loading_helper=False,
-            status="PENDING",
-            custodian_position_id=next_pos.id,
-            sequence_number=sdo.sequence_number + 1,
-            estimated_weight_kg=sdo.estimated_weight_kg,
-            estimated_volume_cft=sdo.estimated_volume_cft
-        )
-        db.add(next_sdo)
+        if not existing_next_res.scalar_one_or_none():
+            sdo_num = await generate_logistics_sequence_number(
+                db,
+                prefix="SDO",
+                document_type="sub_dispatch_order",
+            )
+            next_sdo = LogisticsSubDispatchOrder(
+                sdo_number=sdo_num,
+                mdo_id=mdo.id,
+                route_id=None,
+                route_name=f"Custody Leg {sdo.sequence_number + 1}",
+                vehicle_type_required="Truck",
+                estimated_distance_km=100.0,
+                required_pickup_datetime=datetime.now(timezone.utc),
+                required_delivery_datetime=datetime.now(timezone.utc) + timedelta(days=2),
+                loading_time_minutes=30,
+                unloading_time_minutes=30,
+                requires_loading_helper=False,
+                status="PENDING",
+                custodian_position_id=next_pos.id,
+                sequence_number=sdo.sequence_number + 1,
+                estimated_weight_kg=sdo.estimated_weight_kg,
+                estimated_volume_cft=sdo.estimated_volume_cft
+            )
+            db.add(next_sdo)
 
     db.add(ActivityLog(
         user_id=current_user.id,
@@ -1754,6 +1788,18 @@ async def sdo_receive(
                 mats = res_mats.scalars().all()
 
                 for mat in mats:
+                    # Check for duplicate ledger entry to prevent double-posting
+                    from app.models.stock import StockLedger
+                    dup_check = await db.execute(
+                        select(StockLedger).where(
+                            StockLedger.reference_type == "sub_dispatch_order",
+                            StockLedger.reference_id == sdo.id,
+                            StockLedger.item_id == mat.material_id,
+                        ).limit(1)
+                    )
+                    if dup_check.scalar_one_or_none():
+                        continue
+
                     batch_id = None
                     bin_id = None
                     if mdo.material_issue_id:
@@ -1771,26 +1817,18 @@ async def sdo_receive(
 
                     qty = Decimal(str(mat.quantity))
 
-                    # Step 1 & 2: At PREVIOUS warehouse — clear transit_qty AND total_qty.
-                    #
-                    # For multi-level dispatch, dispatch_material_issue() does NOT deduct
-                    # total_qty at source (it only converts reserved→transit at create_mdo).
-                    # The physical total_qty deduction at source happens HERE (SDO1 receive)
-                    # when RM confirms goods arrived. For subsequent legs (SDO2+), the
-                    # intermediate WH had its total credited at its own SDO receive, so
-                    # decrementing here is equally correct for all sequence numbers.
+                    # Step 1 & 2: At PREVIOUS warehouse — clear transit_qty
+                    prev_balance = await _get_or_create_balance(
+                        db,
+                        item_id=mat.material_id,
+                        warehouse_id=prev_wh_id,
+                        bin_id=bin_id,
+                        batch_id=batch_id,
+                        lock=True,
+                    )
+                    prev_balance.transit_qty = max(Decimal("0"), (prev_balance.transit_qty or Decimal("0")) - qty)
+
                     if prev_wh_id != curr_wh_id:
-                        prev_balance = await _get_or_create_balance(
-                            db,
-                            item_id=mat.material_id,
-                            warehouse_id=prev_wh_id,
-                            bin_id=bin_id,
-                            batch_id=batch_id,
-                            lock=True,
-                        )
-                        # Clear transit_qty (was set at handover / MDO create)
-                        prev_balance.transit_qty = max(Decimal("0"), (prev_balance.transit_qty or Decimal("0")) - qty)
-                        
                         # Post stock ledger entry to deduct total quantity and record the transfer out
                         await post_stock_ledger(
                             db,
@@ -1806,22 +1844,82 @@ async def sdo_receive(
                             created_by=current_user.id,
                         )
 
-                    # Steps 3 & 4: At CURRENT warehouse — add to available_qty and total_qty (goods physically arrived)
-                    await post_stock_ledger(
-                        db,
-                        item_id=mat.material_id,
-                        warehouse_id=curr_wh_id,
-                        transaction_type="transfer_in",
-                        qty_in=qty,
-                        batch_id=batch_id,
-                        bin_id=bin_id,
-                        reference_type="sub_dispatch_order",
-                        reference_id=sdo.id,
-                        uom_id=1,
-                        created_by=current_user.id,
-                    )
+                        # Steps 3 & 4: At CURRENT warehouse — add to available_qty and total_qty (goods physically arrived)
+                        await post_stock_ledger(
+                            db,
+                            item_id=mat.material_id,
+                            warehouse_id=curr_wh_id,
+                            transaction_type="transfer_in",
+                            qty_in=qty,
+                            batch_id=batch_id,
+                            bin_id=bin_id,
+                            reference_type="sub_dispatch_order",
+                            reference_id=sdo.id,
+                            uom_id=1,
+                            created_by=current_user.id,
+                        )
+                    else:
+                        # If same warehouse, just move transit_qty back to available_qty directly on the balance.
+                        prev_balance.available_qty = max(
+                            Decimal("0"),
+                            (prev_balance.total_qty or Decimal("0"))
+                            - (prev_balance.reserved_qty or Decimal("0"))
+                            - (prev_balance.transit_qty or Decimal("0"))
+                        )
 
                 await db.flush()
+
+                # Dynamic creation of the next SDO leg (if it doesn't already exist).
+                # Added as a safety fallback in case handover of the current leg was bypassed.
+                try:
+                    from app.api.v1.dispatch import get_destination_position_id
+                    dest_pos_id = await get_destination_position_id(db, mdo.destination_warehouse_id, mdo.destination_user_id)
+                    project_id = await resolve_mdo_project_id(db, mdo.indent_id, mdo.material_issue_id)
+                    starting_pos_id = await resolve_indent_creator_position(db, mdo.indent_id, mdo.material_issue_id)
+
+                    chain_data = []
+                    if project_id and starting_pos_id:
+                        chain_data = await build_logistics_custody_chain(db, project_id, starting_pos_id, dest_pos_id)
+                    chain = [entry["position"] for entry in chain_data if entry.get("can_approve", False) or entry.get("is_destination", False)]
+
+                    if sdo.sequence_number < len(chain):
+                        next_pos = chain[sdo.sequence_number]
+                        # Avoid creating duplicate next leg SDOs
+                        existing_next_res = await db.execute(
+                            select(LogisticsSubDispatchOrder).where(
+                                LogisticsSubDispatchOrder.mdo_id == mdo.id,
+                                LogisticsSubDispatchOrder.sequence_number == sdo.sequence_number + 1
+                            )
+                        )
+                        if not existing_next_res.scalar_one_or_none():
+                            sdo_num = await generate_logistics_sequence_number(
+                                db,
+                                prefix="SDO",
+                                document_type="sub_dispatch_order",
+                            )
+                            next_sdo = LogisticsSubDispatchOrder(
+                                sdo_number=sdo_num,
+                                mdo_id=mdo.id,
+                                route_id=None,
+                                route_name=f"Custody Leg {sdo.sequence_number + 1}",
+                                vehicle_type_required="Truck",
+                                estimated_distance_km=100.0,
+                                required_pickup_datetime=datetime.now(timezone.utc),
+                                required_delivery_datetime=datetime.now(timezone.utc) + timedelta(days=2),
+                                loading_time_minutes=30,
+                                unloading_time_minutes=30,
+                                requires_loading_helper=False,
+                                status="PENDING",
+                                custodian_position_id=next_pos.id,
+                                sequence_number=sdo.sequence_number + 1,
+                                estimated_weight_kg=sdo.estimated_weight_kg,
+                                estimated_volume_cft=sdo.estimated_volume_cft
+                            )
+                            db.add(next_sdo)
+                            await db.flush()
+                except Exception as next_leg_err:
+                    import logging
+                    logging.getLogger(__name__).warning("Fallback dynamic SDO generation failed: %s", next_leg_err)
 
                 # Notify current warehouse users that stock has arrived (DM dispatch can now proceed)
                 try:
@@ -1932,6 +2030,18 @@ async def sdo_receive(
                     mats_final = res_mats_final.scalars().all()
 
                     for mat_f in mats_final:
+                        # Check for duplicate ledger entry to prevent double-posting
+                        from app.models.stock import StockLedger
+                        dup_check = await db.execute(
+                            select(StockLedger).where(
+                                StockLedger.reference_type == "sdo_final_delivery",
+                                StockLedger.reference_id == sdo.id,
+                                StockLedger.item_id == mat_f.material_id,
+                            ).limit(1)
+                        )
+                        if dup_check.scalar_one_or_none():
+                            continue
+
                         batch_id_f = None
                         bin_id_f = None
                         if mdo.material_issue_id:
@@ -1977,31 +2087,30 @@ async def sdo_receive(
                             )
 
                         # Add to destination warehouse available_qty
-                        # Check for duplicate ledger entry to prevent double-posting
-                        from app.models.stock import StockLedger
-                        dup_check = await db.execute(
-                            select(StockLedger).where(
-                                StockLedger.reference_type == "sdo_final_delivery",
-                                StockLedger.reference_id == sdo.id,
-                                StockLedger.item_id == mat_f.material_id,
-                                StockLedger.warehouse_id == dest_wh_id,
-                            ).limit(1)
+                        await post_stock_ledger(
+                            db,
+                            item_id=mat_f.material_id,
+                            warehouse_id=dest_wh_id,
+                            transaction_type="transfer_in",
+                            qty_in=qty_f,
+                            batch_id=batch_id_f,
+                            bin_id=bin_id_f,
+                            reference_type="sdo_final_delivery",
+                            reference_id=sdo.id,
+                            uom_id=1,
+                            created_by=current_user.id,
                         )
-                        if not dup_check.scalar_one_or_none():
-                            await post_stock_ledger(
-                                db,
-                                item_id=mat_f.material_id,
-                                warehouse_id=dest_wh_id,
-                                transaction_type="transfer_in",
-                                qty_in=qty_f,
-                                batch_id=batch_id_f,
-                                bin_id=bin_id_f,
-                                reference_type="sdo_final_delivery",
-                                reference_id=sdo.id,
-                                uom_id=1,
-                                created_by=current_user.id,
-                            )
                     await db.flush()
+
+                # Transition MaterialIssue status to "dispatched" for multi-level here (final ack leg)
+                if mdo.material_issue_id:
+                    from app.models.issue import MaterialIssue
+                    mi_res = await db.execute(select(MaterialIssue).where(MaterialIssue.id == mdo.material_issue_id))
+                    mi = mi_res.scalar_one_or_none()
+                    if mi and mi.status != "dispatched":
+                        mi.status = "dispatched"
+                        mi.dispatched_at = datetime.now(timezone.utc)
+                        db.add(mi)
             else:
                 from app.api.v1.dispatch import process_dispatch_stock_deduction
                 await process_dispatch_stock_deduction(db, disp, mdo.created_by or 1)
@@ -2846,6 +2955,8 @@ async def update_so_vehicle_status(vehicle_id: int, payload: VehicleStatusUpdate
         v.lr_number = payload.lrNumber or f"LR-{int(datetime.now().timestamp()) % 100000}"
         v.eway_bill_number = payload.ewayBillNumber or f"EW-{int(datetime.now().timestamp()) % 1000000}"
         v.eway_bill_expiry = datetime.now(timezone.utc) + timedelta(days=3)
+        if payload.gateOutPassNumber:
+            v.gate_out_pass_number = payload.gateOutPassNumber
 
         # Free Bay
         if v.loading_bay_number:
@@ -2868,11 +2979,14 @@ async def update_so_vehicle_status(vehicle_id: int, payload: VehicleStatusUpdate
         v.current_location_lng = 72.8910
         v.last_location_update = datetime.now(timezone.utc)
         v.gps_tracking_url = f"https://maps.google.com/?q={v.current_location_lat},{v.current_location_lng}"
+        if payload.gateOutPassNumber:
+            v.gate_out_pass_number = payload.gateOutPassNumber
 
         # Update associated GatePass status to gate_out
-        if v.gate_pass_number:
+        target_gp_num = v.gate_out_pass_number or v.gate_pass_number
+        if target_gp_num:
             from app.models.dispatch import GatePass
-            gp_res = await db.execute(select(GatePass).where(GatePass.gate_pass_number == v.gate_pass_number.strip()))
+            gp_res = await db.execute(select(GatePass).where(GatePass.gate_pass_number == target_gp_num.strip()))
             gp = gp_res.scalar_one_or_none()
             if gp:
                 gp.status = "gate_out"
@@ -2971,7 +3085,6 @@ async def update_so_vehicle_status(vehicle_id: int, payload: VehicleStatusUpdate
                                     prefix="SDO",
                                     document_type="sub_dispatch_order",
                                 )
-                                from datetime import timedelta
                                 next_sdo = LogisticsSubDispatchOrder(
                                     sdo_number=sdo_num,
                                     mdo_id=mdo.id,

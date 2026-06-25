@@ -2444,6 +2444,101 @@ async def get_stock_visibility(
     query = select(StockBalance)
     count_query = select(func.count(StockBalance.id))
 
+    # ACCESS SCOPING — strict role and position-based.
+    # • Super admin / admin: see everything (org-wide).
+    # • Central Warehouse mapped users: see everything (org-wide).
+    # • Non-admin / other users: see only their own mapped warehouses + descendant position mapped warehouses.
+    from app.utils.dependencies import get_user_role_codes, user_warehouse_ids
+    role_codes = set(await get_user_role_codes(db, current_user.id))
+    is_super_or_admin = bool({"super_admin", "admin"} & role_codes)
+
+    wh_ids = await user_warehouse_ids(db, current_user.id)
+    is_mapped_to_central = False
+    if wh_ids:
+        from app.models.warehouse import Warehouse as WhModel
+        central_wh_res = await db.execute(
+            select(WhModel.id).where(
+                WhModel.id.in_(wh_ids),
+                (func.lower(WhModel.name) == "central") | (WhModel.name == "Central - Vijayawada") | (WhModel.code == "20070") | (WhModel.id == 18)
+            )
+        )
+        if central_wh_res.scalars().all():
+            is_mapped_to_central = True
+
+    has_all_visibility = is_super_or_admin or is_mapped_to_central
+
+    if not has_all_visibility:
+        from app.models.settings_master import Employee, Position
+        from app.models.user import User as UserModel, UserWarehouse
+        from app.services.approval_service import get_position_descendants
+
+        user_pos_ids = []
+        user_role_id = current_user.active_role_id
+        desc_user_ids = []
+
+        if current_user.employee_id:
+            if user_role_id:
+                pos_q = await db.execute(
+                    select(Position.id).where(
+                        Position.employee_id == current_user.employee_id,
+                        Position.role_id == user_role_id
+                    )
+                )
+                user_pos_ids = list(pos_q.scalars().all())
+
+            if not user_pos_ids:
+                emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
+                emp = emp_res.scalar_one_or_none()
+                if emp:
+                    if emp.position_id:
+                        user_pos_ids = [emp.position_id]
+                        if user_role_id is None:
+                            pos_res = await db.execute(select(Position).where(Position.id == emp.position_id))
+                            pos = pos_res.scalar_one_or_none()
+                            if pos:
+                                user_role_id = pos.role_id
+                    else:
+                        pos_q = await db.execute(
+                            select(Position.id).where(Position.employee_id == current_user.employee_id)
+                        )
+                        user_pos_ids = list(pos_q.scalars().all())
+
+        desc_pos_ids = []
+        if user_pos_ids:
+            for pos_id in user_pos_ids:
+                descendants = await get_position_descendants(db, pos_id)
+                desc_pos_ids.extend([d.id for d in descendants])
+
+            if desc_pos_ids:
+                emp_q2 = select(Position.employee_id).where(
+                    Position.id.in_(desc_pos_ids),
+                    Position.employee_id.is_not(None)
+                )
+                desc_emps_res = await db.execute(
+                    select(Employee.id).where(
+                        (Employee.position_id.in_(desc_pos_ids)) |
+                        (Employee.id.in_(emp_q2))
+                    )
+                )
+                desc_emp_ids = [r[0] for r in desc_emps_res.all()]
+                if desc_emp_ids:
+                    desc_users_res = await db.execute(
+                        select(UserModel.id).where(UserModel.employee_id.in_(desc_emp_ids))
+                    )
+                    desc_user_ids = [r[0] for r in desc_users_res.all()]
+
+        # Collect direct and descendant mapped warehouse IDs
+        allowed_wh_ids = set(wh_ids or [])
+        if desc_user_ids:
+            desc_wh_res = await db.execute(
+                select(UserWarehouse.warehouse_id).where(UserWarehouse.user_id.in_(desc_user_ids))
+            )
+            desc_wh_ids = desc_wh_res.scalars().all()
+            allowed_wh_ids.update(desc_wh_ids)
+
+        query = query.where(StockBalance.warehouse_id.in_(list(allowed_wh_ids)))
+        count_query = count_query.where(StockBalance.warehouse_id.in_(list(allowed_wh_ids)))
+
     if warehouse_id:
         query = query.where(StockBalance.warehouse_id == warehouse_id)
         count_query = count_query.where(StockBalance.warehouse_id == warehouse_id)
@@ -2587,8 +2682,8 @@ async def list_material_issues(
 async def create_material_issue(
     payload: MaterialIssueCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "warehouse_operator", "store_keeper"
+    current_user: User = Depends(require_permission(
+        "warehouse-material-issues", "create", "warehouse-material-issues"
     )),
 ):
     """Create a new material issue with items. Auto-generates issue_number.
@@ -2603,21 +2698,20 @@ async def create_material_issue(
     if not payload.items:
         raise HTTPException(status_code=422, detail="At least one item is required")
 
-    # BUG-ISS-005 — warehouse-membership check (super_admin/admin bypass).
-    from app.utils.dependencies import (
-        get_user_role_codes as _get_role_codes,
-        user_warehouse_ids as _user_wh_ids,
-    )
-    _role_codes = await _get_role_codes(db, current_user.id)
-    if not ({"super_admin", "admin"} & set(_role_codes)):
-        _wh_ids = await _user_wh_ids(db, current_user.id)
-        if not _wh_ids or payload.warehouse_id not in _wh_ids:
-            raise HTTPException(
-                status_code=403,
-                detail="You are not authorised to issue from this warehouse",
-            )
 
 
+
+
+    # Resolve central warehouse
+    from app.models.warehouse import Warehouse as _Wh
+    wh_row = await db.execute(select(_Wh).where(_Wh.id == payload.warehouse_id))
+    wh = wh_row.scalar_one_or_none()
+    is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+
+    if not is_central:
+        for it in payload.items:
+            it.batch_id = None
+            it.bin_id = None
 
     # PATIENT SAFETY: block issuing expired medicine batches.
     # BUG-INV-046: use <= today (a batch expiring TODAY is already unusable —
@@ -2660,9 +2754,9 @@ async def create_material_issue(
             m = mi_item_meta.get(it.item_id)
             if not m:
                 continue
-            requires_batch = m.has_batch or (
+            requires_batch = is_central and (m.has_batch or (
                 m.item_type and str(m.item_type).lower() in BATCH_REQUIRED_TYPES_MI
-            )
+            ))
             if requires_batch and it.batch_id is None:
                 raise HTTPException(
                     status_code=400,
@@ -2702,10 +2796,11 @@ async def create_material_issue(
             StockBalance.item_id == it.item_id,
             StockBalance.warehouse_id == payload.warehouse_id,
         ]
-        if it.batch_id is not None:
-            bal_conds.append(StockBalance.batch_id == it.batch_id)
-        if it.bin_id is not None:
-            bal_conds.append(StockBalance.bin_id == it.bin_id)
+        if is_central:
+            if it.batch_id is not None:
+                bal_conds.append(StockBalance.batch_id == it.batch_id)
+            if it.bin_id is not None:
+                bal_conds.append(StockBalance.bin_id == it.bin_id)
         bal_row = await db.execute(select(StockBalance).where(and_(*bal_conds)))
         balances = bal_row.scalars().all()
         avail = sum((bb.available_qty or Decimal("0")) for bb in balances) or Decimal("0")
@@ -2714,10 +2809,11 @@ async def create_material_issue(
                 StockLedger.item_id == it.item_id,
                 StockLedger.warehouse_id == payload.warehouse_id,
             ]
-            if it.batch_id is not None:
-                ledger_conds.append(StockLedger.batch_id == it.batch_id)
-            if it.bin_id is not None:
-                ledger_conds.append(StockLedger.bin_id == it.bin_id)
+            if is_central:
+                if it.batch_id is not None:
+                    ledger_conds.append(StockLedger.batch_id == it.batch_id)
+                if it.bin_id is not None:
+                    ledger_conds.append(StockLedger.bin_id == it.bin_id)
             led_q = select(
                 _sa_func.coalesce(_sa_func.sum(StockLedger.qty_in), 0)
                 - _sa_func.coalesce(_sa_func.sum(StockLedger.qty_out), 0)
@@ -2927,6 +3023,18 @@ async def update_material_issue(
     if payload.remarks is not None:
         mi.remarks = payload.remarks
 
+    # Resolve central warehouse
+    from app.models.warehouse import Warehouse as _Wh
+    target_wh_id = payload.warehouse_id if payload.warehouse_id is not None else mi.warehouse_id
+    wh_row = await db.execute(select(_Wh).where(_Wh.id == target_wh_id))
+    wh = wh_row.scalar_one_or_none()
+    is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+
+    if not is_central and payload.items is not None:
+        for it in payload.items:
+            it.batch_id = None
+            it.bin_id = None
+
     # Replace items if provided
     if payload.items is not None:
         from app.models.master import Item as _MIItem
@@ -2942,9 +3050,9 @@ async def update_material_issue(
                 m = mi_item_meta.get(it.item_id)
                 if not m:
                     continue
-                requires_batch = m.has_batch or (
+                requires_batch = is_central and (m.has_batch or (
                     m.item_type and str(m.item_type).lower() in BATCH_REQUIRED_TYPES_MI
-                )
+                ))
                 if requires_batch and it.batch_id is None:
                     raise HTTPException(
                         status_code=400,
@@ -2998,8 +3106,8 @@ async def issue_material(
     # BUG-INV-055: include super_admin (system-wide override) and store_keeper
     # (the role that physically dispenses stock from the bin) — they were
     # excluded so the literal people who issue material couldn't post the issue.
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "warehouse_operator", "store_keeper"
+    current_user: User = Depends(require_permission(
+        "warehouse-material-issues", "approve", "warehouse-material-issues"
     )),
 ):
     """Mark material issue as issued and deduct stock."""
@@ -3020,6 +3128,17 @@ async def issue_material(
         raise HTTPException(status_code=404, detail="Material issue not found")
     if mi.status != "draft":
         raise HTTPException(status_code=400, detail="Only draft material issues can be issued")
+
+    # Resolve central warehouse
+    from app.models.warehouse import Warehouse as _Wh
+    wh_row = await db.execute(select(_Wh).where(_Wh.id == mi.warehouse_id))
+    wh = wh_row.scalar_one_or_none()
+    is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+
+    if not is_central:
+        for item in mi.items:
+            item.batch_id = None
+            item.bin_id = None
 
     if not mi.items or len(mi.items) == 0:
         raise HTTPException(status_code=400, detail="Material issue has no items")
@@ -3133,15 +3252,15 @@ async def issue_material(
     for item in mi.items:
         # Validate that batch-tracked items have a batch assigned before issuing
         BATCH_REQUIRED_TYPES_MI = {"medicine", "pharma", "drug", "consumable_medicine"}
-        requires_batch = (item.item.has_batch) or (
+        requires_batch = is_central and ((item.item.has_batch) or (
             item.item.item_type and str(item.item.item_type).lower() in BATCH_REQUIRED_TYPES_MI
-        )
+        ))
         if requires_batch and item.batch_id is None:
             raise HTTPException(
                 status_code=400,
                 detail=f"{item.item.item_code}: batch_id is required for batch-tracked items (expiry must be verified before issue)."
             )
-        if item.bin_id is not None:
+        if is_central and item.bin_id is not None:
             wh_for_bin = bin_to_wh.get(item.bin_id)
             if wh_for_bin is None:
                 raise HTTPException(
@@ -3160,12 +3279,13 @@ async def issue_material(
             StockBalance.item_id == item.item_id,
             StockBalance.warehouse_id == mi.warehouse_id,
         ]
-        if item.batch_id is not None:
-            bal_conds.append(StockBalance.batch_id == item.batch_id)
-        else:
-            bal_conds.append(StockBalance.batch_id.is_(None))
-        if item.bin_id is not None:
-            bal_conds.append(StockBalance.bin_id == item.bin_id)
+        if is_central:
+            if item.batch_id is not None:
+                bal_conds.append(StockBalance.batch_id == item.batch_id)
+            else:
+                bal_conds.append(StockBalance.batch_id.is_(None))
+            if item.bin_id is not None:
+                bal_conds.append(StockBalance.bin_id == item.bin_id)
         bal_row = await db.execute(select(StockBalance).where(and_(*bal_conds)))
         balances = bal_row.scalars().all()
         avail = sum((b.available_qty or Decimal("0")) for b in balances) or Decimal("0")
@@ -3349,8 +3469,8 @@ async def issue_material(
 async def dispatch_material_issue(
     issue_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "warehouse_operator", "store_keeper"
+    current_user: User = Depends(require_permission(
+        "warehouse-material-issues", "approve", "warehouse-material-issues"
     )),
 ):
     """Mark material issue as dispatched, reduce stock, and post GL entries."""
@@ -3488,8 +3608,8 @@ async def dispatch_material_issue(
 async def cancel_material_issue(
     issue_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager"
+    current_user: User = Depends(require_permission(
+        "warehouse-material-issues", "delete", "warehouse-material-issues"
     )),
 ):
     """BUG-ISS-016 — Cancel a draft or issued material issue.
@@ -3540,6 +3660,12 @@ async def cancel_material_issue(
                             break
 
     elif mi.status == "dispatched":
+        # Resolve central warehouse
+        from app.models.warehouse import Warehouse as _Wh
+        wh_row = await db.execute(select(_Wh).where(_Wh.id == mi.warehouse_id))
+        wh = wh_row.scalar_one_or_none()
+        is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+
         # Reverse stock ledger — push qty back IN with the same valuation
         reverse_gl_items: list[dict] = []
         for item in mi.items:
@@ -3556,25 +3682,78 @@ async def cancel_material_issue(
                 )
                 src_balance.transit_qty = max(Decimal("0"), (src_balance.transit_qty or Decimal("0")) - Decimal(str(item.qty)))
 
-            ledger_row = await post_stock_ledger(
-                db,
-                item_id=item.item_id,
-                warehouse_id=mi.warehouse_id,
-                transaction_type="material_issue",
-                qty_in=item.qty,
-                rate=item.rate,
-                bin_id=item.bin_id,
-                batch_id=item.batch_id,
-                reference_type="material_issue_cancel",
-                reference_id=mi.id,
-                uom_id=item.uom_id,
-                created_by=current_user.id,
-            )
-            reverse_gl_items.append({
-                "item_id": item.item_id,
-                "qty": -1 * (item.qty or 0),  # negative qty triggers reverse JE
-                "rate": (ledger_row.rate if ledger_row else None) or item.rate or 0,
-            })
+            if not is_central:
+                # Query previous ledger entries for this material issue to find the exact batches/bins consumed
+                prev_ledgers_q = await db.execute(
+                    select(StockLedger).where(
+                        StockLedger.reference_type == "material_issue",
+                        StockLedger.reference_id == mi.id,
+                        StockLedger.item_id == item.item_id,
+                        StockLedger.qty_out > 0
+                    )
+                )
+                prev_ledgers = prev_ledgers_q.scalars().all()
+                if prev_ledgers:
+                    for pl in prev_ledgers:
+                        ledger_row = await post_stock_ledger(
+                            db,
+                            item_id=item.item_id,
+                            warehouse_id=mi.warehouse_id,
+                            transaction_type="material_issue",
+                            qty_in=pl.qty_out,
+                            rate=pl.rate,
+                            bin_id=pl.bin_id,
+                            batch_id=pl.batch_id,
+                            reference_type="material_issue_cancel",
+                            reference_id=mi.id,
+                            uom_id=item.uom_id,
+                            created_by=current_user.id,
+                        )
+                        reverse_gl_items.append({
+                            "item_id": item.item_id,
+                            "qty": -1 * (pl.qty_out or 0),  # negative qty triggers reverse JE
+                            "rate": (ledger_row.rate if ledger_row else None) or item.rate or 0,
+                        })
+                else:
+                    ledger_row = await post_stock_ledger(
+                        db,
+                        item_id=item.item_id,
+                        warehouse_id=mi.warehouse_id,
+                        transaction_type="material_issue",
+                        qty_in=item.qty,
+                        rate=item.rate,
+                        bin_id=item.bin_id,
+                        batch_id=item.batch_id,
+                        reference_type="material_issue_cancel",
+                        reference_id=mi.id,
+                        uom_id=item.uom_id,
+                        created_by=current_user.id,
+                    )
+                    reverse_gl_items.append({
+                        "item_id": item.item_id,
+                        "qty": -1 * (item.qty or 0),  # negative qty triggers reverse JE
+                        "rate": (ledger_row.rate if ledger_row else None) or item.rate or 0,
+                    })
+            else:
+                ledger_row = await post_stock_ledger(
+                    db,
+                    item_id=item.item_id,
+                    warehouse_id=mi.warehouse_id,
+                    transaction_type="material_issue",
+                    qty_in=item.qty,
+                    rate=item.rate,
+                    bin_id=item.bin_id,
+                    batch_id=item.batch_id,
+                    reference_type="material_issue_cancel",
+                    reference_id=mi.id,
+                    uom_id=item.uom_id,
+                    created_by=current_user.id,
+                )
+                reverse_gl_items.append({
+                    "item_id": item.item_id,
+                    "qty": -1 * (item.qty or 0),  # negative qty triggers reverse JE
+                    "rate": (ledger_row.rate if ledger_row else None) or item.rate or 0,
+                })
 
         # Reverse GL by posting an issue JE with negated quantities. The
         # post_issue_gl helper skips zero/negative rows so we hand-craft a
@@ -3661,12 +3840,7 @@ async def cancel_material_issue(
 async def acknowledge_material_issue(
     issue_id: int,
     db: AsyncSession = Depends(get_db),
-    # BUG-ISS-021 — only the recipient (issued_to) or admin/manager roles
-    # may close the loop on someone else's issue.
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "warehouse_operator",
-        "store_keeper", "department_head",
-    )),
+    current_user: User = Depends(get_current_user),
 ):
     """Acknowledge receipt of issued material."""
     result = await db.execute(
@@ -3685,10 +3859,35 @@ async def acknowledge_material_issue(
     from app.utils.dependencies import get_user_role_codes as _get_role_codes
     _role_codes = await _get_role_codes(db, current_user.id)
     is_admin = bool({"super_admin", "admin", "warehouse_manager"} & set(_role_codes))
-    if not is_admin and mi.issued_to and mi.issued_to != current_user.id:
+    
+    is_authorized = is_admin or (mi.issued_to and mi.issued_to == current_user.id)
+    if not is_authorized and mi.issued_to:
+        from app.models.settings_master import Employee
+        from app.services.approval_service import get_position_ancestors
+        
+        receiver_q = await db.execute(select(User).where(User.id == mi.issued_to))
+        receiver = receiver_q.scalar_one_or_none()
+        if receiver and receiver.employee_id:
+            receiver_emp_q = await db.execute(select(Employee).where(Employee.id == receiver.employee_id))
+            receiver_emp = receiver_emp_q.scalar_one_or_none()
+            if receiver_emp and receiver_emp.position_id:
+                ancestors = await get_position_ancestors(db, receiver_emp.position_id)
+                ancestor_ids = {a.id for a in ancestors}
+                
+                if current_user.employee_id:
+                    curr_emp_q = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
+                    curr_emp = curr_emp_q.scalar_one_or_none()
+                    if curr_emp:
+                        from app.models.settings_master import Position as PositionModel
+                        pos_rows = await db.execute(select(PositionModel.id).where(PositionModel.employee_id == curr_emp.id))
+                        curr_pos_ids = {r[0] for r in pos_rows.all()} | ({curr_emp.position_id} if curr_emp.position_id else set())
+                        if curr_pos_ids & ancestor_ids:
+                            is_authorized = True
+
+    if not is_authorized:
         raise HTTPException(
             status_code=403,
-            detail="Only the recipient or a warehouse manager can acknowledge this issue",
+            detail="Only the recipient, a warehouse manager, or their reporting manager can acknowledge this issue",
         )
 
     mi.status = "acknowledged"
@@ -3696,21 +3895,6 @@ async def acknowledge_material_issue(
     # Post stock ledger entries at the destination warehouse if destination_warehouse_id is set
     if mi.destination_warehouse_id:
         from app.services.stock_service import post_stock_ledger, _get_or_create_balance
-
-        # Determine if source is Central Warehouse (uses deferred-deduction model)
-        _is_central_ack = False
-        try:
-            from app.models.warehouse import Warehouse as _WHAck
-            _wh_ack_res = await db.execute(select(_WHAck).where(_WHAck.id == mi.warehouse_id))
-            _src_wh_ack = _wh_ack_res.scalar_one_or_none()
-            if _src_wh_ack and (
-                (_src_wh_ack.name or "").upper() == "CENTRAL"
-                or (_src_wh_ack.code or "") == "20070"
-                or _src_wh_ack.id == 18
-            ):
-                _is_central_ack = True
-        except Exception:
-            pass
 
         for item in mi.items:
             # Decrement transit_qty in source warehouse
@@ -3724,25 +3908,6 @@ async def acknowledge_material_issue(
                     lock=True,
                 )
                 src_balance.transit_qty = max(Decimal("0"), (src_balance.transit_qty or Decimal("0")) - Decimal(str(item.qty)))
-
-                # Central Warehouse deferred deduction: the dispatch step only did
-                # reserved→transit, so we must post the physical stock deduction here
-                # at acknowledgement time (when goods leave CEN custody permanently).
-                if _is_central_ack:
-                    await post_stock_ledger(
-                        db,
-                        item_id=item.item_id,
-                        warehouse_id=mi.warehouse_id,
-                        transaction_type="material_issue",
-                        qty_out=item.qty,
-                        rate=item.rate,
-                        bin_id=item.bin_id,
-                        batch_id=item.batch_id,
-                        reference_type="material_issue",
-                        reference_id=mi.id,
-                        uom_id=item.uom_id,
-                        created_by=current_user.id,
-                    )
 
             await post_stock_ledger(
                 db,
@@ -3810,8 +3975,8 @@ async def delete_material_issue(
     mi_id: int,
     db: AsyncSession = Depends(get_db),
     # BUG-ISS-020 — restrict delete to roles authorised to manage MIs.
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "warehouse_operator"
+    current_user: User = Depends(require_permission(
+        "warehouse-material-issues", "delete", "warehouse-material-issues"
     )),
 ):
     """Delete a draft/pending material issue. Issued/completed issues cannot be deleted."""
