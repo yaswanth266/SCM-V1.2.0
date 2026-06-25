@@ -66,6 +66,44 @@ class StockLedgerResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @model_validator(mode="before")
+    @classmethod
+    def combine_date_time(cls, data):
+        class StockLedgerProxy:
+            def __init__(self, obj, combined_date):
+                self._obj = obj
+                self.posting_date = combined_date
+            def __getattr__(self, name):
+                return getattr(self._obj, name)
+
+        if isinstance(data, dict):
+            pdate = data.get("posting_date")
+            ptime = data.get("posting_time")
+            if pdate and ptime:
+                from datetime import date, time, datetime as dt, timezone
+                if isinstance(pdate, str):
+                    try:
+                        pdate = date.fromisoformat(pdate)
+                    except ValueError:
+                        pass
+                if isinstance(ptime, str):
+                    try:
+                        ptime = time.fromisoformat(ptime)
+                    except ValueError:
+                        pass
+                if isinstance(pdate, date) and not isinstance(pdate, dt) and isinstance(ptime, time):
+                    data["posting_date"] = dt.combine(pdate, ptime).replace(tzinfo=timezone.utc)
+            return data
+
+        pdate = getattr(data, "posting_date", None)
+        ptime = getattr(data, "posting_time", None)
+        if pdate and ptime:
+            from datetime import date, time, datetime as dt, timezone
+            if isinstance(pdate, date) and not isinstance(pdate, dt) and isinstance(ptime, time):
+                combined = dt.combine(pdate, ptime).replace(tzinfo=timezone.utc)
+                return StockLedgerProxy(data, combined)
+        return data
+
 # ---- Stock Transfer ----
 class TransferItemCreate(BaseModel):
     item_id: int

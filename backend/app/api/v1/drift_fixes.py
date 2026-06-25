@@ -241,7 +241,11 @@ async def item_transactions(
     rows = (await db.execute(base.order_by(desc(StockLedger.id)).offset(offset).limit(limit))).scalars().all()
     items = [{
         "id": r.id,
-        "posting_date": r.posting_date.isoformat() if r.posting_date else None,
+        "posting_date": (
+            datetime.combine(r.posting_date, r.posting_time).replace(tzinfo=timezone.utc).isoformat()
+            if r.posting_date and r.posting_time
+            else (r.posting_date.isoformat() if r.posting_date else None)
+        ),
         "warehouse_id": r.warehouse_id,
         "transaction_type": r.transaction_type,
         "reference_type": r.reference_type,

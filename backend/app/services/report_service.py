@@ -134,6 +134,7 @@ async def stock_movement_report(
     # Lifted to 50000 — callers should narrow by date/item to keep results tight.
     result = await db.execute(query.limit(50000))
     rows = result.scalars().all()
+    from datetime import timezone
     return [{
         "id": r.id,
         "item_id": r.item_id,
@@ -143,7 +144,11 @@ async def stock_movement_report(
         "qty_out": float(r.qty_out or 0),
         "balance_qty": float(r.balance_qty or 0),
         "rate": float(r.rate or 0),
-        "posting_date": r.posting_date.isoformat() if r.posting_date else None,
+        "posting_date": (
+            datetime.combine(r.posting_date, r.posting_time).replace(tzinfo=timezone.utc).isoformat()
+            if r.posting_date and r.posting_time
+            else (r.posting_date.isoformat() if r.posting_date else None)
+        ),
         "reference_type": r.reference_type,
         "reference_id": r.reference_id,
     } for r in rows]
