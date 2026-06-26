@@ -1,6 +1,6 @@
 from app.models.user import Organization, Project, Role, Permission, RolePermission, User, UserRole, UserProject, UserWarehouse, TokenBlocklist, PasswordHistory
 from app.models.master import UOMCategory, UOM, UOMConversion, ItemCategory, Item, PriceList, PriceListItem, Vendor, VendorCategory, VendorItem, VendorContract, VendorRating, Customer, Brand, ItemAttribute, ItemAttributeValue, SpecCategory, Spec, ItemSpec, ItemSpecValue, UserGroup, UserGroupMember, UserGroupPermission, BOM, BOMComponent
-from app.models.warehouse import Warehouse, WarehouseLocation, WarehouseLine, WarehouseRack, WarehouseBin, Batch, SerialNumber, MaterialInward, MaterialInwardItem
+from app.models.warehouse import Warehouse, WarehouseLocation, WarehouseLine, WarehouseRack, WarehouseBin, Batch, SerialNumber, MaterialInward, MaterialInwardItem, WarehouseConfig
 from app.models.stock import StockLedger, StockBalance
 from app.models.barcode import BarcodeRegistry, ScanLog
 from app.models.procurement import MaterialRequest, MaterialRequestItem, MrIndentLink, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem

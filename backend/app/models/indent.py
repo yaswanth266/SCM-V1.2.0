@@ -21,6 +21,7 @@ class Indent(Base):
     approved_by = Column(BigInteger)
     approved_date = Column(DateTime)
     remarks = Column(Text)
+    position_id = Column(BigInteger, ForeignKey("positions.id"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -28,6 +29,7 @@ class Indent(Base):
     source_bom = relationship("BOM")
     warehouse = relationship("Warehouse")
     raiser = relationship("User", foreign_keys=[raised_by])
+    position = relationship("Position", foreign_keys=[position_id])
     items = relationship("IndentItem", back_populates="indent", cascade="all, delete-orphan")
     acknowledgements = relationship("IndentAcknowledgement", back_populates="indent")
 

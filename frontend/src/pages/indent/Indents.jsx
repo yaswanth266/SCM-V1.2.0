@@ -165,6 +165,29 @@ const Indents = () => {
       render: (v) => <StatusTag status={v} />,
     },
     { title: 'Raised By', dataIndex: 'raised_by_name', key: 'raised_by', width: 140, render: (v, r) => v || r.raised_by || '-' },
+    {
+      title: 'Raising Position',
+      dataIndex: 'position_name',
+      key: 'position_name',
+      width: 180,
+      render: (text, record) => {
+        if (!text) return '-';
+        return (
+          <span style={{ 
+            backgroundColor: '#e6f7ff', 
+            color: '#0050b3', 
+            border: '1px solid #91d5ff', 
+            padding: '4px 8px', 
+            borderRadius: '4px',
+            fontWeight: '600',
+            fontSize: '12px',
+            display: 'inline-block'
+          }}>
+            {text} {record.position_code ? `(${record.position_code})` : ''}
+          </span>
+        );
+      }
+    },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 150, render: (s) => <StatusTag status={s} /> },
     {
       title: 'Actions',

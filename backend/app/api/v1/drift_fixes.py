@@ -551,9 +551,18 @@ async def stock_balance_breakdown(
     rows = (await db.execute(q)).scalars().all()
     
     # Identify central warehouses in scope
-    from app.models.warehouse import Warehouse as _WHModel
+    from app.models.warehouse import Warehouse as _WHModel, WarehouseConfig
+    cfg_res = await db.execute(select(WarehouseConfig).where(WarehouseConfig.warehouse_id.in_(scoped)))
+    configs = {cfg.warehouse_id: cfg.is_central for cfg in cfg_res.scalars().all()}
+    
     whs_res = await db.execute(select(_WHModel).where(_WHModel.id.in_(scoped)))
-    central_wh_ids = {w.id for w in whs_res.scalars().all() if w.parent_id is None}
+    central_wh_ids = set()
+    for w in whs_res.scalars().all():
+        is_cen = configs.get(w.id)
+        if is_cen is None:
+            is_cen = (w.parent_id is None)
+        if is_cen:
+            central_wh_ids.add(w.id)
 
     is_serial_tracked = False
     if rows and rows[0].item and rows[0].item.has_serial:
@@ -569,7 +578,7 @@ async def stock_balance_breakdown(
         s_result = await db.execute(s_query)
         for s in s_result.scalars().all():
             is_cen = s.warehouse_id in central_wh_ids
-            key = (s.warehouse_id, s.bin_id if is_cen else None, s.batch_id)
+            key = (s.warehouse_id, s.bin_id if is_cen else None, s.batch_id if is_cen else None)
             if key not in serials_map:
                 serials_map[key] = []
             serials_map[key].append(s.serial_number)
@@ -596,7 +605,7 @@ async def stock_balance_breakdown(
             "last_updated": r.last_updated.isoformat() if r.last_updated else None,
             "uom_name": r.item.primary_uom.name if r.item and r.item.primary_uom else None,
             "has_serial": is_serial_tracked,
-            "serial_numbers": serials_map.get((r.warehouse_id, r.bin_id if is_cen else None, r.batch_id), []),
+            "serial_numbers": serials_map.get((r.warehouse_id, r.bin_id if is_cen else None, r.batch_id if is_cen else None), []),
         }
         
         if r.bin:

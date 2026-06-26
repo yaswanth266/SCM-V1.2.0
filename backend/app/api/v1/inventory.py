@@ -158,18 +158,27 @@ async def get_stock_balances(
     wh_ids = {b.warehouse_id for b in balances}
     central_wh_ids = set()
     if wh_ids:
-        from app.models.warehouse import Warehouse as _WHModel
+        from app.models.warehouse import Warehouse as _WHModel, WarehouseConfig
+        cfg_res = await db.execute(select(WarehouseConfig).where(WarehouseConfig.warehouse_id.in_(wh_ids)))
+        configs = {cfg.warehouse_id: cfg.is_central for cfg in cfg_res.scalars().all()}
+        
         wh_res = await db.execute(select(_WHModel).where(_WHModel.id.in_(wh_ids)))
-        central_wh_ids = {w.id for w in wh_res.scalars().all() if w.parent_id is None}
+        for w in wh_res.scalars().all():
+            is_cen = configs.get(w.id)
+            if is_cen is None:
+                is_cen = (w.parent_id is None)
+            if is_cen:
+                central_wh_ids.add(w.id)
 
     # Gather balances with has_serial = True
     serial_tracked_keys = []
     for b in balances:
         if b.item and b.item.has_serial:
             is_cen = b.warehouse_id in central_wh_ids
-            # Non-central warehouses ignore bin constraints
+            # Non-central warehouses ignore bin and batch constraints
             resolved_bin = b.bin_id if is_cen else None
-            serial_tracked_keys.append((b.item_id, b.warehouse_id, resolved_bin, b.batch_id))
+            resolved_batch = b.batch_id if is_cen else None
+            serial_tracked_keys.append((b.item_id, b.warehouse_id, resolved_bin, resolved_batch))
     
     serials_map = {}
     if serial_tracked_keys:
@@ -191,11 +200,6 @@ async def get_stock_balances(
                     SerialNumber.bin_id == bin_id if bin_id is not None else SerialNumber.bin_id.is_(None),
                     SerialNumber.batch_id == batch_id if batch_id is not None else SerialNumber.batch_id.is_(None)
                 )
-            else:
-                cond = and_(
-                    cond,
-                    SerialNumber.batch_id == batch_id if batch_id is not None else SerialNumber.batch_id.is_(None)
-                )
             conditions.append(cond)
             
         s_query = select(SerialNumber).where(or_(*conditions))
@@ -204,7 +208,7 @@ async def get_stock_balances(
         
         for s in serials:
             is_cen = s.warehouse_id in central_wh_ids
-            key = (s.item_id, s.warehouse_id, s.bin_id if is_cen else None, s.batch_id)
+            key = (s.item_id, s.warehouse_id, s.bin_id if is_cen else None, s.batch_id if is_cen else None)
             if key not in serials_map:
                 serials_map[key] = []
             serials_map[key].append(s.serial_number)
@@ -228,7 +232,7 @@ async def get_stock_balances(
             "valuation_rate": b.valuation_rate,
             "stock_value": b.stock_value,
             "last_updated": b.last_updated.isoformat() if b.last_updated else None,
-            "serial_numbers": serials_map.get((b.item_id, b.warehouse_id, b.bin_id if is_cen else None, b.batch_id), []),
+            "serial_numbers": serials_map.get((b.item_id, b.warehouse_id, b.bin_id if is_cen else None, b.batch_id if is_cen else None), []),
         }
         if hasattr(b, 'item') and b.item:
             data["item_name"] = b.item.name

@@ -66,10 +66,12 @@ async def post_stock_ledger(
         raise ValueError(f"post_stock_ledger: qty_out must be >= 0 (got {qty_out})")
 
     # Check if warehouse is central
-    from app.models.warehouse import Warehouse
-    wh_row = await db.execute(select(Warehouse).where(Warehouse.id == warehouse_id))
-    wh = wh_row.scalar_one_or_none()
-    is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+    from app.models.warehouse import Warehouse, WarehouseConfig
+    cfg_row = await db.execute(select(WarehouseConfig.is_central).where(WarehouseConfig.warehouse_id == warehouse_id))
+    is_central = cfg_row.scalar()
+    if is_central is None:
+        wh_row = await db.execute(select(Warehouse.parent_id).where(Warehouse.id == warehouse_id))
+        is_central = (wh_row.scalar() is None)
 
     if not is_central and qty_out > 0 and batch_id is None and bin_id is None:
         # Distribute the outbound stock ledger posting across existing stock balances for this item in this warehouse.
@@ -480,10 +482,12 @@ async def reserve_stock(
         return True
 
     # Check if warehouse is central
-    from app.models.warehouse import Warehouse
-    wh_row = await db.execute(select(Warehouse).where(Warehouse.id == warehouse_id))
-    wh = wh_row.scalar_one_or_none()
-    is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+    from app.models.warehouse import Warehouse, WarehouseConfig
+    cfg_row = await db.execute(select(WarehouseConfig.is_central).where(WarehouseConfig.warehouse_id == warehouse_id))
+    is_central = cfg_row.scalar()
+    if is_central is None:
+        wh_row = await db.execute(select(Warehouse.parent_id).where(Warehouse.id == warehouse_id))
+        is_central = (wh_row.scalar() is None)
 
     if not is_central and batch_id is None and bin_id is None:
         # Distribute reservation across existing balances in the warehouse
@@ -558,10 +562,12 @@ async def release_reservation(
         return
 
     # Check if warehouse is central
-    from app.models.warehouse import Warehouse
-    wh_row = await db.execute(select(Warehouse).where(Warehouse.id == warehouse_id))
-    wh = wh_row.scalar_one_or_none()
-    is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+    from app.models.warehouse import Warehouse, WarehouseConfig
+    cfg_row = await db.execute(select(WarehouseConfig.is_central).where(WarehouseConfig.warehouse_id == warehouse_id))
+    is_central = cfg_row.scalar()
+    if is_central is None:
+        wh_row = await db.execute(select(Warehouse.parent_id).where(Warehouse.id == warehouse_id))
+        is_central = (wh_row.scalar() is None)
 
     if not is_central and batch_id is None and bin_id is None:
         stmt = select(StockBalance).where(

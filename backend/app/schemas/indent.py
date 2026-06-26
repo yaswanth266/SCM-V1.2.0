@@ -130,6 +130,9 @@ class IndentResponse(BaseModel):
     approved_by: Optional[int] = None
     approved_date: Optional[datetime] = None
     remarks: Optional[str] = None
+    position_id: Optional[int] = None
+    position_name: Optional[str] = None
+    position_code: Optional[str] = None
     created_at: Optional[datetime] = None
     items: List[IndentItemResponse] = []
     model_config = {"from_attributes": True}

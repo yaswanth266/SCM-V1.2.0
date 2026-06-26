@@ -512,7 +512,22 @@ const IndentForm = () => {
                 : '-'}
             </Descriptions.Item>
             <Descriptions.Item label="Status"><StatusTag status={indent.status} /></Descriptions.Item>
-            <Descriptions.Item label="Created By">{indent.created_by_name || indent.requested_by_name || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Created By">{indent.created_by_name || indent.requested_by_name || indent.raised_by_name || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Raising Position">
+              {indent.position_name ? (
+                <span style={{ 
+                  backgroundColor: '#e6f7ff', 
+                  color: '#0050b3', 
+                  border: '1px solid #91d5ff', 
+                  padding: '2px 8px', 
+                  borderRadius: '4px',
+                  fontWeight: '600',
+                  fontSize: '12px'
+                }}>
+                  {indent.position_name} {indent.position_code ? `(${indent.position_code})` : ''}
+                </span>
+              ) : '-'}
+            </Descriptions.Item>
             <Descriptions.Item label="Remarks" span={3}>{indent.remarks || '-'}</Descriptions.Item>
           </Descriptions>
 

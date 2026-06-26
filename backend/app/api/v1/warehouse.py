@@ -2717,10 +2717,13 @@ async def create_material_issue(
 
 
     # Resolve central warehouse
-    from app.models.warehouse import Warehouse as _Wh
+    from app.models.warehouse import Warehouse as _Wh, WarehouseConfig
     wh_row = await db.execute(select(_Wh).where(_Wh.id == payload.warehouse_id))
     wh = wh_row.scalar_one_or_none()
-    is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+    cfg_row = await db.execute(select(WarehouseConfig.is_central).where(WarehouseConfig.warehouse_id == payload.warehouse_id))
+    is_central = cfg_row.scalar()
+    if is_central is None:
+        is_central = wh is not None and wh.parent_id is None
 
     if not is_central:
         for it in payload.items:
@@ -3038,11 +3041,14 @@ async def update_material_issue(
         mi.remarks = payload.remarks
 
     # Resolve central warehouse
-    from app.models.warehouse import Warehouse as _Wh
+    from app.models.warehouse import Warehouse as _Wh, WarehouseConfig
     target_wh_id = payload.warehouse_id if payload.warehouse_id is not None else mi.warehouse_id
     wh_row = await db.execute(select(_Wh).where(_Wh.id == target_wh_id))
     wh = wh_row.scalar_one_or_none()
-    is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+    cfg_row = await db.execute(select(WarehouseConfig.is_central).where(WarehouseConfig.warehouse_id == target_wh_id))
+    is_central = cfg_row.scalar()
+    if is_central is None:
+        is_central = wh is not None and wh.parent_id is None
 
     if not is_central and payload.items is not None:
         for it in payload.items:
@@ -3144,10 +3150,13 @@ async def issue_material(
         raise HTTPException(status_code=400, detail="Only draft material issues can be issued")
 
     # Resolve central warehouse
-    from app.models.warehouse import Warehouse as _Wh
+    from app.models.warehouse import Warehouse as _Wh, WarehouseConfig
     wh_row = await db.execute(select(_Wh).where(_Wh.id == mi.warehouse_id))
     wh = wh_row.scalar_one_or_none()
-    is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+    cfg_row = await db.execute(select(WarehouseConfig.is_central).where(WarehouseConfig.warehouse_id == mi.warehouse_id))
+    is_central = cfg_row.scalar()
+    if is_central is None:
+        is_central = wh is not None and wh.parent_id is None
 
     if not is_central:
         for item in mi.items:
@@ -3675,10 +3684,13 @@ async def cancel_material_issue(
 
     elif mi.status == "dispatched":
         # Resolve central warehouse
-        from app.models.warehouse import Warehouse as _Wh
+        from app.models.warehouse import Warehouse as _Wh, WarehouseConfig
         wh_row = await db.execute(select(_Wh).where(_Wh.id == mi.warehouse_id))
         wh = wh_row.scalar_one_or_none()
-        is_central = wh is not None and (wh.name == "CENTRAL" or wh.code == "20070")
+        cfg_row = await db.execute(select(WarehouseConfig.is_central).where(WarehouseConfig.warehouse_id == mi.warehouse_id))
+        is_central = cfg_row.scalar()
+        if is_central is None:
+            is_central = wh is not None and wh.parent_id is None
 
         # Reverse stock ledger — push qty back IN with the same valuation
         reverse_gl_items: list[dict] = []

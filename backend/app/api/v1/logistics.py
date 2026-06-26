@@ -591,26 +591,36 @@ async def get_mdos(db: AsyncSession = Depends(get_db), current_user: User = Depe
     
     # Filter by user position in SDO custody chain (non-admin users)
     if user_position_id and not is_admin:
-        from app.services.approval_service import get_position_descendants
         from app.models.settings_master import Position as MdoPosition
 
-        # Collect ALL positions this employee holds (active + any additional positions
-        # linked via Position.employee_id). A user with multiple roles/positions (e.g.
-        # both DM and OE) must see dispatches assigned to any of their positions,
-        # not just whichever one is currently active.
+        # Collect ALL positions this employee holds
         all_employee_positions_res = await db.execute(
             select(MdoPosition.id).where(MdoPosition.employee_id == current_user.employee_id)
         )
         all_pos_ids = set(all_employee_positions_res.scalars().all())
-        # Always include the active position (it may not have employee_id set in all cases)
         all_pos_ids.add(user_position_id)
 
-        # Expand each position with its descendants so the user can also see dispatches
-        # meant for positions beneath them in the hierarchy.
+        # PERF-FIX: Load ALL positions in ONE query, then resolve descendants in-memory.
+        # The old approach called get_position_descendants() per position, each of which
+        # did a BFS loop firing one DB query per tree node — O(N) round-trips.
+        all_positions_res = await db.execute(
+            select(MdoPosition.id, MdoPosition.parent_position_id)
+        )
+        # Build child map: parent_id -> [child_ids]
+        child_map: dict = {}
+        for pos_id, parent_id in all_positions_res.all():
+            if parent_id is not None:
+                child_map.setdefault(parent_id, []).append(pos_id)
+
+        # BFS in-memory to collect all descendants of the user's positions
         allowed_position_ids = set(all_pos_ids)
-        for pos_id in list(all_pos_ids):
-            descendants = await get_position_descendants(db, pos_id)
-            allowed_position_ids.update(pos.id for pos in descendants)
+        queue = list(all_pos_ids)
+        while queue:
+            curr = queue.pop(0)
+            for child_id in child_map.get(curr, []):
+                if child_id not in allowed_position_ids:
+                    allowed_position_ids.add(child_id)
+                    queue.append(child_id)
 
         from sqlalchemy import or_
         from app.models.user import UserWarehouse as DbUserWarehouse

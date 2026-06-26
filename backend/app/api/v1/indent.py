@@ -73,6 +73,7 @@ async def list_indents(
         selectinload(Indent.source_bom),
         # Bug fix BUG_0042: include project so we can return project_name
         selectinload(Indent.project),
+        selectinload(Indent.position),
     )
     count_query = select(func.count(Indent.id))
 
@@ -88,6 +89,11 @@ async def list_indents(
     if project_id:
         query = query.where(Indent.project_id == project_id)
         count_query = count_query.where(Indent.project_id == project_id)
+
+    # Draft indents must only be visible to the user who raised them
+    from sqlalchemy import or_
+    query = query.where(or_(Indent.status != "draft", Indent.raised_by == current_user.id))
+    count_query = count_query.where(or_(Indent.status != "draft", Indent.raised_by == current_user.id))
 
     # Temporary debug logging
     try:
@@ -241,6 +247,14 @@ async def list_indents(
                 )
                 desc_user_ids = [r[0] for r in desc_users_res.all()]
 
+    has_multiple_positions = False
+    if current_user.employee_id:
+        pos_count_res = await db.execute(
+            select(func.count(Position.id)).where(Position.employee_id == current_user.employee_id)
+        )
+        pos_count = pos_count_res.scalar() or 0
+        has_multiple_positions = (pos_count > 1)
+
     if not has_all_visibility:
         from sqlalchemy import or_
         scope = Indent.raised_by == current_user.id
@@ -249,6 +263,17 @@ async def list_indents(
 
         query = query.where(scope)
         count_query = count_query.where(scope)
+
+    if has_multiple_positions and user_pos_ids:
+        from sqlalchemy import or_
+        active_position_id = user_pos_ids[0]
+        position_filter = or_(
+            Indent.raised_by != current_user.id,
+            Indent.position_id == active_position_id,
+            Indent.position_id.is_(None)
+        )
+        query = query.where(position_filter)
+        count_query = count_query.where(position_filter)
 
 
     query = apply_search_filter(query, Indent, search, ["indent_number", "department"])
@@ -342,6 +367,9 @@ async def list_indents(
         data["source_bom_name"] = ind.source_bom.name if ind.source_bom else None
         data["raised_by_name"] = user_map.get(ind.raised_by)
         data["approved_by_name"] = user_map.get(ind.approved_by)
+        data["position_id"] = ind.position_id
+        data["position_name"] = ind.position.name if ind.position else None
+        data["position_code"] = ind.position.code if ind.position else None
         # Workflow gating fields (None when no workflow / not pending).
         # `can_approve_now` defaults to False when workflow_meta is missing —
         # absence means we have no ApprovalRequest row to check the user
@@ -377,6 +405,7 @@ async def get_indent(
             selectinload(Indent.items).selectinload(IndentItem.uom),
             selectinload(Indent.warehouse),
             selectinload(Indent.source_bom),
+            selectinload(Indent.position),
         )
         .where(Indent.id == indent_id)
     )
@@ -448,6 +477,25 @@ async def get_indent(
 
     is_originator = (indent.raised_by is not None and indent.raised_by == current_user.id)
 
+    if indent.status == "draft" and not is_originator:
+        raise HTTPException(status_code=403, detail="Not authorized to view this draft indent")
+
+    has_multiple_positions = False
+    if current_user.employee_id:
+        pos_count_res = await db.execute(
+            select(func.count(Position.id)).where(Position.employee_id == current_user.employee_id)
+        )
+        pos_count = pos_count_res.scalar() or 0
+        has_multiple_positions = (pos_count > 1)
+
+    if is_originator and has_multiple_positions and user_pos_ids:
+        active_position_id = user_pos_ids[0]
+        if indent.position_id is not None and indent.position_id != active_position_id:
+            raise HTTPException(
+                status_code=403,
+                detail="Not authorized to view this indent under your current position"
+            )
+
     if not is_originator:
         from app.utils.dependencies import get_user_role_codes
         role_codes = set(await get_user_role_codes(db, current_user.id))
@@ -477,6 +525,9 @@ async def get_indent(
     data["warehouse_name"] = indent.warehouse.name if indent.warehouse else None
     data["source_bom_code"] = indent.source_bom.bom_code if indent.source_bom else None
     data["source_bom_name"] = indent.source_bom.name if indent.source_bom else None
+    data["position_id"] = indent.position_id
+    data["position_name"] = indent.position.name if indent.position else None
+    data["position_code"] = indent.position.code if indent.position else None
 
     # Resolve user display names for raised_by / approved_by so the UI shows
     # "Murali" instead of "2". Fetch both in one query.
@@ -714,6 +765,27 @@ async def create_indent(
                     detail="You are not authorized to raise indents for this BOM template"
                 )
 
+    user_position_id = None
+    if current_user.employee_id:
+        from app.models.settings_master import Position
+        if current_user.active_role_id:
+            pos_q = await db.execute(
+                select(Position.id).where(
+                    Position.employee_id == current_user.employee_id,
+                    Position.role_id == current_user.active_role_id
+                )
+            )
+            user_position_id = pos_q.scalars().first()
+        if not user_position_id:
+            from app.models.settings_master import Employee
+            emp_res = await db.execute(select(Employee.position_id).where(Employee.id == current_user.employee_id))
+            user_position_id = emp_res.scalar_one_or_none()
+        if not user_position_id:
+            pos_q = await db.execute(
+                select(Position.id).where(Position.employee_id == current_user.employee_id)
+            )
+            user_position_id = pos_q.scalars().first()
+
     indent = Indent(
         indent_number=indent_number,
         project_id=project_id,
@@ -725,6 +797,7 @@ async def create_indent(
         indent_type=payload.indent_type,
         remarks=payload.remarks,
         raised_by=current_user.id,
+        position_id=user_position_id,
     )
     db.add(indent)
     await db.flush()

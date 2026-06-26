@@ -52,9 +52,26 @@ async def list_material_requests(
     priority: str = Query(None),
     request_type: str = Query(None),
     db: AsyncSession = Depends(get_db),
-    # R-001: read-level RBAC enforcement
-    current_user: User = Depends(require_permission("procurement", "view", "material_requests")),
+    current_user: User = Depends(get_current_user),
 ):
+    # Enforce read-level RBAC: either require explicit permission or check allowed roles
+    from app.utils.dependencies import get_user_role_codes, get_user_permissions
+    role_codes = set(await get_user_role_codes(db, current_user.id))
+    has_perm = False
+    try:
+        permissions = set(await get_user_permissions(db, current_user.id))
+        if "procurement.view.material_requests" in permissions:
+            has_perm = True
+    except Exception:
+        pass
+
+    allowed_roles = {"super_admin", "admin", "warehouse_manager", "store_keeper", "purchase_manager", "purchase_officer"}
+    if not (has_perm or (role_codes & allowed_roles)):
+        raise HTTPException(
+            status_code=403,
+            detail="Permission denied: procurement.view.material_requests"
+        )
+
     offset, limit = paginate_params(page, page_size)
     query = select(MaterialRequest).options(
         selectinload(MaterialRequest.items).selectinload(MaterialRequestItem.item),

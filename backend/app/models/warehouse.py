@@ -1,7 +1,8 @@
 from sqlalchemy import Column, BigInteger, String, Text, Boolean, DateTime, Enum, ForeignKey, Numeric, Integer, UniqueConstraint
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 from datetime import datetime, timezone
 from app.database import Base
+
 
 
 class Warehouse(Base):
@@ -31,6 +32,17 @@ class Warehouse(Base):
     @property
     def parent_name(self):
         return self.parent.name if self.parent else None
+
+
+class WarehouseConfig(Base):
+    __tablename__ = "warehouse_configs"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    warehouse_id = Column(BigInteger, ForeignKey("warehouses.id"), unique=True, nullable=False)
+    is_central = Column(Boolean, default=False)
+
+    warehouse = relationship("Warehouse", backref=backref("config", uselist=False, cascade="all, delete-orphan"))
+
 
 
 class WarehouseLocation(Base):
