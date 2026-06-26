@@ -188,41 +188,65 @@ async function syncToBackend(data) {
     positions,
   };
 
-  log('\n  1) Trying /masters/employees/sync-api …');
+  log('\n  1) Triggering background sync via /masters/employees/sync-api …');
 
-  const tryUrls = [
-    `${BACKEND_URL}/masters/employees/sync-api`,
-    `${BACKEND_URL.replace('/api/v1', '')}/masters/employees/sync-api`,
-    `${BACKEND_URL}/masters/employees/bulk-sync`,
-  ];
+  const syncUrl = `${BACKEND_URL}/masters/employees/sync-api`;
+  let taskId = null;
 
-  for (const url of tryUrls) {
-    try {
-      const r = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json',
-                   'Authorization':`Bearer ${BACKEND_TOKEN}`,
-                   'X-HR-Sync':'1' },
-        body: JSON.stringify(payload),
-        signal: ac.signal,
-      });
-      clearTimeout(acTimeout);
-      if (r.ok) {
-        const result = await r.json();
-        log(`  ✅ Sync API SUCCESS`);
-        log(`     Fetched: ${result.fetched || result.employees_fetched || employees.length}`);
-        log(`     Created: ${result.created || 0}  Updated: ${result.updated || 0}`);
-        log(`     Positions: ${result.positions_created || 0} created, ${result.positions_updated || 0} updated`);
-        log(`     Linked users: ${result.linked_users || 0}`);
-        return result;
+  try {
+    const r = await fetch(syncUrl, {
+      method: 'POST',
+      headers: { 'Authorization':`Bearer ${BACKEND_TOKEN}` },
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (r.ok) {
+      const result = await r.json();
+      if (result.task_id && result.status === 'started') {
+        taskId = result.task_id;
+        log(`  ✅ Sync started in background (task_id: ${taskId})`);
+        log('     Polling for completion...');
+        
+        // Poll for status every 3 seconds
+        const statusUrl = `${BACKEND_URL}/masters/employees/sync-status/${taskId}`;
+        let done = false;
+        while (!done) {
+          await sleep(3_000);
+          const sr = await fetch(statusUrl, {
+            headers: { 'Authorization':`Bearer ${BACKEND_TOKEN}` },
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (sr.ok) {
+            const status = await sr.json();
+            log(`     Status: ${status.status}${status.progress ? ' - ' + status.progress : ''}`);
+            if (status.status === 'completed') {
+              clearTimeout(acTimeout);
+              log(`  ✅ Sync API SUCCESS`);
+              log(`     Fetched: ${status.result?.fetched || employees.length}`);
+              log(`     Created: ${status.result?.created || 0}  Updated: ${status.result?.updated || 0}`);
+              log(`     Positions: ${status.result?.positions_created || 0}`);
+              log(`     Linked users: ${status.result?.linked_users || 0}`);
+              return status.result;
+            }
+            if (status.status === 'failed') {
+              clearTimeout(acTimeout);
+              log(`  ✗ Sync FAILED: ${status.error}`);
+              return { error: status.error };
+            }
+          }
+        }
+      } else {
+        log(`  ⚠ Unexpected response: ${JSON.stringify(result)}`);
       }
+    } else {
       const txt = await r.text().catch(() => '');
-      log(`  ⚠ ${url} → HTTP ${r.status}: ${txt.slice(0, 120)}`);
-    } catch (e) {
-      if (e.name === 'AbortError') { log('  ✗ Request timed out'); break; }
-      log(`  ⚠ ${url} → ${e.message}`);
+      log(`  ⚠ ${syncUrl} → HTTP ${r.status}: ${txt.slice(0, 120)}`);
     }
+  } catch (e) {
+    if (e.name === 'AbortError') { log('  ✗ Request timed out'); return null; }
+    log(`  ⚠ ${syncUrl} → ${e.message}`);
   }
+
+  log('  ⚠ Background sync trigger failed, falling back to individual sync...');
 
   // 2) Fallback: create/update employees individually
   log('\n  2) Falling back to individual employee create/update…');

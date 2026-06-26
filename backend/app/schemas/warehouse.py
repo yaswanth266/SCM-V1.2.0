@@ -405,6 +405,14 @@ class MaterialIssueResponse(BaseModel):
     items: List[MaterialIssueItemResponse] = []
     model_config = {"from_attributes": True}
 
+
+class BulkMaterialIssueConfirm(BaseModel):
+    """Payload for the bulk-confirm-and-issue endpoint.
+    Accepts a list of draft MaterialIssue IDs to be transitioned to 'issued'
+    in a single atomic operation.
+    """
+    issue_ids: List[int]
+
 # ---- Picking ----
 class PickingItemCreate(BaseModel):
     item_id: int

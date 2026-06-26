@@ -15,6 +15,21 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from app.models.master import Feature, ItemFeature, UOMCategory, UOMConversion, ItemUOMConversion, VendorType, VendorCategory, VendorVendorType, VendorItemHistory, SpecCategory, Spec, ItemSpec, ItemSpecValue, Office, Position, Employee, UserItemPermission, RoleItemPermission, PackagingLevel, ItemPackaging
 from app.models.vendor_portal import VendorUser
+from app.models.user import ApiKey, TokenBlocklist, PasswordHistory
+
+
+async def ensure_api_keys_schema(session: AsyncSession) -> None:
+    """Create api_keys, token_blocklist and password_history tables if they
+    do not exist yet. This fixes the 503 Service Unavailable that occurs
+    when the backend is deployed to a fresh database that has never had
+    these tables created via an Alembic migration.
+    """
+    if not _should_sync("api_keys_schema"):
+        return
+    conn = await session.connection()
+    await conn.run_sync(TokenBlocklist.__table__.create, checkfirst=True)
+    await conn.run_sync(PasswordHistory.__table__.create, checkfirst=True)
+    await conn.run_sync(ApiKey.__table__.create, checkfirst=True)
 
 
 async def ensure_user_item_permission_schema(session: AsyncSession) -> None:
@@ -408,6 +423,49 @@ async def ensure_organization_structure_schema(session: AsyncSession) -> None:
           AND u.employee_code IS NOT NULL
           AND u.employee_code <> ''
     """))
+
+    # ── Speed-search indexes for positions, employees, offices ────────────
+    # B-tree indexes on frequently filtered/joined columns
+    _search_indexes = (
+        # positions
+        ("idx_positions_name", "CREATE INDEX idx_positions_name ON positions (name)"),
+        ("idx_positions_department", "CREATE INDEX idx_positions_department ON positions (department)"),
+        ("idx_positions_role_name", "CREATE INDEX idx_positions_role_name ON positions (role_name)"),
+        ("idx_positions_status", "CREATE INDEX idx_positions_status ON positions (status)"),
+        ("idx_positions_project_id", "CREATE INDEX idx_positions_project_id ON positions (project_id)"),
+        ("idx_positions_office_id", "CREATE INDEX idx_positions_office_id ON positions (office_id)"),
+        # employees
+        ("idx_employees_name", "CREATE INDEX idx_employees_name ON employees (name)"),
+        ("idx_employees_email", "CREATE INDEX idx_employees_email ON employees (email)"),
+        ("idx_employees_phone", "CREATE INDEX idx_employees_phone ON employees (phone)"),
+        ("idx_employees_status", "CREATE INDEX idx_employees_status ON employees (status)"),
+        # offices
+        ("idx_offices_state", "CREATE INDEX idx_offices_state ON offices (state)"),
+        ("idx_offices_district", "CREATE INDEX idx_offices_district ON offices (district)"),
+        ("idx_offices_cluster", "CREATE INDEX idx_offices_cluster ON offices (cluster)"),
+        # projects
+        ("idx_projects_name", "CREATE INDEX idx_projects_name ON projects (name)"),
+        # roles
+        ("idx_roles_name", "CREATE INDEX idx_roles_name ON roles (name)"),
+    )
+    existing_indexes = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT DISTINCT index_name
+            FROM information_schema.statistics
+            WHERE table_schema = DATABASE()
+              AND table_name IN ('positions', 'employees', 'offices', 'projects', 'roles')
+        """))).all()
+    }
+    for idx_name, ddl in _search_indexes:
+        if idx_name not in existing_indexes:
+            try:
+                await conn.execute(text(ddl))
+            except OperationalError as exc:
+                if "Duplicate key name" not in str(exc):
+                    raise
+                # Index was just created by a concurrent process
+                pass
 
 
 async def ensure_feature_schema(session: AsyncSession) -> None:

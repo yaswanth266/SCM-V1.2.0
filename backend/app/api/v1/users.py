@@ -11,6 +11,8 @@ from app.schemas.auth import UserResponse, UserCreate, UserUpdate, AssignRoles, 
 from app.utils.dependencies import get_current_user, require_any_role, require_permission
 from app.utils.helpers import paginate_params, build_paginated_response, apply_search_filter
 from app.utils.schema_sync import ensure_organization_structure_schema
+import asyncio
+import uuid
 
 router = APIRouter()
 
@@ -2169,6 +2171,187 @@ async def _apply_position_roles_to_linked_users(db: AsyncSession) -> int:
     return applied
 
 
+# ── Background sync task tracker ────────────────────────────────────────
+# In-memory dict of task_id -> sync status dict.
+# Used by the sync-api endpoint to run long syncs without blocking HTTP.
+_sync_tasks: dict[str, dict] = {}
+_sync_locks: dict[int, asyncio.Lock] = {}
+
+
+def _prune_old_sync_tasks(max_age_seconds: int = 3600):
+    """Remove completed/failed sync tasks older than max_age_seconds."""
+    now = datetime.now(timezone.utc)
+    expired = [
+        tid for tid, t in _sync_tasks.items()
+        if t.get("status") in ("completed", "failed")
+        and t.get("completed_at")
+        and (now - datetime.fromisoformat(t["completed_at"])).total_seconds() > max_age_seconds
+    ]
+    for tid in expired:
+        del _sync_tasks[tid]  # organization_id -> lock
+
+
+def _get_org_lock(org_id: int) -> asyncio.Lock:
+    if org_id not in _sync_locks:
+        _sync_locks[org_id] = asyncio.Lock()
+    return _sync_locks[org_id]
+
+
+async def _run_sync_background(task_id: str, max_pages: int, organization_id: int | None):
+    """Run the full employee/position sync in a background asyncio task.
+    Creates its own DB session so the HTTP response can return immediately.
+    """
+    from app.database import AsyncSessionLocal
+
+    task = _sync_tasks.get(task_id)
+    if task is None:
+        return
+    task["status"] = "running"
+    task["started_at"] = datetime.now(timezone.utc).isoformat()
+
+    async with AsyncSessionLocal() as db:
+        try:
+            await ensure_organization_structure_schema(db)
+            result = await _execute_sync(db, max_pages, organization_id, task)
+            task["result"] = result
+            task["status"] = "completed"
+            task["completed_at"] = datetime.now(timezone.utc).isoformat()
+            await db.commit()
+        except Exception as exc:
+            task["status"] = "failed"
+            task["error"] = str(exc)
+            task["completed_at"] = datetime.now(timezone.utc).isoformat()
+            try:
+                await db.rollback()
+            except Exception:
+                pass
+            print(f"Background sync {task_id} failed: {exc}")
+
+
+async def _execute_sync(
+    db: AsyncSession, max_pages: int, organization_id: int | None,
+    task: dict | None = None,
+) -> dict:
+    """Core sync logic extracted from the endpoint.
+    Fetches positions and employees from the HR API and upserts them.
+    """
+    url = httpx.URL(settings.HR_EMPLOYEE_API_URL)
+    page_size = 200
+    if "page_size" not in url.params:
+        url = url.copy_add_param("page_size", str(page_size))
+    else:
+        try:
+            page_size = int(url.params["page_size"])
+        except ValueError:
+            page_size = 200
+
+    headers = {"X-Api-Key": settings.HR_API_KEY, "Accept": "application/json"}
+
+    created = 0
+    updated = 0
+    skipped = 0
+    fetched_total = 0
+    pages_fetched = 0
+    api_total = None
+    seen_urls: set[str] = set()
+    org_stats = {"projects_created": 0, "offices_created": 0, "positions_created": 0}
+    positions_total = 0
+    mapped_positions = 0
+
+    next_url = str(url)
+
+    try:
+        async with httpx.AsyncClient(timeout=settings.HR_API_TIMEOUT, follow_redirects=True) as client:
+            # First, sync all positions
+            positions_total = await _sync_all_positions(db, org_stats, headers, client, organization_id)
+            if task is not None:
+                task["progress"] = f"Synced {positions_total} positions"
+
+            # Second, sync all employees
+            while next_url and pages_fetched < max_pages:
+                if next_url in seen_urls:
+                    break
+                seen_urls.add(next_url)
+
+                try:
+                    response = await _robust_get(client, next_url, headers)
+                    payload = response.json()
+                    pages_fetched += 1
+                except Exception as exc:
+                    print(f"Error fetching page {pages_fetched + 1}: {exc}")
+                    if fetched_total > 0:
+                        break
+                    raise
+
+                if isinstance(payload, dict) and isinstance(payload.get("count"), int):
+                    api_total = int(payload["count"])
+
+                page_rows = _external_rows(payload)
+                if not page_rows:
+                    break
+
+                fetched_total += len(page_rows)
+
+                for row in page_rows:
+                    try:
+                        async with db.begin_nested():
+                            processed, was_created = await _upsert_external_employee(db, row, org_stats, organization_id)
+                            if not processed:
+                                skipped += 1
+                            elif was_created:
+                                created += 1
+                            else:
+                                updated += 1
+                    except Exception as exc:
+                        skipped += 1
+                        print(f"Transient error syncing row: {exc}")
+
+                await db.commit()
+
+                next_url = _external_next_url(payload, str(response.url))
+                await asyncio.sleep(0.05)
+
+                if task is not None:
+                    task["progress"] = f"{fetched_total} employees processed, {created} created, {updated} updated"
+
+            # Third, map positions to employees
+            mapped_positions = await _sync_position_employee_mappings(db, headers, client)
+            if task is not None:
+                task["progress"] = f"Mapped {mapped_positions} positions to employees"
+
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text[:500] if exc.response is not None else str(exc)
+        raise HTTPException(status_code=502, detail=f"Employee API returned an error: {detail}")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Unable to sync employee API: {exc}")
+
+    linked_users = 0
+    role_links_applied = 0
+    try:
+        linked_users = await _link_users_to_employees(db)
+        role_links_applied = await _apply_position_roles_to_linked_users(db)
+        await db.commit()
+    except Exception as exc:
+        print(f"Error post-processing sync: {exc}")
+
+    return {
+        "message": "Employee API sync completed",
+        "fetched": fetched_total,
+        "api_total": api_total,
+        "positions_total": positions_total,
+        "pages_fetched": pages_fetched,
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        **org_stats,
+        "linked_users": linked_users,
+        "role_links_applied": role_links_applied,
+        "mapped_positions": mapped_positions,
+    }
+
+
 async def _sync_all_positions(
     db: AsyncSession, stats: dict[str, int], headers: dict[str, str], client: httpx.AsyncClient, organization_id: int | None
 ) -> int:
@@ -2291,122 +2474,34 @@ async def sync_employees_from_external_api(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission("masters", "update", "users")),
 ):
+    """Start employee/position sync from HR API in background.
+    Returns immediately with a task_id so the frontend can poll status.
+    """
     await ensure_organization_structure_schema(db)
     if not settings.HR_EMPLOYEE_API_URL:
         raise HTTPException(status_code=422, detail="Set HR_EMPLOYEE_API_URL in backend/.env")
     if not settings.HR_API_KEY:
         raise HTTPException(status_code=422, detail="Set HR_API_KEY in backend/.env")
 
-    url = httpx.URL(settings.HR_EMPLOYEE_API_URL)
-    page_size = 200
-    if "page_size" not in url.params:
-        url = url.copy_add_param("page_size", str(page_size))
-    else:
-        try:
-            page_size = int(url.params["page_size"])
-        except ValueError:
-            page_size = 200
+    task_id = str(uuid.uuid4())
+    _sync_tasks[task_id] = {"status": "starting", "organization_id": current_user.organization_id}
 
-    headers = {"X-Api-Key": settings.HR_API_KEY, "Accept": "application/json"}
-    
-    created = 0
-    updated = 0
-    skipped = 0
-    fetched_total = 0
-    pages_fetched = 0
-    api_total = None
-    seen_urls = set()
-    org_stats = {"projects_created": 0, "offices_created": 0, "positions_created": 0}
-    positions_total = 0
-    mapped_positions = 0
-    
-    next_url = str(url)
-    
-    try:
-        async with httpx.AsyncClient(timeout=settings.HR_API_TIMEOUT, follow_redirects=True) as client:
-            # First, sync all positions
-            positions_total = await _sync_all_positions(db, org_stats, headers, client, current_user.organization_id)
-            
-            # Second, sync all employees
-            while next_url and pages_fetched < max_pages:
-                if next_url in seen_urls:
-                    break
-                seen_urls.add(next_url)
-                
-                try:
-                    response = await _robust_get(client, next_url, headers)
-                    payload = response.json()
-                    pages_fetched += 1
-                except Exception as exc:
-                    print(f"Error fetching page {pages_fetched + 1}: {exc}")
-                    if fetched_total > 0:
-                        break
-                    raise HTTPException(status_code=502, detail=f"Employee API fetch error: {exc}")
-                
-                if isinstance(payload, dict) and isinstance(payload.get("count"), int):
-                    api_total = int(payload["count"])
-                
-                page_rows = _external_rows(payload)
-                if not page_rows:
-                    break
-                
-                fetched_total += len(page_rows)
-                
-                for row in page_rows:
-                    try:
-                        async with db.begin_nested():
-                            processed, was_created = await _upsert_external_employee(db, row, org_stats, current_user.organization_id)
-                            if not processed:
-                                skipped += 1
-                            elif was_created:
-                                created += 1
-                            else:
-                                updated += 1
-                    except Exception as exc:
-                        skipped += 1
-                        print(f"Transient error syncing row: {exc}")
-                
-                # Commit this chunk's transaction immediately!
-                await db.commit()
-                
-                next_url = _external_next_url(payload, str(response.url))
-                # Sleep a few milliseconds (e.g. 50ms) to yield execution
-                await asyncio.sleep(0.05)
-            
-            # Third, map positions to employees using active client context
-            mapped_positions = await _sync_position_employee_mappings(db, headers, client)
-                
-    except httpx.HTTPStatusError as exc:
-        detail = exc.response.text[:500] if exc.response is not None else str(exc)
-        raise HTTPException(status_code=502, detail=f"Employee API returned an error: {detail}")
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Unable to sync employee API: {exc}")
+    asyncio.create_task(
+        _run_sync_background(task_id, max_pages, current_user.organization_id)
+    )
 
-    linked_users = 0
-    role_links_applied = 0
-    try:
-        linked_users = await _link_users_to_employees(db)
-        role_links_applied = await _apply_position_roles_to_linked_users(db)
-        await db.commit()
-    except Exception as exc:
-        print(f"Error post-processing sync: {exc}")
+    return {"task_id": task_id, "status": "started", "message": "Sync started in background"}
 
-    return {
-        "message": "Employee API sync completed",
-        "fetched": fetched_total,
-        "api_total": api_total,
-        "positions_total": positions_total,
-        "pages_fetched": pages_fetched,
-        "created": created,
-        "updated": updated,
-        "skipped": skipped,
-        **org_stats,
-        "linked_users": linked_users,
-        "role_links_applied": role_links_applied,
-        "mapped_positions": mapped_positions,
-    }
+
+@router.get("/employees/sync-status/{task_id}")
+async def get_sync_status(task_id: str):
+    """Poll status of a background sync task."""
+    task = _sync_tasks.get(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Sync task not found")
+    # Clean up completed/failed tasks older than 1 hour
+    _prune_old_sync_tasks()
+    return {"task_id": task_id, **task}
 
 
 @router.get("/projects")

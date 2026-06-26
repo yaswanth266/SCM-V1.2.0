@@ -46,26 +46,11 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [remember, setRemember] = useState(true);
   const [showPassword, setShowPassword] = useState(false);
-  const [tab, setTab] = useState(() => {
-    if (location.pathname === '/login/transporter') return 'partner';
-    if (location.pathname === '/login/vendor') return 'supplier';
-    return 'employee';
-  });
-
   const pathname = location.pathname;
   const isTransporterPage = pathname === '/login/transporter';
   const isVendorPage = pathname === '/login/vendor';
-  const isEmployeePage = pathname === '/login' || pathname === '/';
 
-  useEffect(() => {
-    if (location.pathname === '/login/transporter') {
-      setTab('partner');
-    } else if (location.pathname === '/login/vendor') {
-      setTab('supplier');
-    } else if (location.pathname === '/login' || location.pathname === '/') {
-      setTab('employee');
-    }
-  }, [location.pathname]);
+  const tab = isTransporterPage ? 'partner' : isVendorPage ? 'supplier' : 'employee';
   // BUG-FE-157: detect Caps Lock so users don't burn lockout attempts on a
   // password they typed in the wrong case.
   const [capsLockOn, setCapsLockOn] = useState(false);
@@ -223,52 +208,7 @@ const Login = () => {
               )}
             </h2>
 
-            {!(isTransporterPage || isVendorPage || isEmployeePage) && (
-              <div className="auth-tabs" role="tablist">
-                <button
-                  type="button"
-                  className={tab === 'employee' ? 'active' : ''}
-                  onClick={() => setTab('employee')}
-                  role="tab"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                    <circle cx="12" cy="8" r="4" />
-                    <path d="M4 21a8 8 0 0 1 16 0" />
-                  </svg>
-                  Employee
-                </button>
-                <button
-                  type="button"
-                  className={tab === 'partner' ? 'active' : ''}
-                  onClick={() => setTab('partner')}
-                  role="tab"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="m7.5 4.27 9 5.15" />
-                    <path d="M21 8 12 2 3 8v8l9 6 9-6V8z" />
-                    <path d="m3.3 7 8.7 5 8.7-5" />
-                    <path d="M12 22V12" />
-                  </svg>
-                  Transporter
-                </button>
-                <button
-                  type="button"
-                  className={tab === 'supplier' ? 'active' : ''}
-                  onClick={() => setTab('supplier')}
-                  role="tab"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                    strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" />
-                    <line x1="3" y1="6" x2="21" y2="6" />
-                    <path d="M16 10a4 4 0 0 1-8 0" />
-                  </svg>
-                  Supplier
-                </button>
-              </div>
-            )}
+
 
             {/* BUG-FE-161: surface "Account locked" / "Account disabled"
                 hints with a stronger visual style so users notice they need
@@ -386,21 +326,7 @@ const Login = () => {
               {!(loading || carrierLoading || vendorLoading) && <ArrowRight />}
             </button>
 
-            <div className="alternative-login" style={{ fontSize: '12px', marginTop: '16px', textAlign: 'center', color: '#64748b', lineHeight: '1.6' }}>
-              {tab === 'employee' ? (
-                <span>
-                  Are you a partner? Sign in to{' '}
-                  <a href="#" onClick={(e) => { e.preventDefault(); navigate('/login/transporter'); }} style={{ color: '#096dd9', fontWeight: 600 }}>Transporter Portal</a>
-                  {' or '}
-                  <a href="#" onClick={(e) => { e.preventDefault(); navigate('/login/vendor'); }} style={{ color: '#096dd9', fontWeight: 600 }}>Vendor Portal</a>
-                </span>
-              ) : (
-                <span>
-                  Are you an employee? Sign in to{' '}
-                  <a href="#" onClick={(e) => { e.preventDefault(); navigate('/login'); }} style={{ color: '#096dd9', fontWeight: 600 }}>Employee SCM Portal</a>
-                </span>
-              )}
-            </div>
+
 
             <div className="help-card">
               <div className="ic">
