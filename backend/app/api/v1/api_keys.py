@@ -48,26 +48,43 @@ async def create_api_key(
         linked_user_ids = list(set(linked_user_ids) | role_user_ids)
 
     # Auto-generate URL endpoints based on scopes
+    # Full mapping: every scope offered in the UI → its external route path
+    SCOPE_TO_PATH = {
+        "masters:items:read":           "/api/v1/external/masters/items",
+        "masters:vendors:read":         "/api/v1/external/masters/vendors",
+        "masters:warehouses:read":      "/api/v1/external/masters/warehouses",
+        "masters:packaging:read":        "/api/v1/external/masters/packaging",
+        "masters:categories:read":      "/api/v1/external/masters/categories",
+        "masters:uom:read":             "/api/v1/external/masters/uom",
+        "masters:brands:read":          "/api/v1/external/masters/brands",
+        "masters:features:read":        "/api/v1/external/masters/features",
+        "masters:item-types:read":      "/api/v1/external/masters/item-types",
+        "masters:attributes:read":      "/api/v1/external/masters/attributes",
+        "masters:users:read":           "/api/v1/external/masters/users",
+        "masters:vendor-mapping:read":  "/api/v1/external/masters/vendors",
+        "masters:user-mapping:read":    "/api/v1/external/masters/users",
+        "inventory:stock-balance:read": "/api/v1/external/inventory/stock",
+        "inventory:stock-ledger:read":  "/api/v1/external/inventory/stock-ledger",
+        "indent:acknowledgement:read":  "/api/v1/external/indent/acknowledgements",
+    }
+
     scopes_list = payload.scopes or []
-    paths = []
-    for scope in scopes_list:
-        if scope == "masters:items:read" or scope.startswith("masters:items:"):
-            paths.append("/api/v1/external/masters/items")
-        elif scope == "masters:vendors:read":
-            paths.append("/api/v1/external/masters/vendors")
-        elif scope == "inventory:stock-balance:read" or scope.startswith("inventory:stock-balance:"):
-            paths.append("/api/v1/external/inventory/stock")
-        elif scope == "indent:acknowledgement:read":
-            paths.append("/api/v1/external/indent/acknowledgements")
-            
-    # Dedup and preserve order
-    seen = set()
+    seen_paths = set()
     deduped_paths = []
-    for p in paths:
-        if p not in seen:
-            seen.add(p)
-            deduped_paths.append(p)
-            
+    for scope in scopes_list:
+        # Exact match
+        path = SCOPE_TO_PATH.get(scope)
+        if path is None:
+            # Granular items scope (e.g. masters:items:CONSUMABLE:read)
+            if scope.startswith("masters:items:") and scope.endswith(":read"):
+                path = "/api/v1/external/masters/items"
+            # Granular stock-balance scope
+            elif scope.startswith("inventory:stock-balance:") and scope.endswith(":read"):
+                path = "/api/v1/external/inventory/stock"
+        if path and path not in seen_paths:
+            seen_paths.add(path)
+            deduped_paths.append(path)
+
     base_url = str(request.base_url).rstrip("/")
     generated_endpoint = ", ".join(f"{base_url}{p}" for p in deduped_paths) if deduped_paths else None
 
@@ -163,3 +180,64 @@ async def revoke_api_key(
     await db.delete(key)
     await db.commit()
     return {"success": True, "message": "API Key revoked successfully"}
+
+
+# Shared helper: compute endpoint string from a list of scope strings + base URL
+def _compute_endpoint(scopes_list: list, base_url: str) -> str | None:
+    SCOPE_TO_PATH = {
+        "masters:items:read":           "/api/v1/external/masters/items",
+        "masters:vendors:read":         "/api/v1/external/masters/vendors",
+        "masters:warehouses:read":      "/api/v1/external/masters/warehouses",
+        "masters:packaging:read":       "/api/v1/external/masters/packaging",
+        "masters:categories:read":      "/api/v1/external/masters/categories",
+        "masters:uom:read":             "/api/v1/external/masters/uom",
+        "masters:brands:read":          "/api/v1/external/masters/brands",
+        "masters:features:read":        "/api/v1/external/masters/features",
+        "masters:item-types:read":      "/api/v1/external/masters/item-types",
+        "masters:attributes:read":      "/api/v1/external/masters/attributes",
+        "masters:users:read":           "/api/v1/external/masters/users",
+        "masters:vendor-mapping:read":  "/api/v1/external/masters/vendors",
+        "masters:user-mapping:read":    "/api/v1/external/masters/users",
+        "inventory:stock-balance:read": "/api/v1/external/inventory/stock",
+        "inventory:stock-ledger:read":  "/api/v1/external/inventory/stock-ledger",
+        "indent:acknowledgement:read":  "/api/v1/external/indent/acknowledgements",
+    }
+    seen = set()
+    paths = []
+    for scope in scopes_list:
+        path = SCOPE_TO_PATH.get(scope)
+        if path is None:
+            if scope.startswith("masters:items:") and scope.endswith(":read"):
+                path = "/api/v1/external/masters/items"
+            elif scope.startswith("inventory:stock-balance:") and scope.endswith(":read"):
+                path = "/api/v1/external/inventory/stock"
+        if path and path not in seen:
+            seen.add(path)
+            paths.append(path)
+    return ", ".join(f"{base_url}{p}" for p in paths) if paths else None
+
+
+@router.patch("/{key_id}/refresh-endpoint")
+async def refresh_api_key_endpoint(
+    key_id: int,
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Recompute and save the URL endpoint for an existing API key.
+
+    Useful for keys created before all scopes had a mapped external URL —
+    calling this will populate the 'URL Endpoint' column without revoking/re-generating.
+    """
+    result = await db.execute(
+        select(ApiKey).where(ApiKey.id == key_id, ApiKey.user_id == current_user.id)
+    )
+    key = result.scalar_one_or_none()
+    if not key:
+        raise HTTPException(status_code=404, detail="API Key not found")
+
+    scopes_list = json.loads(key.scopes) if key.scopes else []
+    base_url = str(request.base_url).rstrip("/")
+    key.endpoint = _compute_endpoint(scopes_list, base_url)
+    await db.commit()
+    return {"success": True, "endpoint": key.endpoint}

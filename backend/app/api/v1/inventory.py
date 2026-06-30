@@ -3260,6 +3260,10 @@ async def create_item(
     data = payload.model_dump()
     kit_components = data.pop("kit_components", None)
     initial_quantity = data.pop("initial_quantity", None)
+    initial_warehouse_id = data.pop("initial_warehouse_id", None)
+    initial_bin_code = data.pop("initial_bin_code", None)
+    initial_batch_number = data.pop("initial_batch_number", None)
+    initial_batch_expiry = data.pop("initial_batch_expiry", None)
     requested_feature_ids = data.pop("feature_ids", None)
     if requested_feature_ids is None:
         requested_feature_ids = [data.get("feature_id")] if data.get("feature_id") is not None else []
@@ -3313,30 +3317,39 @@ async def create_item(
         await _replace_item_features(db, int(item.id), validated_feature_ids)
         await _replace_item_kit_components(db, int(item.id), bool(item.is_kit), kit_components, item.item_code)
         if initial_quantity is not None and Decimal(str(initial_quantity)) > 0:
-            wh_result = await db.execute(select(Warehouse).where(func.lower(Warehouse.name) == "central"))
-            warehouse = wh_result.scalar_one_or_none()
+            warehouse = None
+            if initial_warehouse_id:
+                wh_result = await db.execute(select(Warehouse).where(Warehouse.id == initial_warehouse_id, Warehouse.is_active == True))
+                warehouse = wh_result.scalar_one_or_none()
+            if not warehouse:
+                wh_result = await db.execute(select(Warehouse).where(func.lower(Warehouse.name) == "central"))
+                warehouse = wh_result.scalar_one_or_none()
             if not warehouse:
                 fallback_result = await db.execute(select(Warehouse).where(Warehouse.is_active == True).limit(1))
                 warehouse = fallback_result.scalar_one_or_none()
             if warehouse:
-                # Resolve or create a default bin
+                # Resolve or create the bin using initial_bin_code
+                bin_code = (initial_bin_code or "SYSTEM-DEFAULT").strip()
                 from app.api.v1.warehouse import resolve_or_create_bin
-                bin_id = await resolve_or_create_bin(db, warehouse.id, "SYSTEM-DEFAULT")
+                bin_id = await resolve_or_create_bin(db, warehouse.id, bin_code)
 
-                # Resolve or create a default batch with future expiry
+                # Resolve or create the batch using initial_batch_number
                 from app.models.warehouse import Batch
-                batch_number = "INITIAL-BATCH"
+                batch_number = (initial_batch_number or "INITIAL-BATCH").strip()
                 batch_result = await db.execute(
                     select(Batch).where(Batch.item_id == item.id, Batch.batch_number == batch_number)
                 )
                 batch = batch_result.scalar_one_or_none()
                 if not batch:
                     from datetime import datetime, timedelta
-                    future_expiry = datetime.now() + timedelta(days=3650)
+                    if initial_batch_expiry:
+                        expiry_date = datetime.combine(initial_batch_expiry, datetime.min.time())
+                    else:
+                        expiry_date = datetime.now() + timedelta(days=3650)
                     batch = Batch(
                         item_id=item.id,
                         batch_number=batch_number,
-                        expiry_date=future_expiry,
+                        expiry_date=expiry_date,
                         status="active"
                     )
                     db.add(batch)

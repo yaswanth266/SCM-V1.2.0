@@ -277,9 +277,51 @@ const ApiKeys = () => {
     });
   };
 
+  const handleRefreshEndpoint = async (id) => {
+    try {
+      const res = await api.patch(`/api-keys/${id}/refresh-endpoint`);
+      if (res.data?.endpoint) {
+        message.success('URL endpoint updated');
+      } else {
+        message.warning('No URL could be generated for the scopes on this key');
+      }
+      fetchKeys();
+    } catch (err) {
+      message.error(getErrorMessage(err));
+    }
+  };
+
   const columns = [
     { title: 'Name', dataIndex: 'name', key: 'name', width: 180 },
-    { title: 'URL Endpoint', dataIndex: 'endpoint', key: 'endpoint', width: 220, render: (val) => val || '—' },
+    {
+      title: 'URL Endpoint',
+      dataIndex: 'endpoint',
+      key: 'endpoint',
+      width: 260,
+      render: (val, record) => {
+        if (val) {
+          return (
+            <div style={{ fontSize: 12 }}>
+              {val.split(', ').map((url, i) => (
+                <div key={i} style={{ marginBottom: 2 }}>
+                  <a href={url} target="_blank" rel="noopener noreferrer" style={{ wordBreak: 'break-all' }}>{url}</a>
+                </div>
+              ))}
+            </div>
+          );
+        }
+        return (
+          <Button
+            size="small"
+            type="dashed"
+            onClick={() => handleRefreshEndpoint(record.id)}
+            style={{ fontSize: 12 }}
+          >
+            Refresh URL
+          </Button>
+        );
+      },
+    },
     { 
       title: 'Scopes', 
       dataIndex: 'scopes', 

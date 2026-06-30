@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Text, DateTime, Enum, ForeignKey, Numeric
+from sqlalchemy import Column, BigInteger, String, Text, DateTime, Enum, ForeignKey, Numeric, JSON
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.database import Base
@@ -100,6 +100,7 @@ class IndentAcknowledgementItem(Base):
     item_id = Column(BigInteger, ForeignKey("items.id"), nullable=False)
     received_qty = Column(Numeric(15, 3), default=0)
     remarks = Column(Text)
+    serial_numbers = Column(JSON, nullable=True)
 
     acknowledgement = relationship("IndentAcknowledgement", back_populates="items")
     item = relationship("Item")

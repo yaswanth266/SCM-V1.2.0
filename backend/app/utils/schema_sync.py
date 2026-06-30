@@ -1041,6 +1041,8 @@ async def ensure_item_uom_category_schema(session: AsyncSession) -> None:
     }
 
     new_cols = {
+        "asset_code": "ALTER TABLE items ADD COLUMN asset_code VARCHAR(100) NULL",
+        "consumable_code": "ALTER TABLE items ADD COLUMN consumable_code VARCHAR(100) NULL",
         "special_storage_condition": "ALTER TABLE items ADD COLUMN special_storage_condition TINYINT(1) NOT NULL DEFAULT 0",
         "storage_min_temp": "ALTER TABLE items ADD COLUMN storage_min_temp DECIMAL(5, 2) NULL",
         "storage_max_temp": "ALTER TABLE items ADD COLUMN storage_max_temp DECIMAL(5, 2) NULL",

@@ -427,6 +427,12 @@ class ItemCreate(BaseModel):
     is_active: bool = True
     kit_components: Optional[List[ItemKitComponentCreate]] = None
     initial_quantity: Optional[Decimal] = None
+    initial_warehouse_id: Optional[int] = None
+    initial_bin_code: Optional[str] = None
+    initial_batch_number: Optional[str] = None
+    initial_batch_expiry: Optional[date] = None
+    asset_code: Optional[str] = None
+    consumable_code: Optional[str] = None
 
     @field_validator("item_code")
     @classmethod
@@ -529,6 +535,8 @@ class ItemUpdate(BaseModel):
 
     dosage_form: Optional[str] = None
     valuation_method: Optional[str] = None
+    asset_code: Optional[str] = None
+    consumable_code: Optional[str] = None
     # Bug fix D-006 — compliance flags editable
     drug_schedule: Optional[str] = None
     is_schedule_h1: Optional[bool] = None
@@ -619,6 +627,8 @@ class ItemResponse(BaseModel):
 
     dosage_form: Optional[str] = None
     valuation_method: Optional[str] = None
+    asset_code: Optional[str] = None
+    consumable_code: Optional[str] = None
     # Bug fix D-006 — compliance flags exposed (Wave 7 columns)
     drug_schedule: Optional[str] = None
     is_schedule_h1: Optional[bool] = None

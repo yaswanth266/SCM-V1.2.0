@@ -1861,6 +1861,11 @@ async def list_all_acknowledgements(
                     "requested_qty": float(ai.indent_item.requested_qty) if ai.indent_item and ai.indent_item.requested_qty is not None else None,
                     "received_qty": float(ai.received_qty) if ai.received_qty is not None else 0,
                     "remarks": ai.remarks,
+                    "asset_code": ai.serial_numbers if (ai.item and ai.item.item_type == "asset") else None,
+                    "asset_codes": ai.serial_numbers if (ai.item and ai.item.item_type == "asset") else None,
+                    "consumable_code": ai.serial_numbers if (ai.item and ai.item.item_type == "consumable") else None,
+                    "consumable_codes": ai.serial_numbers if (ai.item and ai.item.item_type == "consumable") else None,
+                    "serial_numbers": ai.serial_numbers,
                 }
                 for ai in (ack.items or [])
             ],
@@ -1920,6 +1925,11 @@ async def get_acknowledgement(
             "item_name": ai.item.name if ai.item else None,
             "uom": ind_item.uom.name if ind_item and ind_item.uom else None,
             "approved_qty": ind_item.approved_qty if ind_item else None,
+            "asset_code": ai.serial_numbers if (ai.item and ai.item.item_type == "asset") else None,
+            "asset_codes": ai.serial_numbers if (ai.item and ai.item.item_type == "asset") else None,
+            "consumable_code": ai.serial_numbers if (ai.item and ai.item.item_type == "consumable") else None,
+            "consumable_codes": ai.serial_numbers if (ai.item and ai.item.item_type == "consumable") else None,
+            "serial_numbers": ai.serial_numbers,
         }
         items_data.append(item_data)
 
@@ -2096,6 +2106,7 @@ async def _create_acknowledgement(
             item_id=item.item_id,
             received_qty=item.received_qty,
             remarks=item.remarks,
+            serial_numbers=item.serial_numbers,
         )
         db.add(ack_item)
 

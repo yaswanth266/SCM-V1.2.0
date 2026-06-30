@@ -5,6 +5,7 @@ import {
 import {
   PlusOutlined, EditOutlined, EyeOutlined,
   DownloadOutlined, CheckCircleOutlined, StopOutlined,
+  CloudUploadOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import PageHeader from '../../../components/PageHeader';
@@ -12,11 +13,13 @@ import DataTable from '../../../components/DataTable';
 import StatusTag from '../../../components/StatusTag';
 import api from '../../../config/api';
 import { formatCurrency, getErrorMessage, downloadExcel } from '../../../utils/helpers';
+import BulkUploadModal from '../../../components/BulkUploadModal';
 
 const Items = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialSearch = searchParams.get('search') || '';
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
   const [deactivateError, setDeactivateError] = useState(null);
   const [allCategoryOptions, setAllCategoryOptions] = useState([]);
@@ -311,6 +314,9 @@ const Items = () => {
           <Button icon={<DownloadOutlined />} onClick={handleExport}>
             Export
           </Button>
+          <Button icon={<CloudUploadOutlined />} onClick={() => setUploadModalOpen(true)}>
+            Bulk Upload
+          </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/masters/items/new')}>
             Add Item
           </Button>
@@ -449,6 +455,12 @@ const Items = () => {
           </Button>
         </div>
       </Modal>
+
+      <BulkUploadModal
+        open={uploadModalOpen}
+        onClose={() => setUploadModalOpen(false)}
+        onUploadSuccess={() => setRefreshKey((k) => k + 1)}
+      />
     </div>
   );
 };

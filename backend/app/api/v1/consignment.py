@@ -45,7 +45,7 @@ from app.models.consignment import (
 )
 from app.models.user import User
 from app.services.number_series import generate_number
-from app.utils.dependencies import get_current_user, require_any_role
+from app.utils.dependencies import get_current_user, require_any_role, require_key
 from app.utils.schema_sync import ensure_consignment_schema
 
 router = APIRouter(tags=["Consignment & Packaging"])
@@ -1094,7 +1094,7 @@ async def get_consignment(consignment_id: int, db: AsyncSession = Depends(get_db
 async def pack_consignment(
     consignment_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role("super_admin", "admin", "warehouse_manager", "storekeeper")),
+    current_user: User = Depends(require_key("logistics-consignments")),
 ):
     """Mark a consignment and all its packages as PACKED."""
     await ensure_consignment_schema(db)
@@ -1147,7 +1147,7 @@ async def pack_consignment(
 async def dispatch_consignment(
     consignment_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role("super_admin", "admin", "warehouse_manager")),
+    current_user: User = Depends(require_key("logistics-consignments")),
 ):
     """Mark a packed consignment as IN_TRANSIT."""
     await ensure_consignment_schema(db)
@@ -2264,6 +2264,112 @@ async def acknowledge_package(
                 except Exception as sn_err:
                     import logging
                     logging.getLogger(__name__).warning("Failed to update SerialNumber records in acknowledge_package: %s", sn_err)
+
+    await db.flush()
+
+    # --------------------------------------------------------------------------
+    # Sync to Indent Acknowledgement tables
+    # --------------------------------------------------------------------------
+    try:
+        indent_id = con.indent_id
+        if not indent_id and con.material_issue_id:
+            from app.models.issue import MaterialIssue
+            mi_res = await db.execute(
+                select(MaterialIssue.indent_id).where(MaterialIssue.id == con.material_issue_id)
+            )
+            indent_id = mi_res.scalar()
+
+        if indent_id:
+            from app.models.indent import Indent, IndentItem, IndentAcknowledgement, IndentAcknowledgementItem
+
+            # Compute total received quantity accepted in this package ack
+            total_received = sum(item_ack.quantity_accepted for item_ack in payload.items if item_ack.quantity_accepted is not None)
+
+            indent_ack = IndentAcknowledgement(
+                indent_id=indent_id,
+                warehouse_id=con.destination_warehouse_id or con.warehouse_id,
+                acknowledged_by=current_user.id,
+                employee_code=payload.acknowledged_by_employee_code or current_user.employee_code,
+                acknowledged_at=now,
+                received_qty=total_received,
+                status="received",  # Will update below
+                remarks=payload.remarks or f"Acknowledged via Package {pkg.package_number}",
+                scan_barcode=pkg.package_number,
+                scan_timestamp=now,
+            )
+            db.add(indent_ack)
+            await db.flush()
+
+            # Load indent items
+            indent_items_res = await db.execute(
+                select(IndentItem).where(IndentItem.indent_id == indent_id)
+            )
+            indent_items = indent_items_res.scalars().all()
+            indent_item_map = {it.item_id: it for it in indent_items}
+
+            for item_ack in payload.items:
+                pi = pkg_item_map[item_ack.package_item_id]
+                ind_item = indent_item_map.get(pi.material_id)
+                if ind_item:
+                    indent_ack_item = IndentAcknowledgementItem(
+                        acknowledgement_id=indent_ack.id,
+                        indent_item_id=ind_item.id,
+                        item_id=pi.material_id,
+                        received_qty=item_ack.quantity_accepted,
+                        remarks=getattr(item_ack, "remarks", None) or getattr(item_ack, "rejection_reason", None) or f"Package item ack: {pi.id}",
+                        serial_numbers=item_ack.serial_numbers_received or pi.serial_numbers,
+                    )
+                    db.add(indent_ack_item)
+
+                    # Update indent item fulfillment status
+                    ind_item.fulfillment_status = "acknowledged"
+                    db.add(ind_item)
+
+            await db.flush()
+
+            # Recalculate parent indent status and this acknowledgement status
+            all_acks_res = await db.execute(
+                select(IndentAcknowledgement)
+                .options(selectinload(IndentAcknowledgement.items))
+                .where(IndentAcknowledgement.indent_id == indent_id)
+            )
+            cum = {}
+            for a in all_acks_res.scalars().all():
+                for ai in (a.items or []):
+                    key = ai.indent_item_id or 0
+                    cum[key] = cum.get(key, Decimal("0")) + Decimal(str(ai.received_qty or 0))
+
+            indent_res = await db.execute(
+                select(Indent)
+                .options(selectinload(Indent.items))
+                .where(Indent.id == indent_id)
+            )
+            indent_obj = indent_res.scalar_one_or_none()
+
+            if indent_obj:
+                all_lines_complete = True
+                any_received = False
+                for ind_item in indent_obj.items:
+                    target = Decimal(str(ind_item.approved_qty or ind_item.requested_qty or 0))
+                    recv = cum.get(ind_item.id, Decimal("0"))
+                    if recv > 0:
+                        any_received = True
+                    if recv < target:
+                        all_lines_complete = False
+
+                if all_lines_complete and indent_obj.items:
+                    indent_obj.status = "fulfilled"
+                    indent_ack.status = "completed"
+                elif any_received:
+                    if indent_obj.status == "approved":
+                        indent_obj.status = "partially_fulfilled"
+                    indent_ack.status = "partial"
+                else:
+                    indent_ack.status = "received"
+                db.add(indent_obj)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Failed to update IndentAcknowledgement records in acknowledge_package: %s", e)
 
     await db.flush()
     await _update_consignment_status(db, con)

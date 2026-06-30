@@ -198,6 +198,24 @@ const Acknowledgement = () => {
                 align: 'right',
                 render: (v) => <Text strong style={{ color: '#16a34a' }}>{formatNumber(v)}</Text>,
               },
+              {
+                title: 'Asset / Consumable Code',
+                key: 'codes',
+                width: 250,
+                render: (_, record) => {
+                  const codes = record.asset_codes || record.consumable_codes || record.serial_numbers || [];
+                  if (!codes || codes.length === 0) return '-';
+                  return (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', maxWidth: '300px' }}>
+                      {codes.map((code) => (
+                        <Tag color="cyan" key={code} style={{ fontFamily: 'monospace', margin: 0 }}>
+                          {code}
+                        </Tag>
+                      ))}
+                    </div>
+                  );
+                }
+              },
               { title: 'Remarks', dataIndex: 'remarks', key: 'rem', width: 200, ellipsis: true, render: (v) => v || '-' },
             ]}
           />

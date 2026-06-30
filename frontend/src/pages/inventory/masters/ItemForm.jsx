@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Card, Form, Input, InputNumber, Select, Switch, Space, Button, message, Row, Col, Tabs, Table, Checkbox, Divider, Tooltip, Spin,
+  Card, Form, Input, InputNumber, Select, Switch, Space, Button, message, Row, Col, Tabs, Table, Checkbox, Divider, Tooltip, Spin, DatePicker,
 } from 'antd';
 import { ArrowLeftOutlined, PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -80,16 +80,39 @@ const ItemForm = () => {
   const [selectedUomCategoryId, setSelectedUomCategoryId] = useState(undefined);
   const [specialStorage, setSpecialStorage] = useState(false);
   const [specialTransport, setSpecialTransport] = useState(false);
+  const [warehouses, setWarehouses] = useState([]);
+  const [selectedItemType, setSelectedItemType] = useState(undefined);
+
+  const watchedItemCode = Form.useWatch('item_code', form);
+  const autoAsset = Form.useWatch('asset_code_auto', form);
+  const autoConsumable = Form.useWatch('consumable_code_auto', form);
+
+  useEffect(() => {
+    if (autoAsset) {
+      form.setFieldsValue({
+        asset_code: watchedItemCode ? `${watchedItemCode}-1-` : '',
+      });
+    }
+  }, [watchedItemCode, autoAsset, form]);
+
+  useEffect(() => {
+    if (autoConsumable) {
+      form.setFieldsValue({
+        consumable_code: watchedItemCode ? `${watchedItemCode}-1-` : '',
+      });
+    }
+  }, [watchedItemCode, autoConsumable, form]);
 
   const fetchLookups = useCallback(async () => {
     setLoading(true);
     try {
-      const [catRes, uomCatRes, uomRes, brandRes, typeRes] = await Promise.all([
+      const [catRes, uomCatRes, uomRes, brandRes, typeRes, whRes] = await Promise.all([
         api.get('/masters/categories', { params: { page_size: 500 } }),
         api.get('/masters/uom-categories', { params: { page_size: 100 } }),
         api.get('/masters/uom', { params: { page_size: 500 } }),
         api.get('/masters/brands', { params: { page_size: 500 } }),
         api.get('/masters/item-types', { params: { page_size: 100 } }),
+        api.get('/masters/warehouses', { params: { page_size: 500, is_active: true } }),
       ]);
 
       const catData = catRes.data?.items || catRes.data?.data || catRes.data || [];
@@ -125,6 +148,12 @@ const ItemForm = () => {
         };
       }));
 
+      const whData = whRes.data?.items || whRes.data?.data || whRes.data || [];
+      setWarehouses(whData.map((w) => ({
+        label: w.name,
+        value: w.id,
+      })));
+
       if (!isNew) {
         await fetchItemData(catData);
       } else {
@@ -140,8 +169,14 @@ const ItemForm = () => {
           is_kit: false,
           add_initial_qty: false,
           initial_quantity: undefined,
+          initial_warehouse_id: undefined,
+          initial_bin_code: 'SYSTEM-DEFAULT',
+          initial_batch_number: 'INITIAL-BATCH',
+          initial_batch_expiry: undefined,
           special_storage_condition: false,
           special_transport_condition: false,
+          asset_code_auto: true,
+          consumable_code_auto: true,
         });
       }
     } catch (err) {
@@ -163,6 +198,7 @@ const ItemForm = () => {
       setSelectedUomCategoryId(item.uom_category_id);
       setSpecialStorage(Boolean(item.special_storage_condition));
       setSpecialTransport(Boolean(item.special_transport_condition));
+      setSelectedItemType(item.item_type);
 
       // Resolve category path (Level 1 > Level 2 > Level 3)
       const resolveLevels = () => {
@@ -185,9 +221,14 @@ const ItemForm = () => {
       };
       resolveLevels();
 
+      const isAssetAuto = item.item_code && item.asset_code === `${item.item_code}-1-`;
+      const isConsumableAuto = item.item_code && item.consumable_code === `${item.item_code}-1-`;
+
       form.setFieldsValue({
         ...item,
         status: item.is_active === false ? 'inactive' : 'active',
+        asset_code_auto: isAssetAuto || !item.asset_code,
+        consumable_code_auto: isConsumableAuto || !item.consumable_code,
       });
 
       const catId = item.category_id;
@@ -312,6 +353,9 @@ const ItemForm = () => {
     }
     if ('special_transport_condition' in changed) {
       setSpecialTransport(changed.special_transport_condition);
+    }
+    if ('item_type' in changed) {
+      setSelectedItemType(changed.item_type);
     }
   };
 
@@ -508,6 +552,12 @@ const ItemForm = () => {
     if (submitting) return;
     setSubmitting(true);
     try {
+      if (!level1Id || !level2Id || !level3Id) {
+        message.error('Please select Category Levels 1, 2, and 3. All three levels are mandatory.');
+        setSubmitting(false);
+        return;
+      }
+
       const values = await form.validateFields();
 
       // Validate required dynamic attributes
@@ -564,7 +614,18 @@ const ItemForm = () => {
         }
       }
 
-      const { status, add_initial_qty, initial_quantity, ...rest } = values;
+      const { 
+        status, 
+        add_initial_qty, 
+        initial_quantity, 
+        initial_warehouse_id, 
+        initial_bin_code, 
+        initial_batch_number, 
+        initial_batch_expiry, 
+        asset_code_auto,
+        consumable_code_auto,
+        ...rest 
+      } = values;
       delete rest.secondary_uom_id;
       delete rest.sku;
       delete rest.weight;
@@ -584,6 +645,10 @@ const ItemForm = () => {
 
       if (isNew && add_initial_qty && initial_quantity != null) {
         payload.initial_quantity = initial_quantity;
+        payload.initial_warehouse_id = initial_warehouse_id;
+        payload.initial_bin_code = initial_bin_code;
+        payload.initial_batch_number = initial_batch_number;
+        payload.initial_batch_expiry = initial_batch_expiry ? initial_batch_expiry.format('YYYY-MM-DD') : null;
       }
 
       let savedItemId;
@@ -907,9 +972,51 @@ const ItemForm = () => {
                       </Col>
                     </Row>
 
-                    <Form.Item name="description" label="Description">
+                     <Form.Item name="description" label="Description">
                       <TextArea rows={3} placeholder="Item description" />
                     </Form.Item>
+
+                    {/* Conditional Asset / Consumable Code */}
+                    {selectedItemType && ['asset', 'consumable', 'consumables'].includes(selectedItemType.toLowerCase()) && (
+                      <Row gutter={16} align="middle">
+                        {selectedItemType.toLowerCase() === 'asset' && (
+                          <>
+                            <Col span={12}>
+                              <Form.Item
+                                name="asset_code"
+                                label="Asset Code"
+                                rules={[{ required: true, message: 'Asset Code is required' }]}
+                              >
+                                <Input placeholder="Enter Asset Code prefix/pattern" disabled={autoAsset} />
+                              </Form.Item>
+                            </Col>
+                            <Col span={12} style={{ display: 'flex', alignItems: 'center', paddingTop: '24px' }}>
+                              <Form.Item name="asset_code_auto" valuePropName="checked" label=" ">
+                                <Checkbox>Auto Generate Code</Checkbox>
+                              </Form.Item>
+                            </Col>
+                          </>
+                        )}
+                        {['consumable', 'consumables'].includes(selectedItemType.toLowerCase()) && (
+                          <>
+                            <Col span={12}>
+                              <Form.Item
+                                name="consumable_code"
+                                label="Consumable Code"
+                                rules={[{ required: true, message: 'Consumable Code is required' }]}
+                              >
+                                <Input placeholder="Enter Consumable Code prefix/pattern" disabled={autoConsumable} />
+                              </Form.Item>
+                            </Col>
+                            <Col span={12} style={{ display: 'flex', alignItems: 'center', paddingTop: '24px' }}>
+                              <Form.Item name="consumable_code_auto" valuePropName="checked" label=" ">
+                                <Checkbox>Auto Generate Code</Checkbox>
+                              </Form.Item>
+                            </Col>
+                          </>
+                        )}
+                      </Row>
+                    )}
 
                     <Row gutter={16}>
                       <Col span={12}>
@@ -938,27 +1045,71 @@ const ItemForm = () => {
                     </Row>
 
                     {isNew && (
-                      <Row gutter={16}>
-                        <Col span={12}>
-                          <Form.Item name="add_initial_qty" valuePropName="checked" initialValue={false} label=" ">
-                            <Checkbox>Add Initial Quantity</Checkbox>
-                          </Form.Item>
-                        </Col>
-                        {selectedAddInitialQty && (
-                          <Col span={12}>
-                            <Form.Item
-                              name="initial_quantity"
-                              label="Initial Quantity"
-                              rules={[
-                                { required: true, message: 'Initial quantity is required' },
-                                { type: 'number', min: 0.001, message: 'Quantity must be greater than zero' }
-                              ]}
-                            >
-                              <InputNumber min={0.001} precision={3} style={{ width: '100%' }} placeholder="Enter initial quantity" />
+                      <>
+                        <Row gutter={16}>
+                          <Col span={24}>
+                            <Form.Item name="add_initial_qty" valuePropName="checked" initialValue={false} label=" ">
+                              <Checkbox>Add Initial Quantity</Checkbox>
                             </Form.Item>
                           </Col>
+                        </Row>
+                        {selectedAddInitialQty && (
+                          <Row gutter={16}>
+                            <Col span={12}>
+                              <Form.Item
+                                name="initial_quantity"
+                                label="Initial Quantity"
+                                rules={[
+                                  { required: true, message: 'Initial quantity is required' },
+                                  { type: 'number', min: 0.001, message: 'Quantity must be greater than zero' }
+                                ]}
+                              >
+                                <InputNumber min={0.001} precision={3} style={{ width: '100%' }} placeholder="Enter initial quantity" />
+                              </Form.Item>
+                            </Col>
+                            <Col span={12}>
+                              <Form.Item
+                                name="initial_warehouse_id"
+                                label="Initial Warehouse"
+                                rules={[{ required: true, message: 'Warehouse is required' }]}
+                              >
+                                <Select
+                                  placeholder="Select Warehouse"
+                                  options={warehouses}
+                                  showSearch
+                                  optionFilterProp="label"
+                                />
+                              </Form.Item>
+                            </Col>
+                            <Col span={8}>
+                              <Form.Item
+                                name="initial_bin_code"
+                                label="Initial Bin Code"
+                                rules={[{ required: true, message: 'Bin code is required' }]}
+                              >
+                                <Input placeholder="Enter Bin (e.g. SYSTEM-DEFAULT)" />
+                              </Form.Item>
+                            </Col>
+                            <Col span={8}>
+                              <Form.Item
+                                name="initial_batch_number"
+                                label="Initial Batch Number"
+                                rules={[{ required: true, message: 'Batch number is required' }]}
+                              >
+                                <Input placeholder="Enter Batch (e.g. INITIAL-BATCH)" />
+                              </Form.Item>
+                            </Col>
+                            <Col span={8}>
+                              <Form.Item
+                                name="initial_batch_expiry"
+                                label="Initial Batch Expiry"
+                              >
+                                <DatePicker style={{ width: '100%' }} format="YYYY-MM-DD" placeholder="Select Expiry Date" />
+                              </Form.Item>
+                            </Col>
+                          </Row>
                         )}
-                      </Row>
+                      </>
                     )}
                   </>
                 ),

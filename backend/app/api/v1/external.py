@@ -248,3 +248,184 @@ async def get_indent_acknowledgements(
         }
         for ack in acks
     ]
+
+
+@router.get("/masters/warehouses")
+async def get_warehouses(
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_api_key_scope("masters:warehouses:read")),
+):
+    """Get all warehouses. Requires 'masters:warehouses:read' scope."""
+    from app.models.warehouse import Warehouse
+    result = await db.execute(select(Warehouse).where(Warehouse.is_active == True).limit(limit).offset(offset))
+    rows = result.scalars().all()
+    return [
+        {"id": w.id, "code": w.code, "name": w.name, "type": w.type, "is_active": w.is_active}
+        for w in rows
+    ]
+
+
+@router.get("/masters/packaging")
+async def get_packaging(
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_api_key_scope("masters:packaging:read")),
+):
+    """Get all packaging types. Requires 'masters:packaging:read' scope."""
+    from app.models.master import PackagingType
+    result = await db.execute(select(PackagingType).limit(limit).offset(offset))
+    rows = result.scalars().all()
+    return [
+        {"id": r.id, "name": r.name, "code": getattr(r, 'code', None), "is_active": getattr(r, 'is_active', True)}
+        for r in rows
+    ]
+
+
+@router.get("/masters/categories")
+async def get_categories(
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_api_key_scope("masters:categories:read")),
+):
+    """Get all item categories. Requires 'masters:categories:read' scope."""
+    from app.models.master import ItemCategory
+    result = await db.execute(select(ItemCategory).limit(limit).offset(offset))
+    rows = result.scalars().all()
+    return [
+        {"id": r.id, "name": r.name, "code": getattr(r, 'code', None), "is_active": getattr(r, 'is_active', True)}
+        for r in rows
+    ]
+
+
+@router.get("/masters/uom")
+async def get_uom(
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_api_key_scope("masters:uom:read")),
+):
+    """Get all units of measure. Requires 'masters:uom:read' scope."""
+    from app.models.master import UnitOfMeasure
+    result = await db.execute(select(UnitOfMeasure).limit(limit).offset(offset))
+    rows = result.scalars().all()
+    return [
+        {"id": r.id, "name": r.name, "symbol": getattr(r, 'symbol', None), "is_active": getattr(r, 'is_active', True)}
+        for r in rows
+    ]
+
+
+@router.get("/masters/brands")
+async def get_brands(
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_api_key_scope("masters:brands:read")),
+):
+    """Get all brands. Requires 'masters:brands:read' scope."""
+    from app.models.master import Brand
+    result = await db.execute(select(Brand).limit(limit).offset(offset))
+    rows = result.scalars().all()
+    return [
+        {"id": r.id, "name": r.name, "code": getattr(r, 'code', None), "is_active": getattr(r, 'is_active', True)}
+        for r in rows
+    ]
+
+
+@router.get("/masters/features")
+async def get_features(
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_api_key_scope("masters:features:read")),
+):
+    """Get all features. Requires 'masters:features:read' scope."""
+    from app.models.master import Feature
+    result = await db.execute(select(Feature).limit(limit).offset(offset))
+    rows = result.scalars().all()
+    return [
+        {"id": r.id, "name": r.name, "is_active": getattr(r, 'is_active', True)}
+        for r in rows
+    ]
+
+
+@router.get("/masters/item-types")
+async def get_item_types(
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_api_key_scope("masters:item-types:read")),
+):
+    """Get all item types. Requires 'masters:item-types:read' scope."""
+    from app.models.master import ItemType
+    result = await db.execute(select(ItemType).limit(limit).offset(offset))
+    rows = result.scalars().all()
+    return [
+        {"id": r.id, "name": r.name, "is_active": getattr(r, 'is_active', True)}
+        for r in rows
+    ]
+
+
+@router.get("/masters/attributes")
+async def get_attributes(
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_api_key_scope("masters:attributes:read")),
+):
+    """Get all item attributes. Requires 'masters:attributes:read' scope."""
+    from app.models.master import ItemAttribute
+    result = await db.execute(select(ItemAttribute).limit(limit).offset(offset))
+    rows = result.scalars().all()
+    return [
+        {"id": r.id, "name": r.name, "is_active": getattr(r, 'is_active', True)}
+        for r in rows
+    ]
+
+
+@router.get("/masters/users")
+async def get_users_external(
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_api_key_scope("masters:users:read")),
+):
+    """Get all users. Requires 'masters:users:read' scope."""
+    from app.models.user import User as _User
+    result = await db.execute(
+        select(_User.id, _User.username, _User.email, _User.is_active, _User.employee_id)
+        .limit(limit).offset(offset)
+    )
+    rows = result.all()
+    return [
+        {"id": r.id, "username": r.username, "email": r.email, "is_active": r.is_active, "employee_id": r.employee_id}
+        for r in rows
+    ]
+
+
+@router.get("/inventory/stock-ledger")
+async def get_stock_ledger(
+    limit: int = 100,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_api_key_scope("inventory:stock-ledger:read")),
+):
+    """Get stock ledger entries. Requires 'inventory:stock-ledger:read' scope."""
+    from app.models.stock import StockLedger
+    result = await db.execute(select(StockLedger).order_by(StockLedger.id.desc()).limit(limit).offset(offset))
+    rows = result.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "item_id": r.item_id,
+            "warehouse_id": r.warehouse_id,
+            "transaction_type": r.transaction_type,
+            "qty_in": float(r.qty_in or 0),
+            "qty_out": float(r.qty_out or 0),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in rows
+    ]

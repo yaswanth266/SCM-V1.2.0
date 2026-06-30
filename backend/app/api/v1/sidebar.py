@@ -123,8 +123,11 @@ _ROLE_KEYS = {
         'lms',
         'warehouse', 'warehouse-dashboard', 'warehouse-gate-entry', 'warehouse-purchase-returns',
         'warehouse-material-inward', 'warehouse-dispatch', 'warehouse-notifications',
+        'warehouse-material-issues',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-notifications',
-        'logistics', 'logistics-gate-entry',
+        'procurement-material-requests',
+        'logistics', 'logistics-gate-entry', 'logistics-dashboard', 'logistics-master',
+        'logistics-dispatch', 'logistics-consignments', 'logistics-rfq', 'logistics-so',
     },
     'store_keeper': {
         'lms',
@@ -133,6 +136,9 @@ _ROLE_KEYS = {
         'warehouse-material-issues', 'warehouse-material-inward',
         'warehouse-dispatch', 'warehouse-notifications',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-stock-transfer', 'inventory-notifications',
+        'procurement-material-requests',
+        'logistics', 'logistics-gate-entry', 'logistics-dashboard', 'logistics-master',
+        'logistics-dispatch', 'logistics-consignments', 'logistics-rfq', 'logistics-so',
     },
     'storekeeper': {
         'lms',
@@ -141,6 +147,9 @@ _ROLE_KEYS = {
         'warehouse-material-issues', 'warehouse-material-inward',
         'warehouse-dispatch', 'warehouse-notifications',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-stock-transfer', 'inventory-notifications',
+        'procurement-material-requests',
+        'logistics', 'logistics-gate-entry', 'logistics-dashboard', 'logistics-master',
+        'logistics-dispatch', 'logistics-consignments', 'logistics-rfq', 'logistics-so',
     },
     'quality_inspector': {
         'lms',

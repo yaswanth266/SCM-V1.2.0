@@ -160,6 +160,8 @@ class Item(Base):
     distributor = Column(String(255))
 
     feature_id = Column(BigInteger, ForeignKey("features.id"), nullable=True)
+    asset_code = Column(String(100), nullable=True)
+    consumable_code = Column(String(100), nullable=True)
     ownership = Column(Enum("IT", "HR", "OP", "ADM", "FA", "FL", name="item_ownership"), nullable=True)
     dosage_form = Column(String(100))
     valuation_method = Column(Enum("fifo", "fefo", "lifo", "weighted_average", name="valuation_method_enum"), default="fifo")

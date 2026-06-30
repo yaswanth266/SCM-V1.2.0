@@ -145,6 +145,7 @@ class AckItemCreate(BaseModel):
     item_id: int
     received_qty: Decimal
     remarks: Optional[str] = None
+    serial_numbers: Optional[List[str]] = None
 
 class ScannedBarcode(BaseModel):
     value: str
@@ -172,6 +173,7 @@ class AckItemResponse(BaseModel):
     item_name: Optional[str] = None
     uom: Optional[str] = None
     approved_qty: Optional[Decimal] = None
+    serial_numbers: Optional[List[str]] = None
     model_config = {"from_attributes": True}
 
 class IndentAcknowledgementResponse(BaseModel):
