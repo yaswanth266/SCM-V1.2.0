@@ -64,6 +64,7 @@ const IndentForm = () => {
   const [projects, setProjects] = useState([]);
   const [uoms, setUoms] = useState([]);
   const [bomOptions, setBomOptions] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
   const [bomLoading, setBomLoading] = useState(false);
   const [bomLoadMode, setBomLoadMode] = useState('normal');
   const [originalBomComponents, setOriginalBomComponents] = useState([]);
@@ -74,12 +75,13 @@ const IndentForm = () => {
     try {
       const bomParams = { page_size: 200, is_active: true, position_id: user?.position_id || -1 };
 
-      const [deptRes, whRes, projRes, uomRes, bomRes] = await Promise.allSettled([
+      const [deptRes, whRes, projRes, uomRes, bomRes, vehRes] = await Promise.allSettled([
         api.get('/masters/departments', { params: { page_size: 200 } }),
         api.get('/masters/warehouses', { params: { page_size: 200, user_id: uid } }),
         api.get('/masters/projects', { params: { page_size: 200, user_id: uid } }),
         api.get('/masters/uom', { params: { page_size: 200 } }),
         api.get('/masters/boms', { params: bomParams }),
+        api.get('/masters/vehicles', { params: { is_active: true } }),
       ]);
       if (deptRes.status === 'fulfilled') {
         const d = deptRes.value.data;
@@ -137,6 +139,9 @@ const IndentForm = () => {
               project_id: bom.project_id,
             }))
         );
+      }
+      if (vehRes.status === 'fulfilled') {
+        setVehicles(vehRes.value.data || []);
       }
     } catch {
       // silent
@@ -272,6 +277,15 @@ const IndentForm = () => {
     }
   };
 
+  const handleVehicleChange = (val) => {
+    const matched = vehicles.find((v) => v.vehicle_code === val);
+    if (matched) {
+      form.setFieldsValue({ vehicle_number: matched.vehicle_number });
+    } else {
+      form.setFieldsValue({ vehicle_number: '' });
+    }
+  };
+
   const handleSubmit = async (submitForApproval = false) => {
     // BUG-FE-IND-001 — guard against double-fire. The button's `loading`
     // prop disables it visually, but a quick double-click can still queue
@@ -330,6 +344,8 @@ const IndentForm = () => {
         required_date: formatDateForAPI(values.required_date),
         department: values.department || null,
         project_id: values.project_id || null,
+        vehicle_code: values.vehicle_code || null,
+        vehicle_number: values.vehicle_number || null,
         remarks: values.remarks || '',
         items: validItems.map((item) => ({
           item_id: item.item_id,
@@ -511,6 +527,8 @@ const IndentForm = () => {
                 ? `${indent.source_bom_code || ''}${indent.source_bom_code && indent.source_bom_name ? ' - ' : ''}${indent.source_bom_name || ''}`
                 : '-'}
             </Descriptions.Item>
+            <Descriptions.Item label="Vehicle Code">{indent.vehicle_code || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Vehicle Number">{indent.vehicle_number || '-'}</Descriptions.Item>
             <Descriptions.Item label="Status"><StatusTag status={indent.status} /></Descriptions.Item>
             <Descriptions.Item label="Created By">{indent.created_by_name || indent.requested_by_name || indent.raised_by_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="Raising Position">
@@ -730,6 +748,26 @@ const IndentForm = () => {
                   format={DATE_FORMAT} 
                   disabledDate={(current) => current && current.isBefore(dayjs(), 'day')}
                 />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col xs={24} sm={12} md={8}>
+              <Form.Item name="vehicle_code" label="Vehicle Code">
+                <Select
+                  placeholder="Select vehicle code"
+                  allowClear
+                  showSearch
+                  optionFilterProp="label"
+                  onChange={handleVehicleChange}
+                  options={vehicles.map((v) => ({ label: v.vehicle_code, value: v.vehicle_code }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={8}>
+              <Form.Item name="vehicle_number" label="Vehicle Number">
+                <Input placeholder="Auto-populated from code" disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
               </Form.Item>
             </Col>
           </Row>

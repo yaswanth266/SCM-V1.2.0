@@ -14,3 +14,6 @@ from app.models.settings_master import (
     UserGroup, UserGroupMember, UserGroupPermission, UserItemPermission,
     Office, Position, Employee
 )
+from app.models.vehicles import Vehicle
+from app.models.project_templates import ProjectIndentTemplate, ProjectIndentTemplateItem
+

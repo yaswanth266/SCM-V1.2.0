@@ -22,7 +22,10 @@ class Indent(Base):
     approved_date = Column(DateTime)
     remarks = Column(Text)
     position_id = Column(BigInteger, ForeignKey("positions.id"), nullable=True)
+    vehicle_code = Column(String(50), nullable=True)
+    vehicle_number = Column(String(50), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     project = relationship("Project")

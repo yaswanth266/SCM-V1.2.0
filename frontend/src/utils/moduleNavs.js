@@ -52,8 +52,12 @@ export const MODULE_NAVS = {
           { label: 'Attribute Mapping', path: '/inventory/masters/category-attribute-mapping' },
           { label: 'Specs', path: '/inventory/masters/specs' },
           { label: 'BOM', path: '/inventory/masters/boms' },
-          { label: 'Price Lists', path: '/inventory/masters/price-lists' }
+          { label: 'Price Lists', path: '/inventory/masters/price-lists' },
+          { label: 'AP 104 DP / Consumables - Indent', path: '/inventory/masters/ap104-consumables' },
+          { label: 'AP 104 DP Install - Indent', path: '/inventory/masters/ap104-install' },
+          { label: 'Vehicles', path: '/inventory/masters/vehicles' }
         ]
+
       },
       {
         label: 'Transactions',
@@ -108,8 +112,11 @@ export const MODULE_NAVS = {
         children: [
           { label: 'List', path: '/indent/indents' },
           { label: 'Board', path: '/indent/indents/kanban', hideForRoles: ['field_staff', 'field_supervisor'] },
+          { label: 'AP 104 DP / Consumables', path: '/indent/ap104-consumables' },
+          { label: 'AP 104 DP Install', path: '/indent/ap104-install' },
           { label: 'Acknowledgement', path: '/indent/acknowledgement' }
         ]
+
       },
       { label: 'Reports', path: '/indent/reports' },
       { label: 'Notifications', path: '/indent/notifications' }

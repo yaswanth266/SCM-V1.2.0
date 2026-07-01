@@ -125,6 +125,16 @@ class PackageAcknowledgeIn(BaseModel):
     items: List[PackageItemAck]
 
 
+class ConsignmentDeliverPayload(BaseModel):
+    receiver_signature_url: Optional[str] = None
+    photos: Optional[List[str]] = None
+    remarks: Optional[str] = None
+    acknowledged_by_name: Optional[str] = None
+    acknowledged_by_designation: Optional[str] = None
+    acknowledged_by_phone: Optional[str] = None
+    acknowledged_by_employee_code: Optional[str] = None
+
+
 class StoreItemIn(BaseModel):
     package_item_id: int
     destination_bin_id: int
@@ -271,6 +281,8 @@ def _pkg_response(pkg: ConsignmentPackage, include_items: bool = True) -> dict:
         "packaging_condition_on_receipt": pkg.packaging_condition_on_receipt,
         "seal_intact_on_receipt": pkg.seal_intact_on_receipt,
         "receipt_remarks": pkg.receipt_remarks,
+        "receipt_photos": pkg.receipt_photos,
+        "receipt_signature_url": pkg.receipt_signature_url,
     }
     if include_items and pkg.items is not None:
         d["items"] = [_pkg_item_response(i) for i in pkg.items]
@@ -359,6 +371,9 @@ def _con_response(con: Consignment, packages: list) -> dict:
         "packed_at": con.packed_at,
         "dispatched_at": con.dispatched_at,
         "received_at": con.received_at,
+        "receipt_signature_url": con.receipt_signature_url,
+        "receipt_photos": con.receipt_photos,
+        "receipt_remarks": con.receipt_remarks,
         "created_at": con.created_at,
     }
 
@@ -1234,6 +1249,7 @@ async def dispatch_consignment(
 @router.post("/{consignment_id}/deliver", status_code=200)
 async def deliver_consignment(
     consignment_id: int,
+    payload: Optional[ConsignmentDeliverPayload] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1250,6 +1266,17 @@ async def deliver_consignment(
         
     con.status = "CONSIGNMENT_RECEIVED"
     con.received_at = datetime.now(timezone.utc)
+
+    if payload:
+        con.receipt_signature_url = payload.receiver_signature_url
+        con.receipt_photos = payload.photos
+        con.receipt_remarks = payload.remarks
+        if payload.acknowledged_by_name:
+            con.receiver_name = payload.acknowledged_by_name
+        if payload.acknowledged_by_employee_code:
+            con.receiver_employee_code = payload.acknowledged_by_employee_code
+        if payload.acknowledged_by_designation:
+            con.receiver_position_code = payload.acknowledged_by_designation
     
     for pkg in con.packages:
         if pkg.status in ("PACKED", "IN_TRANSIT"):

@@ -1920,6 +1920,49 @@ export default function LogisticsDispatch() {
                   boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)',
                 }}
               >
+                {(() => {
+                  const conSignature = linkedConsignment.receipt_signature_url;
+                  const conPhotos = linkedConsignment.receipt_photos || [];
+                  const allReceiptSignatures = Array.from(new Set([
+                    conSignature,
+                    ...packages.map(p => p.receipt_signature_url)
+                  ].filter(Boolean)));
+                  const allReceiptPhotos = Array.from(new Set([
+                    ...conPhotos,
+                    ...packages.flatMap(p => p.receipt_photos || [])
+                  ].filter(Boolean)));
+                  if (allReceiptSignatures.length === 0 && allReceiptPhotos.length === 0) return null;
+                  return (
+                    <div style={{ 
+                      background: '#f8fafc', 
+                      border: '1px solid #cbd5e1', 
+                      borderRadius: '8px', 
+                      padding: '12px 16px', 
+                      margin: '16px', 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '8px' 
+                    }}>
+                      <div style={{ fontWeight: 700, fontSize: '13px', color: '#1e293b' }}>
+                        Consignment Delivery Evidence Summary (All Packages)
+                      </div>
+                      <Space size="middle" wrap>
+                        {allReceiptSignatures.map((sig, idx) => (
+                          <div key={`sig-${idx}`} style={{ display: 'inline-block', textAlign: 'center' }}>
+                            <span style={{ display: 'block', fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>Signature #{idx + 1}</span>
+                            <Image src={sig} width={60} height={40} style={{ objectFit: 'contain', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff' }} />
+                          </div>
+                        ))}
+                        {allReceiptPhotos.map((photo, idx) => (
+                          <div key={`photo-${idx}`} style={{ display: 'inline-block', textAlign: 'center' }}>
+                            <span style={{ display: 'block', fontSize: '10px', color: '#64748b', marginBottom: '4px' }}>Photo #{idx + 1}</span>
+                            <Image src={photo} width={60} height={40} style={{ objectFit: 'cover', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff' }} />
+                          </div>
+                        ))}
+                      </Space>
+                    </div>
+                  );
+                })()}
                 <div style={{ maxHeight: '400px', overflowY: 'auto', paddingRight: '8px' }}>
                   {parentsList.length > 0 && (
                     <div style={{ marginBottom: unassigned.length > 0 ? '24px' : '0' }}>
@@ -1968,6 +2011,38 @@ export default function LogisticsDispatch() {
                                     style={{ marginBottom: '8px', border: 'none' }}
                                   >
                                     <div style={{ padding: '8px 12px 8px 24px', borderLeft: '2px dashed #e2e8f0', marginLeft: '16px' }}>
+                                      {(pkg.receipt_signature_url || (pkg.receipt_photos && pkg.receipt_photos.length > 0)) && (
+                                        <div style={{ 
+                                          background: '#f8fafc', 
+                                          border: '1px dashed #cbd5e1', 
+                                          borderRadius: '6px', 
+                                          padding: '8px 12px', 
+                                          marginBottom: '10px',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'space-between',
+                                          flexWrap: 'wrap',
+                                          gap: '8px'
+                                        }}>
+                                          <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>
+                                            Package-wise Receipt Evidence:
+                                          </div>
+                                          <Space size="middle" wrap>
+                                            {pkg.receipt_signature_url && (
+                                              <div style={{ textAlign: 'center' }}>
+                                                <span style={{ display: 'block', fontSize: '9px', color: '#64748b' }}>Signature</span>
+                                                <Image src={pkg.receipt_signature_url} width={50} height={35} style={{ objectFit: 'contain', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff' }} />
+                                              </div>
+                                            )}
+                                            {(pkg.receipt_photos || []).map((photo, pIdx) => (
+                                              <div key={pIdx} style={{ textAlign: 'center' }}>
+                                                <span style={{ display: 'block', fontSize: '9px', color: '#64748b' }}>Photo {pIdx + 1}</span>
+                                                <Image src={photo} width={50} height={35} style={{ objectFit: 'cover', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff' }} />
+                                              </div>
+                                            ))}
+                                          </Space>
+                                        </div>
+                                      )}
                                       {pkg.items && pkg.items.length > 0 && (
                                         <Table
                                           dataSource={pkg.items}
@@ -2057,6 +2132,38 @@ export default function LogisticsDispatch() {
                             style={{ marginBottom: '12px', border: 'none' }}
                           >
                             <div style={{ padding: '0 12px 12px 36px', borderLeft: '2px dashed #cbd5e1', marginLeft: '24px' }}>
+                              {(pkg.receipt_signature_url || (pkg.receipt_photos && pkg.receipt_photos.length > 0)) && (
+                                        <div style={{ 
+                                          background: '#f8fafc', 
+                                          border: '1px dashed #cbd5e1', 
+                                          borderRadius: '6px', 
+                                          padding: '8px 12px', 
+                                          marginBottom: '10px',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          justifyContent: 'space-between',
+                                          flexWrap: 'wrap',
+                                          gap: '8px'
+                                        }}>
+                                          <div style={{ fontSize: '12px', fontWeight: 600, color: '#475569' }}>
+                                            Package-wise Receipt Evidence:
+                                          </div>
+                                          <Space size="middle" wrap>
+                                            {pkg.receipt_signature_url && (
+                                              <div style={{ textAlign: 'center' }}>
+                                                <span style={{ display: 'block', fontSize: '9px', color: '#64748b' }}>Signature</span>
+                                                <Image src={pkg.receipt_signature_url} width={50} height={35} style={{ objectFit: 'contain', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff' }} />
+                                              </div>
+                                            )}
+                                            {(pkg.receipt_photos || []).map((photo, pIdx) => (
+                                              <div key={pIdx} style={{ textAlign: 'center' }}>
+                                                <span style={{ display: 'block', fontSize: '9px', color: '#64748b' }}>Photo {pIdx + 1}</span>
+                                                <Image src={photo} width={50} height={35} style={{ objectFit: 'cover', borderRadius: '4px', border: '1px solid #cbd5e1', background: '#fff' }} />
+                                              </div>
+                                            ))}
+                                          </Space>
+                                        </div>
+                                      )}
                               {pkg.items && pkg.items.length > 0 && (
                                 <Table
                                   dataSource={pkg.items}

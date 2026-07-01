@@ -12,7 +12,7 @@ from app.api.v1 import (
     rate_contracts, cycle_count, landed_cost, lms, sidebar, packaging, inward, dispatch, api_keys, external,
     logistics, carrier_auth, carrier_portal,
     vendor_auth, vendor_portal,
-    consignment, bulk_upload,
+    consignment, bulk_upload, vehicles, project_templates,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -34,7 +34,10 @@ api_router.include_router(bulk_upload.router, prefix="/inventory", tags=["Invent
 api_router.include_router(indent.router, prefix="/indents", tags=["Indent Management"])
 api_router.include_router(indent.router, prefix="/indent/indents", tags=["Indent Management"])
 api_router.include_router(indent.ack_router, prefix="/indent", tags=["Indent Acknowledgement"])
+api_router.include_router(vehicles.router, prefix="/masters/vehicles", tags=["Vehicle Master"])
+api_router.include_router(project_templates.router, prefix="/masters/project-indent-templates", tags=["Project Indent Templates"])
 api_router.include_router(consumption.router, prefix="/consumption", tags=["Consumption"])
+
 
 api_router.include_router(approval.router, prefix="/approvals", tags=["Approval Workflow"])
 api_router.include_router(rules.router, prefix="/automation", tags=["Business Rules Engine"])

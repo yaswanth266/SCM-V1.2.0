@@ -386,6 +386,9 @@ async def list_indents(
                 if item.item:
                     data["items"][i]["item_name"] = item.item.name
                     data["items"][i]["item_code"] = item.item.item_code
+                    data["items"][i]["item_type"] = item.item.item_type
+                    data["items"][i]["has_serial"] = bool(getattr(item.item, "has_serial", False))
+
                 if item.uom:
                     data["items"][i]["uom"] = item.uom.name
         response_items.append(data)
@@ -612,7 +615,10 @@ async def get_indent(
             if item.item:
                 data["items"][i]["item_name"] = item.item.name
                 data["items"][i]["item_code"] = item.item.item_code
+                data["items"][i]["item_type"] = item.item.item_type
+                data["items"][i]["has_serial"] = bool(getattr(item.item, "has_serial", False))
                 # Enrich with master flags so MI prefill can decide whether
+
                 # batch is mandatory and what rate to seed.
                 data["items"][i]["has_batch"] = bool(getattr(item.item, "has_batch", False))
                 pp = getattr(item.item, "purchase_price", None)
@@ -798,7 +804,10 @@ async def create_indent(
         remarks=payload.remarks,
         raised_by=current_user.id,
         position_id=user_position_id,
+        vehicle_code=payload.vehicle_code,
+        vehicle_number=payload.vehicle_number,
     )
+
     db.add(indent)
     await db.flush()
 

@@ -28,6 +28,9 @@ class IndentCreate(BaseModel):
     indent_date: Optional[date] = None
     required_date: Optional[date] = None
     department: Optional[str] = None
+    vehicle_code: Optional[str] = None
+    vehicle_number: Optional[str] = None
+
     # BUG-IND-028 — `department_id` is a foreign key to the departments
     # table; previously typed as Optional[str] which silently accepted
     # garbage like "Cardiology" (the department NAME) and stored it where
@@ -91,7 +94,10 @@ class IndentUpdate(BaseModel):
     required_date: Optional[date] = None
     indent_type: Optional[str] = None
     remarks: Optional[str] = None
+    vehicle_code: Optional[str] = None
+    vehicle_number: Optional[str] = None
     # When provided, replaces all existing items on the indent. Only allowed
+
     # while the indent is still in draft status (handler enforces).
     items: Optional[List[IndentItemCreate]] = None
 
@@ -111,6 +117,9 @@ class IndentItemResponse(BaseModel):
     has_batch: Optional[bool] = None
     rate: Optional[Decimal] = None
     purchase_price: Optional[Decimal] = None
+    item_type: Optional[str] = None
+    has_serial: Optional[bool] = None
+
     model_config = {"from_attributes": True}
 
 class IndentResponse(BaseModel):
@@ -130,7 +139,10 @@ class IndentResponse(BaseModel):
     approved_by: Optional[int] = None
     approved_date: Optional[datetime] = None
     remarks: Optional[str] = None
+    vehicle_code: Optional[str] = None
+    vehicle_number: Optional[str] = None
     position_id: Optional[int] = None
+
     position_name: Optional[str] = None
     position_code: Optional[str] = None
     created_at: Optional[datetime] = None

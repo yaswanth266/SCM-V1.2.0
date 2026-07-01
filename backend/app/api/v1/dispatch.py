@@ -296,6 +296,33 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
             mapped_st = st_map.get(mdo.status, "in_transit")
             
             if not existing:
+                # Try to get POD details from consignment if already present
+                receiver_sig_url = None
+                deliv_photo_urls = None
+                deliv_remarks = None
+                deliv_ack_by_name = None
+                deliv_ack_by_phone = None
+                try:
+                    from app.models.consignment import Consignment
+                    con_stmt = select(Consignment).where(Consignment.mdo_id == mdo.id).limit(1)
+                    con_res = await db.execute(con_stmt)
+                    linked_con = con_res.scalar_one_or_none()
+                    if linked_con:
+                        receiver_sig_url = linked_con.receipt_signature_url
+                        if linked_con.receipt_photos:
+                            deliv_photo_urls = {"photo": linked_con.receipt_photos[0]} if len(linked_con.receipt_photos) > 0 else None
+                        deliv_remarks = linked_con.receipt_remarks
+                        deliv_ack_by_name = linked_con.receiver_name
+                        if linked_con.destination_user_id:
+                            from app.models.user import User
+                            user_stmt = select(User).where(User.id == linked_con.destination_user_id).limit(1)
+                            user_res = await db.execute(user_stmt)
+                            linked_user = user_res.scalar_one_or_none()
+                            if linked_user and linked_user.phone:
+                                deliv_ack_by_phone = linked_user.phone
+                except Exception:
+                    pass
+
                 # Create standard DispatchOrder
                 disp = DispatchOrder(
                     dispatch_number=mdo.mdo_number,
@@ -309,7 +336,12 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
                     material_issue_id=mdo.material_issue_id,
                     dispatch_date=mdo.order_date,
                     expected_delivery_date=mdo.required_delivery_date,
-                    delivery_acknowledged=(mdo.status == "ACKNOWLEDGED")
+                    delivery_acknowledged=(mdo.status in ("ACKNOWLEDGED", "COMPLETED", "CONSIGNMENT_RECEIVED", "PARTIALLY_RECEIVED")),
+                    receiver_signature_url=receiver_sig_url,
+                    delivery_photo_urls=deliv_photo_urls,
+                    delivery_remarks=deliv_remarks,
+                    delivery_acknowledged_by_name=deliv_ack_by_name,
+                    delivery_acknowledged_by_phone=deliv_ack_by_phone
                 )
                 db.add(disp)
                 await db.flush()
@@ -359,12 +391,38 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
                 # Sync dispatch_mode from MDO so acknowledge_delivery picks the right transit warehouse
                 if mdo.dispatch_mode and existing.dispatch_mode != mdo.dispatch_mode:
                     existing.dispatch_mode = mdo.dispatch_mode
+
+                # Sync POD delivery evidence from linked consignment
+                try:
+                    from app.models.consignment import Consignment
+                    con_stmt = select(Consignment).where(Consignment.mdo_id == mdo.id).limit(1)
+                    con_res = await db.execute(con_stmt)
+                    linked_con = con_res.scalar_one_or_none()
+                    if linked_con:
+                        if linked_con.receipt_signature_url:
+                            existing.receiver_signature_url = linked_con.receipt_signature_url
+                        if linked_con.receipt_photos:
+                            existing.delivery_photo_urls = {"photo": linked_con.receipt_photos[0]} if len(linked_con.receipt_photos) > 0 else None
+                        if linked_con.receipt_remarks:
+                            existing.delivery_remarks = linked_con.receipt_remarks
+                        if linked_con.receiver_name:
+                            existing.delivery_acknowledged_by_name = linked_con.receiver_name
+                        if linked_con.destination_user_id:
+                            from app.models.user import User
+                            user_stmt = select(User).where(User.id == linked_con.destination_user_id).limit(1)
+                            user_res = await db.execute(user_stmt)
+                            linked_user = user_res.scalar_one_or_none()
+                            if linked_user and linked_user.phone:
+                                existing.delivery_acknowledged_by_phone = linked_user.phone
+                except Exception:
+                    pass
+
                 db.add(existing)
                 # Keep status in sync in case status changed
                 if existing.status != mapped_st:
                     old_status = existing.status
                     existing.status = mapped_st
-                    existing.delivery_acknowledged = (mdo.status == "ACKNOWLEDGED")
+                    existing.delivery_acknowledged = (mdo.status in ("ACKNOWLEDGED", "COMPLETED", "CONSIGNMENT_RECEIVED", "PARTIALLY_RECEIVED"))
                     await db.flush()
  
                     # Trigger stock deduction if transitioning to dispatched, in_transit, delivered, acknowledged, consignment_received, or partially_acknowledged

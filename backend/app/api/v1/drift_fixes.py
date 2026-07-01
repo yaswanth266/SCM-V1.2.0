@@ -632,7 +632,7 @@ async def stock_balance_breakdown(
                 consumable_codes_map[key].append(act_consumable_code)
 
     items = []
-    items = []
+    should_commit = False
     for r in rows:
         is_cen = r.warehouse_id in central_wh_ids
         key = (r.warehouse_id, r.bin_id if is_cen else None, r.batch_id if is_cen else None)
@@ -646,11 +646,26 @@ async def stock_balance_breakdown(
             qty_int = int(r.total_qty)
             if qty_int > 0:
                 from app.services.asset_service import generate_asset_code
+                from app.models.warehouse import SerialNumber as DB_SerialNumber
                 for i in range(1, qty_int + 1):
                     if i > 1000:
                         break
                     v_sn = f"V{i}"
                     v_code = generate_asset_code(v_sn, r.item.item_code)
+                    
+                    new_sn = DB_SerialNumber(
+                        item_id=r.item_id,
+                        serial_number=v_sn,
+                        batch_id=r.batch_id,
+                        status="available",
+                        warehouse_id=r.warehouse_id,
+                        bin_id=r.bin_id,
+                        asset_code=v_code if r.item.item_type == "asset" else None,
+                        consumable_code=v_code if r.item.item_type == "consumable" else None
+                    )
+                    db.add(new_sn)
+                    should_commit = True
+                    
                     sns.append(v_sn)
                     if r.item.item_type == "asset":
                         acs.append(v_code)
@@ -715,6 +730,8 @@ async def stock_balance_breakdown(
             
         items.append(data)
         
+    if should_commit:
+        await db.commit()
     return {"items": items}
 
 

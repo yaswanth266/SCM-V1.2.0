@@ -14,7 +14,11 @@ from app.models.master import Item, ItemCategory, UOM
 from app.models.warehouse import Warehouse, Batch
 from app.utils.dependencies import get_current_user, require_permission
 from app.services.item_coding import generate_item_code, ORG_PREFIX_DEFAULT
-from app.api.v1.inventory import _item_readable_code
+from app.api.v1.inventory import (
+    _item_readable_code, _generate_category_short_code, _category_level,
+    _category_full_code, _unique_category_code, _category_readable_code,
+    _readable_token
+)
 from app.services.stock_service import post_stock_ledger
 from app.api.v1.warehouse import resolve_or_create_bin
 
@@ -167,6 +171,12 @@ async def _bulk_upload_items_impl(
     
     processed_names_in_file = set()
     
+    # Pools for simulated/mock entities generated during the validation pass.
+    # Stored as dictionaries with simulated negative IDs.
+    simulated_uoms = {}        # key: uom_str.lower()
+    simulated_categories = {}  # key: (parent_id, name.lower())
+    simulated_warehouses = {}  # key: wh_str.lower()
+
     # Parse rows
     rows_to_insert = []
     
@@ -207,37 +217,93 @@ async def _bulk_upload_items_impl(
                 row_errors.append(f"Item with name '{name}' already exists in database.")
             processed_names_in_file.add(name_lower)
 
-        # 2. Category Hierarchy Resolution
+        # 2. Category Hierarchy Resolution & Simulation
         resolved_category_id = None
         if cat_l1 and cat_l2 and cat_l3:
+            # Resolve Level 1
             l1_cat = cats_by_name.get(cat_l1.lower())
             if not l1_cat:
-                row_errors.append(f"Category Level 1 '{cat_l1}' not found or inactive.")
-            else:
-                l2_cat = None
+                l1_cat = simulated_categories.get((None, cat_l1.lower()))
+            if not l1_cat:
+                # Create mock Level 1 category mapping
+                mock_id = -len(simulated_categories) - 1
+                l1_cat = {
+                    "id": mock_id,
+                    "parent_id": None,
+                    "name": cat_l1,
+                    "level": 1,
+                    "short_code": f"{10 + abs(mock_id) % 90}",
+                    "full_code": f"{10 + abs(mock_id) % 90}",
+                    "code": f"CAT-{cat_l1.upper().replace(' ', '-')[:10]}"
+                }
+                simulated_categories[(None, cat_l1.lower())] = l1_cat
+
+            # Resolve Level 2
+            l2_cat = None
+            parent1_id = l1_cat["id"] if isinstance(l1_cat, dict) else l1_cat.id
+            if parent1_id > 0:
+                # Check DB categories
                 for c in all_categories:
-                    if c.name and c.name.strip().lower() == cat_l2.lower() and c.parent_id == l1_cat.id:
+                    if c.name and c.name.strip().lower() == cat_l2.lower() and c.parent_id == parent1_id:
                         l2_cat = c
                         break
-                if not l2_cat:
-                    row_errors.append(f"Category Level 2 '{cat_l2}' not found under Level 1 '{cat_l1}'.")
-                else:
-                    l3_cat = None
-                    for c in all_categories:
-                        if c.name and c.name.strip().lower() == cat_l3.lower() and c.parent_id == l2_cat.id:
-                            l3_cat = c
-                            break
-                    if not l3_cat:
-                        row_errors.append(f"Category Level 3 '{cat_l3}' not found under Level 2 '{cat_l2}'.")
-                    else:
-                        resolved_category_id = l3_cat.id
+            if not l2_cat:
+                l2_cat = simulated_categories.get((parent1_id, cat_l2.lower()))
+            if not l2_cat:
+                mock_id = -len(simulated_categories) - 1
+                l2_cat = {
+                    "id": mock_id,
+                    "parent_id": parent1_id,
+                    "name": cat_l2,
+                    "level": 2,
+                    "short_code": f"{10 + abs(mock_id) % 90}",
+                    "full_code": f"{(l1_cat['full_code'] if isinstance(l1_cat, dict) else l1_cat.full_code)}{10 + abs(mock_id) % 90}",
+                    "code": f"CAT-{cat_l2.upper().replace(' ', '-')[:10]}"
+                }
+                simulated_categories[(parent1_id, cat_l2.lower())] = l2_cat
 
-        # 3. UOM Resolution
+            # Resolve Level 3
+            l3_cat = None
+            parent2_id = l2_cat["id"] if isinstance(l2_cat, dict) else l2_cat.id
+            if parent2_id > 0:
+                # Check DB categories
+                for c in all_categories:
+                    if c.name and c.name.strip().lower() == cat_l3.lower() and c.parent_id == parent2_id:
+                        l3_cat = c
+                        break
+            if not l3_cat:
+                l3_cat = simulated_categories.get((parent2_id, cat_l3.lower()))
+            if not l3_cat:
+                mock_id = -len(simulated_categories) - 1
+                l3_cat = {
+                    "id": mock_id,
+                    "parent_id": parent2_id,
+                    "name": cat_l3,
+                    "level": 3,
+                    "short_code": f"{10 + abs(mock_id) % 90}",
+                    "full_code": f"{(l2_cat['full_code'] if isinstance(l2_cat, dict) else l2_cat.full_code)}{10 + abs(mock_id) % 90}",
+                    "code": f"CAT-{cat_l3.upper().replace(' ', '-')[:10]}"
+                }
+                simulated_categories[(parent2_id, cat_l3.lower())] = l3_cat
+
+            resolved_category_id = l3_cat["id"] if isinstance(l3_cat, dict) else l3_cat.id
+
+        # 3. UOM Resolution & Simulation
         resolved_uom = None
         if uom_str:
             resolved_uom = uoms_by_name.get(uom_str.lower())
             if not resolved_uom:
-                row_errors.append(f"UOM '{uom_str}' not found or inactive.")
+                resolved_uom = simulated_uoms.get(uom_str.lower())
+            if not resolved_uom:
+                # Create mock UOM mapping
+                mock_id = -len(simulated_uoms) - 1
+                resolved_uom = {
+                    "id": mock_id,
+                    "name": uom_str,
+                    "abbreviation": uom_str[:10],
+                    "is_active": True
+                }
+                simulated_uoms[uom_str.lower()] = resolved_uom
 
         # 4. Decimal and number validations
         purchase_price = clean_decimal(cleaned_row.get("purchase_price"))
@@ -268,9 +334,19 @@ async def _bulk_upload_items_impl(
             else:
                 wh_obj = whs_by_name.get(wh_str.lower())
                 if not wh_obj:
-                    row_errors.append(f"Initial warehouse '{wh_str}' not found or inactive.")
-                else:
-                    initial_warehouse_id = wh_obj.id
+                    wh_obj = simulated_warehouses.get(wh_str.lower())
+                if not wh_obj:
+                    # Create mock Warehouse mapping
+                    mock_id = -len(simulated_warehouses) - 1
+                    wh_obj = {
+                        "id": mock_id,
+                        "name": wh_str,
+                        "code": f"WH-{wh_str.upper().replace(' ', '-')[:20]}",
+                        "is_active": True
+                    }
+                    simulated_warehouses[wh_str.lower()] = wh_obj
+                
+                initial_warehouse_id = wh_obj["id"] if isinstance(wh_obj, dict) else wh_obj.id
 
             if (cleaned_row.get("initial_batch_expiry") or "").strip() and not initial_expiry_date:
                 row_errors.append("Invalid initial_batch_expiry format. Use YYYY-MM-DD.")
@@ -290,8 +366,12 @@ async def _bulk_upload_items_impl(
                 "name": name,
                 "description": (cleaned_row.get("description") or "").strip() or None,
                 "item_type": item_type,
+                "category_l1": cat_l1,
+                "category_l2": cat_l2,
+                "category_l3": cat_l3,
                 "category_id": resolved_category_id,
-                "primary_uom_id": resolved_uom.id if resolved_uom else None,
+                "primary_uom_str": uom_str,
+                "primary_uom_id": resolved_uom["id"] if isinstance(resolved_uom, dict) else resolved_uom.id,
                 "purchase_price": purchase_price,
                 "selling_price": selling_price,
                 "mrp": mrp,
@@ -305,6 +385,7 @@ async def _bulk_upload_items_impl(
                 "dosage_form": (cleaned_row.get("dosage_form") or "").strip() or None,
                 "valuation_method": (cleaned_row.get("valuation_method") or "fifo").strip().lower(),
                 "initial_quantity": initial_qty,
+                "initial_warehouse_str": (cleaned_row.get("initial_warehouse") or "").strip() or None,
                 "initial_warehouse_id": initial_warehouse_id,
                 "initial_bin_code": initial_bin_code,
                 "initial_batch_number": initial_batch_number,
@@ -341,16 +422,136 @@ async def _bulk_upload_items_impl(
 
     # Insert items
     created_items = []
+    
+    # Caches of newly-created DB records during the actual insertion pass
+    db_uom_ids = {}        # key: uom_str.lower() -> int (database UOM id)
+    db_category_ids = {}   # key: (parent_id, name.lower()) -> int (database Category id)
+    db_warehouse_ids = {}  # key: wh_name.lower() -> int (database Warehouse id)
+
     try:
         for r_data in rows_to_insert:
+            # 1. Resolve & Auto-create UOM if missing
+            uom_key = r_data["primary_uom_str"].lower()
+            if uom_key not in db_uom_ids:
+                uom_db = (await db.execute(select(UOM).where(func.lower(UOM.name) == uom_key))).scalar_one_or_none()
+                if not uom_db:
+                    uom_db = UOM(
+                        name=r_data["primary_uom_str"],
+                        abbreviation=r_data["primary_uom_str"][:10],
+                        is_active=True
+                    )
+                    db.add(uom_db)
+                    await db.flush()
+                db_uom_ids[uom_key] = uom_db.id
+            primary_uom_id = db_uom_ids[uom_key]
+
+            # 2. Resolve & Auto-create Category Level 1, 2, 3 if missing
+            cat1_key = (None, r_data["category_l1"].lower())
+            if cat1_key not in db_category_ids:
+                l1_db = (await db.execute(
+                    select(ItemCategory).where(ItemCategory.parent_id.is_(None), func.lower(ItemCategory.name) == cat1_key[1])
+                )).scalar_one_or_none()
+                if not l1_db:
+                    short_code = await _generate_category_short_code(db, None)
+                    code_val = await _unique_category_code(db, _category_readable_code(r_data["category_l1"]))
+                    l1_db = ItemCategory(
+                        parent_id=None,
+                        name=r_data["category_l1"],
+                        code=code_val,
+                        level=1,
+                        short_code=short_code,
+                        full_code=short_code,
+                        is_active=True
+                    )
+                    db.add(l1_db)
+                    await db.flush()
+                db_category_ids[cat1_key] = l1_db.id
+            l1_id = db_category_ids[cat1_key]
+
+            cat2_key = (l1_id, r_data["category_l2"].lower())
+            if cat2_key not in db_category_ids:
+                l2_db = (await db.execute(
+                    select(ItemCategory).where(ItemCategory.parent_id == l1_id, func.lower(ItemCategory.name) == cat2_key[1])
+                )).scalar_one_or_none()
+                if not l2_db:
+                    short_code = await _generate_category_short_code(db, l1_id)
+                    code_val = await _unique_category_code(db, _category_readable_code(r_data["category_l2"]))
+                    l1_full_code = (await db.execute(select(ItemCategory.full_code).where(ItemCategory.id == l1_id))).scalar()
+                    l2_db = ItemCategory(
+                        parent_id=l1_id,
+                        name=r_data["category_l2"],
+                        code=code_val,
+                        level=2,
+                        short_code=short_code,
+                        full_code=f"{l1_full_code}{short_code}",
+                        is_active=True
+                    )
+                    db.add(l2_db)
+                    await db.flush()
+                db_category_ids[cat2_key] = l2_db.id
+            l2_id = db_category_ids[cat2_key]
+
+            cat3_key = (l2_id, r_data["category_l3"].lower())
+            if cat3_key not in db_category_ids:
+                l3_db = (await db.execute(
+                    select(ItemCategory).where(ItemCategory.parent_id == l2_id, func.lower(ItemCategory.name) == cat3_key[1])
+                )).scalar_one_or_none()
+                if not l3_db:
+                    short_code = await _generate_category_short_code(db, l2_id)
+                    code_val = await _unique_category_code(db, _category_readable_code(r_data["category_l3"]))
+                    l2_full_code = (await db.execute(select(ItemCategory.full_code).where(ItemCategory.id == l2_id))).scalar()
+                    l3_db = ItemCategory(
+                        parent_id=l2_id,
+                        name=r_data["category_l3"],
+                        code=code_val,
+                        level=3,
+                        short_code=short_code,
+                        full_code=f"{l2_full_code}{short_code}",
+                        is_active=True
+                    )
+                    db.add(l3_db)
+                    await db.flush()
+                db_category_ids[cat3_key] = l3_db.id
+            category_id = db_category_ids[cat3_key]
+
+            # 3. Resolve & Auto-create Warehouse if missing
+            initial_warehouse_id = None
+            if r_data["initial_quantity"] > 0 and r_data["initial_warehouse_str"]:
+                wh_key = r_data["initial_warehouse_str"].lower()
+                if wh_key not in db_warehouse_ids:
+                    wh_db = (await db.execute(select(Warehouse).where(func.lower(Warehouse.name) == wh_key))).scalar_one_or_none()
+                    if not wh_db:
+                        # Slugify and find unique code
+                        base_code = f"WH-{_readable_token(r_data['initial_warehouse_str'], 20)}"
+                        code_val = base_code
+                        suffix_char = ""
+                        while True:
+                            dup = (await db.execute(select(Warehouse).where(func.lower(Warehouse.code) == code_val.lower()))).scalar_one_or_none()
+                            if not dup:
+                                break
+                            suffix_char = chr(ord("A") + len(suffix_char))
+                            code_val = f"{base_code}{suffix_char}"
+                        
+                        wh_db = Warehouse(
+                            name=r_data["initial_warehouse_str"],
+                            code=code_val.upper(),
+                            organization_id=getattr(current_user, "organization_id", None) or 1,
+                            type="main",
+                            is_active=True
+                        )
+                        db.add(wh_db)
+                        await db.flush()
+                    db_warehouse_ids[wh_key] = wh_db.id
+                initial_warehouse_id = db_warehouse_ids[wh_key]
+
             # Generate item code and readable code
             item_code = await generate_item_code(
                 db,
-                category_id=r_data["category_id"],
+                category_id=category_id,
                 dosage_form=r_data["dosage_form"],
                 org_prefix=ORG_PREFIX_DEFAULT
             )
-            readable_code = await _item_readable_code(db, r_data["category_id"], r_data["name"])
+            readable_code = await _item_readable_code(db, category_id, r_data["name"])
 
             # Create Item object
             item = Item(
@@ -359,8 +560,8 @@ async def _bulk_upload_items_impl(
                 item_code=item_code,
                 readable_code=readable_code,
                 item_type=r_data["item_type"],
-                category_id=r_data["category_id"],
-                primary_uom_id=r_data["primary_uom_id"],
+                category_id=category_id,
+                primary_uom_id=primary_uom_id,
                 purchase_price=r_data["purchase_price"],
                 selling_price=r_data["selling_price"],
                 mrp=r_data["mrp"],
@@ -383,8 +584,8 @@ async def _bulk_upload_items_impl(
             initial_qty = r_data["initial_quantity"]
             if initial_qty > 0:
                 warehouse = None
-                if r_data["initial_warehouse_id"]:
-                    wh_res = await db.execute(select(Warehouse).where(Warehouse.id == r_data["initial_warehouse_id"]))
+                if initial_warehouse_id:
+                    wh_res = await db.execute(select(Warehouse).where(Warehouse.id == initial_warehouse_id))
                     warehouse = wh_res.scalar_one_or_none()
                 if not warehouse:
                     # Fallback to Central

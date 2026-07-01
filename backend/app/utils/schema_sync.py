@@ -90,6 +90,12 @@ async def ensure_consignment_schema(session: AsyncSession) -> None:
             await conn.execute(text("ALTER TABLE consignments ADD COLUMN parent_package_barcode VARCHAR(500) NULL"))
         if "receiver_position_code" not in columns:
             await conn.execute(text("ALTER TABLE consignments ADD COLUMN receiver_position_code VARCHAR(100) NULL"))
+        if "receipt_signature_url" not in columns:
+            await conn.execute(text("ALTER TABLE consignments ADD COLUMN receipt_signature_url VARCHAR(500) NULL"))
+        if "receipt_photos" not in columns:
+            await conn.execute(text("ALTER TABLE consignments ADD COLUMN receipt_photos JSON NULL"))
+        if "receipt_remarks" not in columns:
+            await conn.execute(text("ALTER TABLE consignments ADD COLUMN receipt_remarks TEXT NULL"))
     except Exception:
         pass
 

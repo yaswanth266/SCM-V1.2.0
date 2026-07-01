@@ -1661,3 +1661,55 @@ class BOMUpdate(BaseModel):
     is_active: Optional[bool] = None
     components: Optional[List[BOMComponentCreate]] = None
 
+
+# ===================== VEHICLES MASTER =====================
+
+class VehicleCreate(BaseModel):
+    vehicle_code: str
+    vehicle_number: str
+    is_active: Optional[bool] = True
+
+class VehicleResponse(BaseModel):
+    id: int
+    vehicle_code: str
+    vehicle_number: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+    model_config = {"from_attributes": True}
+
+
+# ===================== PROJECT INDENT TEMPLATES =====================
+
+class ProjectIndentTemplateItemCreate(BaseModel):
+    item_id: int
+    quantity: Decimal
+    uom_id: Optional[int] = None
+
+class ProjectIndentTemplateItemResponse(BaseModel):
+    id: int
+    template_id: int
+    item_id: int
+    quantity: Decimal
+    uom_id: Optional[int] = None
+    item_name: Optional[str] = None
+    item_code: Optional[str] = None
+    uom_name: Optional[str] = None
+    model_config = {"from_attributes": True}
+
+class ProjectIndentTemplateCreate(BaseModel):
+    project_id: int
+    template_type: str  # consumables, install
+    items: List[ProjectIndentTemplateItemCreate]
+
+class ProjectIndentTemplateResponse(BaseModel):
+    id: int
+    project_id: int
+    project_name: Optional[str] = None
+    template_type: str
+    created_at: datetime
+    updated_at: datetime
+    items: List[ProjectIndentTemplateItemResponse] = []
+    model_config = {"from_attributes": True}
+
+

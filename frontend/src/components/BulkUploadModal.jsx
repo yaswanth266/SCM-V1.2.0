@@ -205,9 +205,9 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
       style={{ borderRadius: 24, overflow: 'hidden' }}
     >
       <div style={{
-        background: 'linear-gradient(135deg, #1f1124 0%, #0d0610 100%)',
+        background: 'linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)',
         padding: '36px 32px',
-        color: '#fff',
+        color: '#1e293b',
         position: 'relative',
         overflow: 'hidden'
       }}>
@@ -219,7 +219,7 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
           width: '200px',
           height: '200px',
           borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(144, 0, 120, 0.2) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, rgba(37, 99, 235, 0.05) 0%, transparent 70%)',
           filter: 'blur(20px)',
           pointerEvents: 'none'
         }} />
@@ -230,17 +230,17 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
           width: '200px',
           height: '200px',
           borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(216, 0, 72, 0.15) 0%, transparent 70%)',
+          background: 'radial-gradient(circle, rgba(37, 99, 235, 0.05) 0%, transparent 70%)',
           filter: 'blur(20px)',
           pointerEvents: 'none'
         }} />
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
           <div>
-            <h2 style={{ color: '#fff', margin: 0, fontSize: '22px', fontWeight: 700 }}>
+            <h2 style={{ color: '#0f172a', margin: 0, fontSize: '22px', fontWeight: 700 }}>
               Bulk Upload Items
             </h2>
-            <p style={{ color: 'rgba(255,255,255,0.5)', margin: 0, fontSize: '13px' }}>
+            <p style={{ color: '#475569', margin: 0, fontSize: '13px' }}>
               Import item master details using a CSV spreadsheet
             </p>
           </div>
@@ -248,7 +248,7 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
             type="link"
             icon={<DownloadOutlined />}
             onClick={handleDownloadTemplate}
-            style={{ color: '#ff4d4f', border: '1px solid rgba(255, 77, 79, 0.3)', borderRadius: 8, height: 38 }}
+            style={{ color: '#2563eb', border: '1px solid rgba(37, 99, 235, 0.3)', borderRadius: 8, height: 38 }}
           >
             Download CSV Template
           </Button>
@@ -262,19 +262,19 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
             onRemove={handleRemove}
             showUploadList={true}
             style={{
-              background: 'rgba(255,255,255,0.03)',
-              border: '2px dashed rgba(255,255,255,0.15)',
+              background: '#ffffff',
+              border: '2px dashed #cbd5e1',
               borderRadius: 16,
               padding: '24px'
             }}
           >
-            <p className="ant-upload-drag-icon" style={{ color: '#ff4d4f', fontSize: 40, marginBottom: 8 }}>
+            <p className="ant-upload-drag-icon" style={{ color: '#2563eb', fontSize: 40, marginBottom: 8 }}>
               {validating ? <LoadingOutlined /> : <CloudUploadOutlined />}
             </p>
-            <p style={{ color: '#fff', fontSize: '15px', fontWeight: 600, margin: '0 0 4px 0' }}>
+            <p style={{ color: '#0f172a', fontSize: '15px', fontWeight: 600, margin: '0 0 4px 0' }}>
               {validating ? 'Analyzing file structure...' : 'Click or drag CSV file here to upload'}
             </p>
-            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '12px', margin: 0 }}>
+            <p style={{ color: '#475569', fontSize: '12px', margin: 0 }}>
               Ensure columns match the standard template schema. Level 1, 2, and 3 categories are mandatory.
             </p>
           </Dragger>
@@ -286,30 +286,30 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
             <div style={{
               display: 'flex',
               gap: 16,
-              background: 'rgba(255,255,255,0.04)',
-              border: '1px solid rgba(255,255,255,0.08)',
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
               borderRadius: 12,
               padding: '16px',
               marginBottom: 16
             }}>
               <div>
-                <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, textTransform: 'uppercase' }}>Total Rows</span>
-                <h3 style={{ color: '#fff', margin: 0, fontSize: 20 }}>{validationResult.total_rows}</h3>
+                <span style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase' }}>Total Rows</span>
+                <h3 style={{ color: '#0f172a', margin: 0, fontSize: 20 }}>{validationResult.total_rows}</h3>
               </div>
-              <div style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 16 }}>
-                <span style={{ color: '#52c41a', fontSize: 11, textTransform: 'uppercase' }}>Valid Rows</span>
-                <h3 style={{ color: '#52c41a', margin: 0, fontSize: 20 }}>{validationResult.valid_rows}</h3>
+              <div style={{ borderLeft: '1px solid #e2e8f0', paddingLeft: 16 }}>
+                <span style={{ color: '#16a34a', fontSize: 11, textTransform: 'uppercase' }}>Valid Rows</span>
+                <h3 style={{ color: '#16a34a', margin: 0, fontSize: 20 }}>{validationResult.valid_rows}</h3>
               </div>
-              <div style={{ borderLeft: '1px solid rgba(255,255,255,0.08)', paddingLeft: 16 }}>
-                <span style={{ color: '#ff4d4f', fontSize: 11, textTransform: 'uppercase' }}>Invalid Rows</span>
-                <h3 style={{ color: '#ff4d4f', margin: 0, fontSize: 20 }}>{validationResult.error_rows}</h3>
+              <div style={{ borderLeft: '1px solid #e2e8f0', paddingLeft: 16 }}>
+                <span style={{ color: '#dc2626', fontSize: 11, textTransform: 'uppercase' }}>Invalid Rows</span>
+                <h3 style={{ color: '#dc2626', margin: 0, fontSize: 20 }}>{validationResult.error_rows}</h3>
               </div>
             </div>
 
             <div style={{
-              background: 'rgba(0,0,0,0.2)',
+              background: '#ffffff',
               borderRadius: 12,
-              border: '1px solid rgba(255,255,255,0.05)',
+              border: '1px solid #e2e8f0',
               maxHeight: 240,
               overflowY: 'auto'
             }}>
@@ -319,8 +319,6 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
                 rowKey="row_index"
                 pagination={false}
                 size="small"
-                theme="dark"
-                rowClassName={() => 'dark-table-row'}
                 style={{
                   background: 'transparent',
                 }}
@@ -337,9 +335,9 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
             }}
             disabled={importing}
             style={{
-              background: 'transparent',
-              border: '1px solid rgba(255,255,255,0.15)',
-              color: '#fff',
+              background: '#ffffff',
+              border: '1px solid #cbd5e1',
+              color: '#334155',
               borderRadius: 10,
               height: 40,
             }}
@@ -356,13 +354,13 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
               (validationResult && !validationResult.success)
             }
             style={{
-              background: 'linear-gradient(90deg, #d80030 0%, #900078 100%)',
+              background: 'linear-gradient(90deg, #2563eb 0%, #4f46e5 100%)',
               border: 0,
               color: '#fff',
               borderRadius: 10,
               height: 40,
               fontWeight: 600,
-              boxShadow: fileList.length > 0 ? '0 4px 12px rgba(216,0,72,0.25)' : 'none',
+              boxShadow: fileList.length > 0 ? '0 4px 12px rgba(37,99,235,0.2)' : 'none',
             }}
           >
             Import Items ({validationResult ? validationResult.valid_rows : 0})

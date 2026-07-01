@@ -62,6 +62,11 @@ class Consignment(Base):
     # Status lifecycle: DRAFT → PACKED → IN_TRANSIT → PARTIALLY_RECEIVED → RECEIVED
     status = Column(String(30), nullable=False, default="DRAFT")
 
+    # Receipt evidence (filled when entire consignment is marked CONSIGNMENT_RECEIVED)
+    receipt_signature_url = Column(String(500), nullable=True)
+    receipt_photos = Column(JSON, nullable=True)
+    receipt_remarks = Column(Text, nullable=True)
+
     # Timestamps
     packed_at = Column(DateTime(timezone=True), nullable=True)
     dispatched_at = Column(DateTime(timezone=True), nullable=True)

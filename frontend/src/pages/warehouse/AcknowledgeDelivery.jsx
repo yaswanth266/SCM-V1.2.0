@@ -257,8 +257,17 @@ const AcknowledgeDelivery = () => {
         message.success('Package delivery acknowledged successfully!');
         navigate('/logistics/consignments');
       } else if (activeScanType === 'consignment') {
-        // Mark consignment as delivered (state transition only)
-        await api.post(`/consignment/${consignmentData.id}/deliver`);
+        // Mark consignment as delivered with POD evidence
+        const payload = {
+          receiver_signature_url: uploadedUrls.signature_image || null,
+          photos: uploadedUrls.materials_photos ? [uploadedUrls.materials_photos] : [],
+          remarks: values.remarks || 'Received successfully',
+          acknowledged_by_name: values.acknowledged_by_name,
+          acknowledged_by_designation: values.acknowledged_by_designation || 'Storekeeper',
+          acknowledged_by_phone: values.acknowledged_by_phone,
+          acknowledged_by_employee_code: values.acknowledged_by_employee_code,
+        };
+        await api.post(`/consignment/${consignmentData.id}/deliver`, payload);
         message.success('Consignment marked as DELIVERED successfully!');
         navigate('/logistics/consignments');
       }
@@ -451,8 +460,8 @@ const AcknowledgeDelivery = () => {
               </Col>
 
               <Col xs={24} md={8}>
-                <Card title="Consignment QR" style={{ borderRadius: '12px', border: '1px solid #cbd5e1', textAlign: 'center' }}>
-                  <QRCodeSVG value={consignmentData.parent_package_barcode || consignmentData.parent_package_code} size={150} includeMargin={true} />
+                <Card title="Consignment Barcode" style={{ borderRadius: '12px', border: '1px solid #cbd5e1', textAlign: 'center' }}>
+                  <Barcode value={consignmentData.parent_package_barcode || consignmentData.parent_package_code} width={1.2} height={50} fontSize={11} />
                   <div style={{ marginTop: '12px', fontFamily: 'monospace', fontWeight: 700, fontSize: '15px' }}>{consignmentData.parent_package_code}</div>
                   <Text type="secondary">Consignment Reference: {consignmentData.consignment_number}</Text>
                 </Card>

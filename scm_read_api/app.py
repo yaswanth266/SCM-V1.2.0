@@ -93,6 +93,9 @@ RESOURCES = {
     # asset master FK references
     "projects": "projects",
     "organizations": "organizations",
+    "consignment_packages": "consignment_packages",
+    "consignment_package_items": "consignment_package_items"
+    
 }
 
 # Columns never returned, regardless of table (credentials / secrets). AIMS
@@ -136,10 +139,21 @@ app.add_middleware(
 
 @app.get("/health", tags=["meta"])
 def health():
+    """Liveness + which database/host this API is actually connected to, so the
+    AIMS team can verify the source. No credentials are exposed."""
     try:
         with engine.connect() as conn:
-            conn.execute(text("SELECT 1"))
-        return {"ok": True, "db": "up"}
+            dbname = conn.execute(text("SELECT DATABASE()")).scalar()
+            ver = conn.execute(text("SELECT VERSION()")).scalar()
+        url = engine.url  # SQLAlchemy strips the password in str(url)
+        return {
+            "ok": True, "db": "up",
+            "database": dbname,
+            "host": url.host,
+            "port": url.port,
+            "db_user": url.username,
+            "server_version": ver,
+        }
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"DB error: {e}")
 
