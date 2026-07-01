@@ -679,6 +679,305 @@ async def create_consignment(
     return _con_response(con_full, pkgs_out)
 
 
+@router.put("/{consignment_id}")
+async def update_consignment(
+    consignment_id: int,
+    payload: ConsignmentCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update a draft consignment's packages and details.
+
+    1. Fetch existing consignment.
+    2. Verify status is 'DRAFT'.
+    3. Validate MI and items.
+    4. Delete existing package containers, package items, and packages.
+    5. Re-create packages and items from the payload.
+    6. Recalculate consignment aggregates.
+    """
+    from app.models.issue import MaterialIssue, MaterialIssueItem
+    from app.models.consignment import ConsignmentPackage, ConsignmentPackageItem, ConsignmentPackageContainer
+    from sqlalchemy import delete
+
+    consignment = (await db.execute(select(Consignment).where(Consignment.id == consignment_id))).scalar_one_or_none()
+    if not consignment:
+        raise HTTPException(404, "Consignment not found")
+
+    if consignment.status != "DRAFT":
+        raise HTTPException(400, "Only draft consignments can be edited")
+
+    mi = (await db.execute(select(MaterialIssue).where(MaterialIssue.id == payload.material_issue_id))).scalar_one_or_none()
+    if not mi:
+        raise HTTPException(404, "Material Issue not found")
+
+    # Validate MI items exist
+    mi_item_ids = [i.material_issue_item_id for pkg in payload.packages for i in pkg.items]
+    mi_items_res = await db.execute(
+        select(MaterialIssueItem).where(
+            MaterialIssueItem.issue_id == mi.id,
+            MaterialIssueItem.id.in_(mi_item_ids),
+        )
+    )
+    mi_items = {r.id: r for r in mi_items_res.scalars().all()}
+    missing = set(mi_item_ids) - set(mi_items.keys())
+    if missing:
+        raise HTTPException(400, f"MI items not found in this issue: {sorted(missing)}")
+
+    # 🛑 Validation: Sum of quantities per MI item across all packages must NOT exceed MI item qty
+    from collections import defaultdict
+    item_qty_sum = defaultdict(lambda: Decimal("0"))
+    for pkg_in in payload.packages:
+        for item_in in pkg_in.items:
+            item_qty_sum[item_in.material_issue_item_id] += item_in.quantity_packed
+
+    # Get total packed quantity of each MI item in OTHER consignments
+    other_packed_res = await db.execute(
+        select(
+            ConsignmentPackageItem.material_issue_item_id,
+            func.sum(ConsignmentPackageItem.quantity_packed)
+        )
+        .join(ConsignmentPackage, ConsignmentPackageItem.package_id == ConsignmentPackage.id)
+        .join(Consignment, ConsignmentPackage.consignment_id == Consignment.id)
+        .where(
+            ConsignmentPackageItem.material_issue_item_id.in_(mi_item_ids),
+            Consignment.id != consignment_id,
+            Consignment.status != "CANCELLED"
+        )
+        .group_by(ConsignmentPackageItem.material_issue_item_id)
+    )
+    other_packed = {mi_item_id: Decimal(str(qty_p or 0)) for mi_item_id, qty_p in other_packed_res.all()}
+
+    for mi_item_id, total_packed in item_qty_sum.items():
+        if mi_item_id not in mi_items:
+            continue
+        mi_item = mi_items[mi_item_id]
+        mi_item_qty = mi_item.qty or Decimal("0")
+        packed_in_others = other_packed.get(mi_item_id, Decimal("0"))
+        if total_packed + packed_in_others > mi_item_qty:
+            raise HTTPException(400,
+                f"Total packed quantity ({total_packed + packed_in_others}) for MI item ID {mi_item_id} "
+                f"exceeds the issued quantity ({mi_item_qty})."
+            )
+
+    # 🛑 Validation: If MI items have serial numbers, validate subset, uniqueness, and quantity matching
+    resolved_sns_map = {}
+    mi_assigned_serials = defaultdict(set)
+    for pkg_idx, pkg_in in enumerate(payload.packages, start=1):
+        for item_in in pkg_in.items:
+            mi_item = mi_items.get(item_in.material_issue_item_id)
+            if not mi_item:
+                continue
+            mi_sns = mi_item.serial_numbers or []
+            if mi_sns:
+                item_sns = item_in.serial_numbers
+                if item_sns is None or len(item_sns) == 0:
+                    if item_in.quantity_packed == mi_item.qty:
+                        item_sns = mi_sns
+                    else:
+                        raise HTTPException(
+                            400,
+                            f"Package #{pkg_idx}: Serial numbers must be explicitly selected when splitting or packing partial quantities of serial-tracked item."
+                        )
+
+                if len(item_sns) != int(item_in.quantity_packed):
+                    raise HTTPException(
+                        400,
+                        f"Package #{pkg_idx}: quantity packed ({item_in.quantity_packed}) must match the number of selected serial numbers ({len(item_sns)})."
+                    )
+
+                invalid_sns = set(item_sns) - set(mi_sns)
+                if invalid_sns:
+                    raise HTTPException(
+                        400,
+                        f"Package #{pkg_idx}: serial numbers {sorted(invalid_sns)} are not part of the issued serial numbers."
+                    )
+
+                duplicate_sns = set(item_sns) & mi_assigned_serials[mi_item.id]
+                if duplicate_sns:
+                    raise HTTPException(
+                        400,
+                        f"Duplicate serial numbers {sorted(duplicate_sns)} assigned across packages."
+                    )
+
+                for sn in item_sns:
+                    mi_assigned_serials[mi_item.id].add(sn)
+
+                resolved_sns_map[(pkg_idx, mi_item.id)] = item_sns
+
+    # Get the sequence code part from the existing consignment number
+    consignment_number = consignment.consignment_number
+    seq_part = consignment_number.split("-")[-1]
+    state = consignment.state_code or "GEN"
+    yr = datetime.now(timezone.utc).year
+
+    # Map from parent group name -> (code, barcode)
+    parent_groups = {}
+    group_seq = 1
+    for p in payload.packages:
+        gname = p.parent_package_group
+        if gname and gname.strip() and gname.strip() not in parent_groups:
+            g_code = f"PKG-{state}-{yr}-{seq_part}-PAR{group_seq}"
+            g_qr = _qr_barcode({
+                "type": "parent_package",
+                "parent_package": g_code,
+                "consignment": consignment_number,
+                "group_name": gname.strip(),
+                "receiver": payload.receiver_employee_code,
+            })
+            parent_groups[gname.strip()] = (g_code, g_qr)
+            group_seq += 1
+
+    first_parent_code = None
+    first_parent_qr = None
+    if parent_groups:
+        first_parent_code, first_parent_qr = list(parent_groups.values())[0]
+
+    # Fetch indent number for QR if indent_id provided
+    indent_number_for_qr = None
+    if payload.indent_id:
+        from app.models.indent import Indent as _Indent
+        _ind = (await db.execute(select(_Indent).where(_Indent.id == payload.indent_id))).scalar_one_or_none()
+        indent_number_for_qr = _ind.indent_number if _ind else None
+
+    con_qr = _qr_barcode({
+        "type": "consignment",
+        "consignment": consignment_number,
+        "indent": indent_number_for_qr,
+        "receiver": payload.receiver_employee_code,
+        "total_packages": len(payload.packages),
+    })
+
+    # Fetch existing package IDs to delete packages, package items, and package containers
+    pkg_res = await db.execute(select(ConsignmentPackage.id).where(ConsignmentPackage.consignment_id == consignment_id))
+    pkg_ids = pkg_res.scalars().all()
+    if pkg_ids:
+        await db.execute(
+            delete(ConsignmentPackageItem).where(ConsignmentPackageItem.package_id.in_(pkg_ids))
+        )
+        await db.execute(
+            delete(ConsignmentPackageContainer).where(ConsignmentPackageContainer.package_id.in_(pkg_ids))
+        )
+        await db.execute(
+            delete(ConsignmentPackage).where(ConsignmentPackage.id.in_(pkg_ids))
+        )
+        await db.flush()
+
+    # Update consignment metadata
+    consignment.consignment_barcode = con_qr
+    consignment.parent_package_code = first_parent_code
+    consignment.parent_package_barcode = first_parent_qr
+    consignment.indent_id = payload.indent_id
+    consignment.material_issue_id = payload.material_issue_id
+    consignment.destination_warehouse_id = payload.destination_warehouse_id
+    consignment.destination_user_id = payload.destination_user_id
+    consignment.receiver_employee_code = payload.receiver_employee_code
+    consignment.receiver_name = payload.receiver_name
+    consignment.receiver_position_code = payload.receiver_position_code
+
+    # Add packages & items
+    for idx, pkg_in in enumerate(payload.packages, start=1):
+        pkg_num = f"PKG-{state}-{yr}-{seq_part}-{str(idx).zfill(2)}"
+        gname = pkg_in.parent_package_group
+        g_code = None
+        g_qr = None
+        if gname and gname.strip() in parent_groups:
+            g_code, g_qr = parent_groups[gname.strip()]
+
+        pkg_qr = _qr_barcode({
+            "type": "package",
+            "package": pkg_num,
+            "consignment": consignment_number,
+            "parent_package": g_code,
+            "weight_kg": float(pkg_in.gross_weight_kg or 0),
+            "package_type": pkg_in.package_type,
+        })
+        vol = _vol_cft(pkg_in.length_cm, pkg_in.width_cm, pkg_in.height_cm)
+
+        pkg = ConsignmentPackage(
+            package_number=pkg_num,
+            package_barcode=pkg_qr,
+            parent_package_code=g_code,
+            parent_package_barcode=g_qr,
+            consignment_id=consignment.id,
+            sequence_number=idx,
+            package_type=pkg_in.package_type,
+            package_description=pkg_in.package_description,
+            length_cm=pkg_in.length_cm,
+            width_cm=pkg_in.width_cm,
+            height_cm=pkg_in.height_cm,
+            gross_weight_kg=pkg_in.gross_weight_kg or Decimal("0"),
+            volume_cft=vol,
+            seal_number=pkg_in.seal_number,
+            material_count=len(pkg_in.items),
+            status="DRAFT",
+            created_by=current_user.id,
+        )
+        db.add(pkg)
+        await db.flush()
+
+        for item_in in pkg_in.items:
+            mi_item = mi_items[item_in.material_issue_item_id]
+            rate = item_in.unit_price or mi_item.rate or Decimal("0")
+            sns = resolved_sns_map.get((idx, mi_item.id))
+            if sns is None:
+                sns = item_in.serial_numbers
+                if sns is None or len(sns) == 0:
+                    sns = mi_item.serial_numbers
+
+            pkg_item = ConsignmentPackageItem(
+                package_id=pkg.id,
+                material_issue_item_id=item_in.material_issue_item_id,
+                material_id=item_in.material_id,
+                batch_id=item_in.batch_id or mi_item.batch_id,
+                uom_id=mi_item.uom_id,
+                uom_code=item_in.uom_code or "NOS",
+                source_bin_id=item_in.source_bin_id or mi_item.bin_id,
+                quantity_packed=item_in.quantity_packed,
+                serial_numbers=sns,
+                unit_price=rate,
+                total_value=item_in.quantity_packed * rate,
+            )
+            db.add(pkg_item)
+
+        cnt_num = f"CNT-{state}-{yr}-{seq_part}-{str(idx).zfill(2)}"
+        cnt_qr = _qr_barcode({"type": "container", "container": cnt_num, "package": pkg_num})
+        db.add(ConsignmentPackageContainer(
+            package_id=pkg.id,
+            container_number=cnt_num,
+            container_type="PACKAGE",
+            container_barcode=cnt_qr,
+            warehouse_id=mi.warehouse_id,
+        ))
+
+    await db.flush()
+    await _recalc_consignment(db, consignment)
+    await db.flush()
+    await db.commit()
+    await db.refresh(consignment)
+
+    # Reload and return
+    con_full = (await db.execute(
+        select(Consignment)
+        .options(
+            joinedload(Consignment.material_issue),
+            joinedload(Consignment.indent),
+            joinedload(Consignment.source_warehouse),
+            joinedload(Consignment.destination_warehouse),
+            selectinload(Consignment.packages)
+            .selectinload(ConsignmentPackage.items)
+            .joinedload(ConsignmentPackageItem.material),
+            selectinload(Consignment.packages)
+            .selectinload(ConsignmentPackage.items)
+            .joinedload(ConsignmentPackageItem.batch),
+            selectinload(Consignment.packages).joinedload(ConsignmentPackage.container),
+        )
+        .where(Consignment.id == consignment.id)
+    )).unique().scalar_one()
+
+    pkgs_out = [_pkg_response(p) for p in con_full.packages]
+    return _con_response(con_full, pkgs_out)
+
+
 @router.get("")
 async def list_consignments(
     page: int = Query(1, ge=1),

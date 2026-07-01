@@ -11,7 +11,8 @@ import {
   BarcodeOutlined, EnvironmentOutlined,
   LoadingOutlined, ScanOutlined,
   GoldOutlined, BoxPlotOutlined, DeleteOutlined, GiftOutlined,
-  PrinterOutlined, DownloadOutlined, LockOutlined, UnlockOutlined
+  PrinterOutlined, DownloadOutlined, LockOutlined, UnlockOutlined,
+  EditOutlined
 } from '@ant-design/icons';
 import api from '../../config/api';
 import dayjs from 'dayjs';
@@ -54,6 +55,7 @@ export default function LogisticsConsignment() {
   const [loadingIssue, setLoadingIssue] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [packages, setPackages] = useState([]);
+  const [editId, setEditId] = useState(null);
 
   // Modal states for selectable serial numbers in packages creation
   const [modalOpen, setModalOpen] = useState(false);
@@ -406,7 +408,101 @@ export default function LogisticsConsignment() {
     setSelectedIssue(null);
     setSelectedIssueItems([]);
     setPackages([]);
+    setEditId(null);
     fetchMaterialIssues();
+  };
+
+  const handleEditConsignment = async (conRecord) => {
+    setLoadingIssue(true);
+    try {
+      setEditId(conRecord.id);
+      setShowCreate(true);
+      setShowDetail(false);
+      setDetailConsignment(null);
+      form.resetFields();
+
+      // Fetch material issues list for selection dropdown
+      await fetchMaterialIssues();
+
+      // Fetch consignment details (with packages and items)
+      const resCon = await api.get(`/consignment/${conRecord.id}`);
+      const conData = resCon.data;
+
+      // Fetch Material Issue details
+      const resMi = await api.get(`/warehouse/material-issues/${conData.material_issue_id}`);
+      const issueData = resMi.data;
+
+      setSelectedIssue(issueData);
+
+      // We map the issue items and inject packed_qty for previous consignments (excluding this one).
+      const items = (issueData.items || []).map(item => {
+        let packedInThisCon = 0;
+        (conData.packages || []).forEach(pkg => {
+          const pItem = (pkg.items || []).find(i => i.material_issue_item_id === item.id);
+          if (pItem) {
+            packedInThisCon += parseFloat(pItem.quantity_packed || 0);
+          }
+        });
+
+        const otherPacked = Math.max(0, parseFloat(item.packed_qty || 0) - packedInThisCon);
+        const remaining = Math.max(0, parseFloat(item.qty || 0) - otherPacked);
+
+        return {
+          ...item,
+          key: item.id || Math.random(),
+          quantity_packed: remaining,
+          packed_qty: otherPacked,
+        };
+      });
+      setSelectedIssueItems(items);
+
+      // Pre-fill form fields
+      form.setFieldsValue({
+        material_issue_id: conData.material_issue_id,
+        receiver_employee_code: conData.receiver_employee_code || '',
+        receiver_name: conData.receiver_name || '',
+        state_code: conData.state_code || 'AP',
+        mdo_id: conData.mdo_id || undefined,
+        indent_id: conData.indent_id || undefined,
+      });
+
+      // Map packages
+      const mappedPackages = (conData.packages || []).map((pkg, pkgIdx) => {
+        return {
+          key: pkg.id || Date.now() + pkgIdx,
+          package_type: pkg.package_type || 'BOX',
+          package_description: pkg.package_description || `Package ${pkgIdx + 1}`,
+          gross_weight_kg: parseFloat(pkg.gross_weight_kg || 0),
+          length_cm: pkg.length_cm ? parseFloat(pkg.length_cm) : undefined,
+          width_cm: pkg.width_cm ? parseFloat(pkg.width_cm) : undefined,
+          height_cm: pkg.height_cm ? parseFloat(pkg.height_cm) : undefined,
+          seal_number: pkg.seal_number || '',
+          parent_package_group: pkg.parent_package_code || null,
+          items: (pkg.items || []).map(i => {
+            return {
+              material_issue_item_id: i.material_issue_item_id,
+              material_id: i.material_id,
+              quantity_packed: parseFloat(i.quantity_packed || 0),
+              uom_code: i.uom_code || 'NOS',
+              batch_id: i.batch_id || undefined,
+              source_bin_id: i.source_bin_id || undefined,
+              serial_numbers: i.serial_numbers || [],
+              unit_price: parseFloat(i.unit_price || 0),
+              _material_name: i.item_name || i.item?.name || 'Material',
+              _material_code: i.item_code || i.item?.item_code || '',
+            };
+          }),
+          locked: true,
+        };
+      });
+      setPackages(mappedPackages);
+
+    } catch (err) {
+      console.error('Failed to load consignment for editing:', err);
+      message.error('Failed to load consignment details for editing');
+    } finally {
+      setLoadingIssue(false);
+    }
   };
 
   const handleIssueSelect = async (issueId) => {
@@ -609,9 +705,15 @@ export default function LogisticsConsignment() {
         })),
       };
 
-      await api.post('/consignment', payload);
-      message.success('Consignment created successfully!');
+      if (editId) {
+        await api.put(`/consignment/${editId}`, payload);
+        message.success('Consignment updated successfully!');
+      } else {
+        await api.post('/consignment', payload);
+        message.success('Consignment created successfully!');
+      }
       setShowCreate(false);
+      setEditId(null);
       form.resetFields();
       setSelectedIssue(null);
       setSelectedIssueItems([]);
@@ -739,11 +841,16 @@ export default function LogisticsConsignment() {
             <Button size="small" icon={<EyeOutlined />} onClick={() => handleViewDetail(r.id)} />
           </Tooltip>
           {r.status === 'DRAFT' && (
-            <Tooltip title="Mark as PACKED">
-              <Button size="small" type="primary" icon={<CheckCircleOutlined />}
-                style={{ background: '#0284c7' }}
-                onClick={() => handlePack(r.id)}>Pack</Button>
-            </Tooltip>
+            <>
+              <Tooltip title="Edit consignment">
+                <Button size="small" icon={<EditOutlined />} onClick={() => handleEditConsignment(r)} />
+              </Tooltip>
+              <Tooltip title="Mark as PACKED">
+                <Button size="small" type="primary" icon={<CheckCircleOutlined />}
+                  style={{ background: '#0284c7' }}
+                  onClick={() => handlePack(r.id)}>Pack</Button>
+              </Tooltip>
+            </>
           )}
         </Space>
       ),
@@ -1081,11 +1188,11 @@ export default function LogisticsConsignment() {
           marginBottom: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px'
         }}>
           <Space>
-            <Button icon={<ArrowLeftOutlined />} onClick={() => { setShowCreate(false); form.resetFields(); setSelectedIssue(null); setSelectedIssueItems([]); setPackages([]); }}
+            <Button icon={<ArrowLeftOutlined />} onClick={() => { setShowCreate(false); setEditId(null); form.resetFields(); setSelectedIssue(null); setSelectedIssueItems([]); setPackages([]); }}
               style={{ borderRadius: '8px', fontWeight: 600 }}>Back</Button>
             <span style={{ fontSize: '17px', fontWeight: 700, color: '#0f172a' }}>
               <PlusOutlined style={{ color: '#0284c7', marginRight: '8px' }} />
-              New Consignment
+              {editId ? 'Edit Consignment' : 'New Consignment'}
             </span>
           </Space>
         </div>
@@ -1417,13 +1524,13 @@ export default function LogisticsConsignment() {
 
           {/* Submit */}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '16px' }}>
-            <Button onClick={() => { setShowCreate(false); form.resetFields(); setSelectedIssue(null); setSelectedIssueItems([]); setPackages([]); }}
+            <Button onClick={() => { setShowCreate(false); setEditId(null); form.resetFields(); setSelectedIssue(null); setSelectedIssueItems([]); setPackages([]); }}
               style={{ borderRadius: '8px' }}>Cancel</Button>
             <Button type="primary" htmlType="submit" loading={submitting}
               icon={<GoldOutlined />}
               style={{ borderRadius: '8px', fontWeight: 700, background: 'linear-gradient(135deg, #0284c7, #0369a1)', borderColor: 'transparent' }}
             >
-              Create Consignment
+              {editId ? 'Update Consignment' : 'Create Consignment'}
             </Button>
           </div>
         </Form>
