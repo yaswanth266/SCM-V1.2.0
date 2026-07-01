@@ -1242,13 +1242,11 @@ const PutawayForm = () => {
 
       {/* Items Table */}
       <Card>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <Divider orientation="left" style={{ margin: 0 }}>
-            <Space>
-              <InboxOutlined />
-              Items ({items.length})
-            </Space>
-          </Divider>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, borderBottom: '1px solid #f0f0f0', paddingBottom: 12 }}>
+          <Space style={{ fontSize: 16, fontWeight: 600 }}>
+            <InboxOutlined />
+            Items ({items.length})
+          </Space>
           {putawayType === 'manual' && (
             <Button
               type="dashed"

@@ -36,6 +36,41 @@ function ProgressRing({ filled, needed, size = 52 }) {
   );
 }
 
+/* ─── single serial input row to prevent controlled lag ────────────────── */
+function SerialInput({ index, initialValue, onUpdate, onDelete }) {
+  const [val, setVal] = useState(initialValue || '');
+
+  useEffect(() => {
+    setVal(initialValue || '');
+  }, [initialValue]);
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{
+        width: 24, height: 24, borderRadius: 6, flexShrink: 0,
+        background: val?.trim() ? '#dcfce7' : '#f1f5f9',
+        border: `1px solid ${val?.trim() ? '#86efac' : '#cbd5e1'}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: val?.trim() ? '#15803d' : '#64748b', fontSize: 10, fontWeight: 700,
+      }}>{index + 1}</span>
+      <Input
+        placeholder={`Serial #${index + 1}`}
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onBlur={() => onUpdate(val)}
+        onPressEnter={() => onUpdate(val)}
+        style={{ flex: 1, borderRadius: 6, fontFamily: 'monospace', fontSize: 12 }}
+        suffix={val?.trim() ? <CheckCircleFilled style={{ color: '#16a34a', fontSize: 12 }} /> : null}
+      />
+      <Button
+        type="text" danger icon={<DeleteOutlined />}
+        onClick={onDelete}
+        style={{ flexShrink: 0 }}
+      />
+    </div>
+  );
+}
+
 /* ─── main component ─────────────────────────────────────────────── */
 const SerialNumbersModal = ({
   value = [],
@@ -427,29 +462,21 @@ const SerialNumbersModal = ({
           <div style={{ padding: '20px 24px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }}>
               {draft.map((serial, i) => (
-                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{
-                    width: 24, height: 24, borderRadius: 6, flexShrink: 0,
-                    background: serial?.trim() ? '#dcfce7' : '#f1f5f9',
-                    border: `1px solid ${serial?.trim() ? '#86efac' : '#cbd5e1'}`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    color: serial?.trim() ? '#15803d' : '#64748b', fontSize: 10, fontWeight: 700,
-                  }}>{i + 1}</span>
-                  <Input
-                    placeholder={`Serial #${i + 1}`}
-                    value={serial}
-                    onChange={(e) => {
-                      const updated = [...draft]; updated[i] = e.target.value; setDraft(updated);
-                    }}
-                    style={{ flex: 1, borderRadius: 6, fontFamily: 'monospace', fontSize: 12 }}
-                    suffix={serial?.trim() ? <CheckCircleFilled style={{ color: '#16a34a', fontSize: 12 }} /> : null}
-                  />
-                  <Button
-                    type="text" danger icon={<DeleteOutlined />}
-                    onClick={() => { const u = [...draft]; u.splice(i, 1); setDraft(u); }}
-                    style={{ flexShrink: 0 }}
-                  />
-                </div>
+                <SerialInput
+                  key={i}
+                  index={i}
+                  initialValue={serial}
+                  onUpdate={(val) => {
+                    const updated = [...draft];
+                    updated[i] = val;
+                    setDraft(updated);
+                  }}
+                  onDelete={() => {
+                    const u = [...draft];
+                    u.splice(i, 1);
+                    setDraft(u);
+                  }}
+                />
               ))}
             </div>
             <Button
