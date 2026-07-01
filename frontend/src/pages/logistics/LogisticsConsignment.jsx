@@ -70,7 +70,7 @@ export default function LogisticsConsignment() {
   const [printLabelType, setPrintLabelType] = useState(''); // 'consignment', 'parent', 'package'
 
   const getRemainingQty = (miItem, currentPkgKey) => {
-    const miQty = parseFloat(miItem.qty || miItem.quantity || 0);
+    const miQty = parseFloat(miItem.qty || miItem.quantity || 0) - parseFloat(miItem.packed_qty || 0);
     const packedInOthers = packages
       .filter(p => p.key !== currentPkgKey)
       .reduce((sum, p) => {
@@ -82,6 +82,7 @@ export default function LogisticsConsignment() {
 
   const getAvailableSerials = (miItem, currentPkgKey, currentPackages = packages) => {
     const allSerials = miItem.serial_numbers || [];
+    const packedInOthersConsignments = new Set(miItem.packed_serials || []);
     const usedInOthers = currentPackages
       .filter(p => p.key !== currentPkgKey)
       .reduce((acc, p) => {
@@ -91,7 +92,7 @@ export default function LogisticsConsignment() {
         }
         return acc;
       }, new Set());
-    return allSerials.filter(sn => !usedInOthers.has(sn));
+    return allSerials.filter(sn => !packedInOthersConsignments.has(sn) && !usedInOthers.has(sn));
   };
 
   const handlePackageItemQtyChange = (pkgKey, miItemId, qty) => {
@@ -381,16 +382,15 @@ export default function LogisticsConsignment() {
       const issues = issuesRes.data?.items || issuesRes.data?.data || issuesRes.data || [];
       const consignments = consignmentsRes.data?.data || [];
       
-      // Get all material_issue_numbers that already have a consignment in draft/packed/in_transit/partially_received
-      const consignedMiNumbers = new Set(
-        consignments
-          .filter(c => ['DRAFT', 'PACKED', 'IN_TRANSIT', 'PARTIALLY_RECEIVED'].includes(c.status))
-          .map(c => c.material_issue_number)
-          .filter(Boolean)
-      );
-
       const filteredIssues = (Array.isArray(issues) ? issues.filter(i => i && i.status === 'issued') : [])
-        .filter(i => !consignedMiNumbers.has(i.issue_number));
+        .filter(i => {
+          const hasRemaining = (i.items || []).some(item => {
+            const qty = parseFloat(item.qty || 0);
+            const packed = parseFloat(item.packed_qty || 0);
+            return qty - packed > 0.001;
+          });
+          return hasRemaining;
+        });
 
       setMaterialIssues(filteredIssues);
     } catch (err) {
@@ -421,11 +421,14 @@ export default function LogisticsConsignment() {
       const res = await api.get(`/warehouse/material-issues/${issueId}`);
       const issueData = res.data;
       setSelectedIssue(issueData);
-      const items = (issueData.items || []).map(item => ({
-        ...item,
-        key: item.id || Math.random(),
-        quantity_packed: item.qty || item.quantity || 0,
-      }));
+      const items = (issueData.items || []).map(item => {
+        const remaining = Math.max(0, parseFloat(item.qty || 0) - parseFloat(item.packed_qty || 0));
+        return {
+          ...item,
+          key: item.id || Math.random(),
+          quantity_packed: remaining,
+        };
+      });
       setSelectedIssueItems(items);
 
       // Auto-populate receiver fields from MI's issued_to data
@@ -436,29 +439,36 @@ export default function LogisticsConsignment() {
         });
       }
 
-      // Auto-create a default package with all items
+      // Auto-create a default package with all items that have remaining qty to pack
+      const defaultPkgItems = items
+        .filter(i => i.quantity_packed > 0)
+        .map(i => {
+          const availableSns = (i.serial_numbers || []).filter(sn => !(i.packed_serials || []).includes(sn));
+          return {
+            material_issue_item_id: i.id,
+            material_id: i.item_id || i.material_id,
+            quantity_packed: i.quantity_packed,
+            uom_code: i.uom_code || i.uom_name || 'NOS',
+            batch_id: i.batch_id || undefined,
+            source_bin_id: i.bin_id || undefined,
+            serial_numbers: availableSns.slice(0, Math.ceil(i.quantity_packed)),
+            unit_price: i.rate || 0,
+            _material_name: i.item_name || i.item?.name || 'Material',
+            _material_code: i.item_code || i.item?.item_code || '',
+          };
+        });
+
       setPackages([{
         key: Date.now(),
         package_type: 'BOX',
         package_description: `Package 1 - ${issueData.issue_number || ''}`,
-        gross_weight_kg: items.reduce((sum, i) => sum + (parseFloat(i.quantity_packed || 0) * 0.5), 0),
+        gross_weight_kg: defaultPkgItems.reduce((sum, i) => sum + (parseFloat(i.quantity_packed || 0) * 0.5), 0),
         length_cm: 30,
         width_cm: 20,
         height_cm: 15,
         seal_number: '',
         parent_package_group: null,
-        items: items.map(i => ({
-          material_issue_item_id: i.id,
-          material_id: i.item_id || i.material_id,
-          quantity_packed: i.qty || i.quantity || 0,
-          uom_code: i.uom_code || i.uom_name || 'NOS',
-          batch_id: i.batch_id || undefined,
-          source_bin_id: i.bin_id || undefined,
-          serial_numbers: i.serial_numbers || [],
-          unit_price: i.rate || 0,
-          _material_name: i.item_name || i.item?.name || 'Material',
-          _material_code: i.item_code || i.item?.item_code || '',
-        })),
+        items: defaultPkgItems,
         locked: false,
       }]);
     } catch (err) {

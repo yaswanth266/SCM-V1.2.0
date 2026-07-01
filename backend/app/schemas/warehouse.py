@@ -384,6 +384,8 @@ class MaterialIssueItemResponse(BaseModel):
     has_serial: bool = False
     has_batch: bool = False
     item_type: Optional[str] = None
+    packed_qty: Decimal = Decimal("0")
+    packed_serials: List[str] = []
     model_config = {"from_attributes": True}
 
 class MaterialIssueResponse(BaseModel):

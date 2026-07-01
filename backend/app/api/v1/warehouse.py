@@ -2671,6 +2671,31 @@ async def list_material_issues(
         for ind in ind_rows.scalars().all():
             indent_map[ind.id] = ind
 
+    # Bulk-load packed info for all items in the page to prevent N+1 queries
+    all_mi_item_ids = [it.id for mi in issues for it in mi.items]
+    packed_info_map = {} # item_id -> (total_packed, list_of_packed_serials)
+    if all_mi_item_ids:
+        from app.models.consignment import ConsignmentPackageItem, ConsignmentPackage, Consignment
+        packed_rows = await db.execute(
+            select(
+                ConsignmentPackageItem.material_issue_item_id,
+                ConsignmentPackageItem.quantity_packed,
+                ConsignmentPackageItem.serial_numbers
+            )
+            .join(ConsignmentPackage, ConsignmentPackageItem.package_id == ConsignmentPackage.id)
+            .join(Consignment, ConsignmentPackage.consignment_id == Consignment.id)
+            .where(
+                ConsignmentPackageItem.material_issue_item_id.in_(all_mi_item_ids),
+                Consignment.status != "CANCELLED"
+            )
+        )
+        for mi_item_id, qty_p, sns_list in packed_rows.all():
+            if mi_item_id not in packed_info_map:
+                packed_info_map[mi_item_id] = [Decimal("0"), []]
+            packed_info_map[mi_item_id][0] += qty_p or Decimal("0")
+            if sns_list:
+                packed_info_map[mi_item_id][1].extend(sns_list)
+
     for mi in issues:
         indent = indent_map.get(mi.indent_id) if mi.indent_id else None
         mi_dict = {
@@ -2699,12 +2724,15 @@ async def list_material_issues(
         }
         for item in mi.items:
             b = batch_map.get(item.batch_id) if item.batch_id else None
+            p_info = packed_info_map.get(item.id, [Decimal("0"), []])
             mi_dict["items"].append({
                 "id": item.id, "item_id": item.item_id,
                 "item_name": item.item.name if item.item else None,
                 "item_code": item.item.item_code if item.item else None,
                 "uom_name": item.uom.name if item.uom else None,
                 "qty": float(item.qty or 0),
+                "packed_qty": float(p_info[0]),
+                "packed_serials": p_info[1],
                 "uom_id": item.uom_id,
                 "rate": float(item.rate or 0),
                 "amount": float(item.amount or 0),
@@ -3326,6 +3354,26 @@ async def get_material_issue(
         response["items"][i]["serial_numbers"] = item.serial_numbers
         response["items"][i]["has_serial"] = bool(item.item.has_serial) if item.item else False
         response["items"][i]["has_batch"] = bool(item.item.has_batch) if item.item else False
+        
+        # Calculate packed quantity and packed serials for this MaterialIssueItem
+        from app.models.consignment import ConsignmentPackageItem, ConsignmentPackage, Consignment
+        packed_res = await db.execute(
+            select(ConsignmentPackageItem.serial_numbers, ConsignmentPackageItem.quantity_packed)
+            .join(ConsignmentPackage, ConsignmentPackageItem.package_id == ConsignmentPackage.id)
+            .join(Consignment, ConsignmentPackage.consignment_id == Consignment.id)
+            .where(
+                ConsignmentPackageItem.material_issue_item_id == item.id,
+                Consignment.status != "CANCELLED"
+            )
+        )
+        total_packed = Decimal("0")
+        packed_sns = []
+        for sns_list, qty_p in packed_res.all():
+            total_packed += qty_p or Decimal("0")
+            if sns_list:
+                packed_sns.extend(sns_list)
+        response["items"][i]["packed_qty"] = float(total_packed)
+        response["items"][i]["packed_serials"] = packed_sns
     return response
 
 
