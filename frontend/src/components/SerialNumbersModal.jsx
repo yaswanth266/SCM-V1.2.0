@@ -54,11 +54,22 @@ function SerialInput({ index, initialValue, onUpdate, onDelete }) {
         color: val?.trim() ? '#15803d' : '#64748b', fontSize: 10, fontWeight: 700,
       }}>{index + 1}</span>
       <Input
+        className="serial-number-input-field"
         placeholder={`Serial #${index + 1}`}
         value={val}
         onChange={(e) => setVal(e.target.value)}
-        onBlur={() => onUpdate(val)}
-        onPressEnter={() => onUpdate(val)}
+        onBlur={(e) => onUpdate(e.target.value)}
+        onPressEnter={(e) => {
+          onUpdate(e.target.value);
+          setTimeout(() => {
+            const inputs = document.querySelectorAll('.serial-number-input-field');
+            const nextInput = inputs[index + 1];
+            if (nextInput) {
+              nextInput.focus();
+              nextInput.select();
+            }
+          }, 80);
+        }}
         style={{ flex: 1, borderRadius: 6, fontFamily: 'monospace', fontSize: 12 }}
         suffix={val?.trim() ? <CheckCircleFilled style={{ color: '#16a34a', fontSize: 12 }} /> : null}
       />
