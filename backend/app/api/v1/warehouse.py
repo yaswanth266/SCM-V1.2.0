@@ -2720,6 +2720,9 @@ async def list_material_issues(
             "remarks": mi.remarks,
             "issued_by": mi.issued_by,
             "created_at": mi.created_at,
+            "vehicle_code": mi.vehicle_code,
+            "vehicle_number": mi.vehicle_number,
+            "service_code": mi.service_code,
             "items": [],
         }
         for item in mi.items:
@@ -2929,7 +2932,7 @@ async def create_material_issue(
                 ),
             )
 
-    # BUG-ISS-003 — block issue against a closed/cancelled indent.
+    ind = None
     if payload.indent_id:
         try:
             from app.models.indent import Indent as _Indent
@@ -2994,6 +2997,10 @@ async def create_material_issue(
             )
             issue_number = await generate_number(db, "warehouse", "material_issue")
 
+            v_code = payload.vehicle_code if payload.vehicle_code is not None else (ind.vehicle_code if ind else None)
+            v_num = payload.vehicle_number if payload.vehicle_number is not None else (ind.vehicle_number if ind else None)
+            s_code = payload.service_code if payload.service_code is not None else (ind.service_code if ind else None)
+
             mi = MaterialIssue(
                 issue_number=issue_number,
                 mr_id=payload.mr_id,
@@ -3006,6 +3013,9 @@ async def create_material_issue(
                 remarks=payload.remarks,
                 status="draft",
                 issued_by=current_user.id,
+                vehicle_code=v_code,
+                vehicle_number=v_num,
+                service_code=s_code,
             )
             db.add(mi)
             await db.flush()
@@ -3351,7 +3361,9 @@ async def get_material_issue(
         response["items"][i]["item_code"] = item.item.item_code if item.item else None
         response["items"][i]["item_type"] = item.item.item_type if item.item else None
         response["items"][i]["uom_name"] = item.uom.name if item.uom else None
+        response["items"][i]["batch_id"] = item.batch_id
         response["items"][i]["batch_number"] = item.batch.batch_number if item.batch else None
+        response["items"][i]["expiry_date"] = item.batch.expiry_date.strftime("%d-%b-%Y") if (item.batch and item.batch.expiry_date) else None
         response["items"][i]["serial_numbers"] = item.serial_numbers
         response["items"][i]["has_serial"] = bool(item.item.has_serial) if item.item else False
         response["items"][i]["has_batch"] = bool(item.item.has_batch) if item.item else False
@@ -3415,6 +3427,12 @@ async def update_material_issue(
         mi.issued_to = payload.issued_to
     if payload.remarks is not None:
         mi.remarks = payload.remarks
+    if payload.vehicle_code is not None:
+        mi.vehicle_code = payload.vehicle_code
+    if payload.vehicle_number is not None:
+        mi.vehicle_number = payload.vehicle_number
+    if payload.service_code is not None:
+        mi.service_code = payload.service_code
 
     # Resolve central warehouse
     from app.models.warehouse import Warehouse as _Wh, WarehouseConfig

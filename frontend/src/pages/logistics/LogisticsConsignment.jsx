@@ -190,7 +190,9 @@ export default function LogisticsConsignment() {
         { label: 'Indent #', value: detailConsignment.indent_number || '—' },
         { label: 'Source WH', value: detailConsignment.warehouse_name },
         { label: 'Destination WH', value: detailConsignment.destination_warehouse_name || '—' },
-        { label: 'Receiver', value: `${detailConsignment.receiver_name || ''} (${detailConsignment.receiver_employee_code || ''})` },
+        { label: 'Receiver', value: detailConsignment.receiver_employee_code 
+          ? `${detailConsignment.receiver_name || ''} (${detailConsignment.receiver_employee_code})` 
+          : (detailConsignment.receiver_name || '—') },
         { label: 'Total Packages', value: detailConsignment.total_packages },
         { label: 'Total Weight', value: `${detailConsignment.total_weight_kg || 0} KG` },
         { label: 'Total Volume', value: `${detailConsignment.total_volume_cft || 0} CFT` },
@@ -217,9 +219,10 @@ export default function LogisticsConsignment() {
         barcode: label.parent_package_barcode || label.parent_package_number,
         details: [
           { label: 'Consignment', value: label.consignment_number },
-          { label: 'Seal #', value: label.seal_number || '—' },
           { label: 'Destination', value: label.destination_warehouse_name || '—' },
-          { label: 'Receiver', value: `${label.receiver_name || ''} (${label.receiver_employee_code || ''})` },
+          { label: 'Receiver', value: label.receiver_employee_code 
+            ? `${label.receiver_name || ''} (${label.receiver_employee_code})` 
+            : (label.receiver_name || '—') },
           { label: 'Child Packages', value: label.child_package_count },
           { label: 'Gross Weight', value: `${label.gross_weight_kg || 0} KG` },
           { label: 'Volume', value: `${label.total_volume_cft || 0} CFT` },
@@ -242,9 +245,10 @@ export default function LogisticsConsignment() {
         barcode: label.package_barcode_value || label.package_number,
         details: [
           { label: 'Consignment', value: label.consignment_number },
-          { label: 'Seal #', value: label.seal_number || '—' },
           { label: 'Location', value: label.location || '—' },
-          { label: 'Receiver', value: `${label.receiver_name || ''} (${label.receiver_employee_code || ''})` },
+          { label: 'Receiver', value: label.receiver_employee_code 
+            ? `${label.receiver_name || ''} (${label.receiver_employee_code})` 
+            : (label.receiver_name || '—') },
           { label: 'Material Count', value: label.material_count },
           { label: 'Weight', value: `${label.gross_weight_kg || 0} KG` },
         ]
@@ -921,15 +925,13 @@ export default function LogisticsConsignment() {
                 <Descriptions.Item label="Indent #">{detailConsignment.indent_number || '—'}</Descriptions.Item>
                 <Descriptions.Item label="Source Warehouse">{detailConsignment.warehouse_name || '—'}</Descriptions.Item>
                 <Descriptions.Item label="Destination WH">{detailConsignment.destination_warehouse_name || '—'}</Descriptions.Item>
-                <Descriptions.Item label="Receiver">{detailConsignment.receiver_name ? `${detailConsignment.receiver_name} (${detailConsignment.receiver_employee_code || ''})` : (detailConsignment.receiver_employee_code || '—')}</Descriptions.Item>
+                <Descriptions.Item label="Receiver">{detailConsignment.receiver_name ? (detailConsignment.receiver_employee_code ? `${detailConsignment.receiver_name} (${detailConsignment.receiver_employee_code})` : detailConsignment.receiver_name) : (detailConsignment.receiver_employee_code || '—')}</Descriptions.Item>
                 <Descriptions.Item label="Receiver Position"><Tag color="purple">{detailConsignment.receiver_position_code || '—'}</Tag></Descriptions.Item>
                 <Descriptions.Item label="Total Packages">{detailConsignment.total_packages || 0}</Descriptions.Item>
                 <Descriptions.Item label="Total Weight">{detailConsignment.total_weight_kg ? `${detailConsignment.total_weight_kg} KG` : '—'}</Descriptions.Item>
                 <Descriptions.Item label="Total Volume">{detailConsignment.total_volume_cft ? `${detailConsignment.total_volume_cft} CFT` : '—'}</Descriptions.Item>
                 <Descriptions.Item label="Created">{formatDate(detailConsignment.created_at)}</Descriptions.Item>
                 <Descriptions.Item label="Packed At">{detailConsignment.packed_at ? formatDate(detailConsignment.packed_at) : '—'}</Descriptions.Item>
-                <Descriptions.Item label="Dispatched At">{detailConsignment.dispatched_at ? formatDate(detailConsignment.dispatched_at) : '—'}</Descriptions.Item>
-                <Descriptions.Item label="Received At">{detailConsignment.received_at ? formatDate(detailConsignment.received_at) : '—'}</Descriptions.Item>
               </Descriptions>
             </Card>
           </Col>
@@ -1011,7 +1013,7 @@ export default function LogisticsConsignment() {
                 <Row gutter={[12, 12]}>
                   <Col xs={24} md={18}>
                     <Row gutter={[12, 12]}>
-                      <Col xs={24} md={8}>
+                      <Col xs={24} md={10}>
                         <div style={{ fontSize: '11px', color: '#64748b' }}>Type</div>
                         <div style={{ fontWeight: 600 }}>{pkg.package_type}</div>
                       </Col>
@@ -1019,15 +1021,11 @@ export default function LogisticsConsignment() {
                         <div style={{ fontSize: '11px', color: '#64748b' }}>Weight</div>
                         <div style={{ fontWeight: 600 }}>{pkg.gross_weight_kg ? `${pkg.gross_weight_kg} KG` : '—'}</div>
                       </Col>
-                      <Col xs={12} md={4}>
+                      <Col xs={12} md={5}>
                         <div style={{ fontSize: '11px', color: '#64748b' }}>Volume</div>
                         <div style={{ fontWeight: 600 }}>{pkg.volume_cft ? `${pkg.volume_cft.toFixed(2)} CFT` : '—'}</div>
                       </Col>
-                      <Col xs={12} md={4}>
-                        <div style={{ fontSize: '11px', color: '#64748b' }}>Seal #</div>
-                        <div style={{ fontWeight: 600 }}>{pkg.seal_number || '—'}</div>
-                      </Col>
-                      <Col xs={12} md={4}>
+                      <Col xs={12} md={5}>
                         <div style={{ fontSize: '11px', color: '#64748b' }}>Items</div>
                         <div style={{ fontWeight: 600 }}>{pkg.material_count || 0}</div>
                       </Col>
@@ -1253,12 +1251,10 @@ export default function LogisticsConsignment() {
                       <Divider type="vertical" />
                       <span><strong>WH:</strong> {selectedIssue.warehouse_name || '—'}</span>
                       <Divider type="vertical" />
-                      <span><strong>Destination:</strong> {selectedIssue.destination_warehouse_name || '—'}</span>
-                      <Divider type="vertical" />
                       <span><strong>Items:</strong> {selectedIssueItems.length}</span>
                     </Space>
                     <Space wrap style={{ background: '#f8fafc', padding: '6px 12px', borderRadius: '6px', border: '1px solid #e2e8f0', width: 'fit-content', marginTop: '4px' }}>
-                      <span>👤 <strong>Issued To:</strong> {selectedIssue.issued_to_name || '—'} ({selectedIssue.issued_to_employee_code || '—'})</span>
+                      <span>👤 <strong>Issued To:</strong> {selectedIssue.issued_to_name || '—'}{selectedIssue.issued_to_employee_code ? ` (${selectedIssue.issued_to_employee_code})` : ''}</span>
                       <Divider type="vertical" />
                       <span>💼 <strong>Position Code:</strong> <Tag color="purple">{selectedIssue.position_code || '—'}</Tag></span>
                     </Space>
@@ -1329,7 +1325,7 @@ export default function LogisticsConsignment() {
                   style={{ marginBottom: '12px', borderRadius: '10px', border: pkg.locked ? '1px solid #bbf7d0' : '1px solid #e2e8f0', background: pkg.locked ? '#f0fdf4' : '#ffffff' }}
                 >
                   <Row gutter={12}>
-                    <Col xs={12} md={4}>
+                    <Col xs={12} md={5}>
                       <Form.Item label="Type">
                         <Select disabled={pkg.locked} value={pkg.package_type} onChange={v => handlePackageFieldChange(pkg.key, 'package_type', v)}>
                           <Option value="BOX">BOX</Option>
@@ -1340,34 +1336,29 @@ export default function LogisticsConsignment() {
                         </Select>
                       </Form.Item>
                     </Col>
-                    <Col xs={12} md={4}>
+                    <Col xs={12} md={5}>
                       <Form.Item label="Weight (KG)">
                         <InputNumber disabled={pkg.locked} value={pkg.gross_weight_kg} min={0} step={0.1}
                           onChange={v => handlePackageFieldChange(pkg.key, 'gross_weight_kg', v)}
                           style={{ width: '100%' }} />
                       </Form.Item>
                     </Col>
-                    <Col xs={8} md={3}>
+                    <Col xs={8} md={4}>
                       <Form.Item label="L (cm)">
                         <InputNumber disabled={pkg.locked} value={pkg.length_cm} min={0} onChange={v => handlePackageFieldChange(pkg.key, 'length_cm', v)}
                           style={{ width: '100%' }} />
                       </Form.Item>
                     </Col>
-                    <Col xs={8} md={3}>
+                    <Col xs={8} md={4}>
                       <Form.Item label="W (cm)">
                         <InputNumber disabled={pkg.locked} value={pkg.width_cm} min={0} onChange={v => handlePackageFieldChange(pkg.key, 'width_cm', v)}
                           style={{ width: '100%' }} />
                       </Form.Item>
                     </Col>
-                    <Col xs={8} md={3}>
+                    <Col xs={8} md={4}>
                       <Form.Item label="H (cm)">
                         <InputNumber disabled={pkg.locked} value={pkg.height_cm} min={0} onChange={v => handlePackageFieldChange(pkg.key, 'height_cm', v)}
                           style={{ width: '100%' }} />
-                      </Form.Item>
-                    </Col>
-                    <Col xs={12} md={3}>
-                      <Form.Item label="Seal #">
-                        <Input disabled={pkg.locked} value={pkg.seal_number} onChange={e => handlePackageFieldChange(pkg.key, 'seal_number', e.target.value)} />
                       </Form.Item>
                     </Col>
                     <Col xs={24} md={24}>

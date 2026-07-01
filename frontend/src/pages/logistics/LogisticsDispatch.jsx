@@ -629,6 +629,9 @@ export default function LogisticsDispatch() {
       driver_phone: mdo.handover?.driver_phone,
       received_by_name: mdo.handover?.received_by_name,
       received_by_phone: mdo.handover?.received_by_phone,
+      received_by_emp_code: mdo.handover?.received_by_emp_code,
+      received_by_aadhar_no: mdo.handover?.received_by_aadhar_no,
+      received_by_designation: mdo.handover?.received_by_designation,
       vehicle_no: mdo.handover?.vehicle_no,
       courier_name: mdo.handover?.courier_name,
       awb_no: mdo.handover?.awb_no,
@@ -730,6 +733,9 @@ export default function LogisticsDispatch() {
         driver_phone: values.driver_phone ? values.driver_phone.replace(/[\s\-()]/g, '') : undefined,
         received_by_name: values.received_by_name,
         received_by_phone: values.received_by_phone ? values.received_by_phone.replace(/[\s\-()]/g, '') : undefined,
+        received_by_emp_code: values.received_by_emp_code,
+        received_by_aadhar_no: values.received_by_aadhar_no ? values.received_by_aadhar_no.replace(/\s/g, '') : undefined,
+        received_by_designation: values.received_by_designation,
         handover_remarks: uploadedUrls.receiver_signature
           ? `RECEIVER_SIGNATURE: ${uploadedUrls.receiver_signature} | REMARKS: ${values.handover_remarks || 'Standard handover clearance completed.'}`
           : (values.handover_remarks || 'Standard handover clearance completed.')
@@ -2504,13 +2510,25 @@ export default function LogisticsDispatch() {
               >
                 {isReadOnly ? (
                   <Row gutter={[16, 16]} style={{ fontSize: '13px' }}>
-                    <Col xs={12} md={12}>
+                    <Col xs={12} md={8}>
                       <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Pickup Person Name</span>
                       <strong style={{ color: '#334155' }}>{form.getFieldValue('received_by_name') || '—'}</strong>
                     </Col>
-                    <Col xs={12} md={12}>
+                    <Col xs={12} md={8}>
                       <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Pickup Person Phone</span>
                       <strong style={{ color: '#334155' }}>{form.getFieldValue('received_by_phone') || '—'}</strong>
+                    </Col>
+                    <Col xs={12} md={8}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Employee Code</span>
+                      <strong style={{ color: '#334155' }}>{form.getFieldValue('received_by_emp_code') || '—'}</strong>
+                    </Col>
+                    <Col xs={12} md={8}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Aadhar No</span>
+                      <strong style={{ color: '#334155' }}>{form.getFieldValue('received_by_aadhar_no') || '—'}</strong>
+                    </Col>
+                    <Col xs={12} md={8}>
+                      <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Designation</span>
+                      <strong style={{ color: '#334155' }}>{form.getFieldValue('received_by_designation') || '—'}</strong>
                     </Col>
                     <Col xs={24}>
                       <span style={{ color: '#64748b', display: 'block', fontSize: '11px', textTransform: 'uppercase' }}>Handover Remarks</span>
@@ -2552,6 +2570,39 @@ export default function LogisticsDispatch() {
                           ]}
                         >
                           <Input placeholder="E.g., 9765432100" />
+                        </Form.Item>
+                      </Col>
+                    </Row>
+                    <Row gutter={16}>
+                      <Col xs={24} md={8}>
+                        <Form.Item name="received_by_emp_code" label="Employee Code" rules={[{ required: true, message: 'Employee Code is required' }]}>
+                          <Input placeholder="E.g., EMP101" />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} md={8}>
+                        <Form.Item
+                          name="received_by_aadhar_no"
+                          label="Aadhar Number"
+                          rules={[
+                            { required: true, message: 'Aadhar Number is required' },
+                            {
+                              validator: (_, value) => {
+                                if (!value) return Promise.resolve();
+                                const cleaned = value.replace(/\s/g, '');
+                                if (/^\d{12}$/.test(cleaned)) {
+                                  return Promise.resolve();
+                                }
+                                return Promise.reject(new Error('Enter a valid 12-digit Aadhar number'));
+                              }
+                            }
+                          ]}
+                        >
+                          <Input placeholder="E.g., 1234 5678 9012" maxLength={14} />
+                        </Form.Item>
+                      </Col>
+                      <Col xs={24} md={8}>
+                        <Form.Item name="received_by_designation" label="Designation" rules={[{ required: true, message: 'Designation is required' }]}>
+                          <Input placeholder="E.g., Logistics Officer" />
                         </Form.Item>
                       </Col>
                     </Row>

@@ -179,6 +179,11 @@ async def ensure_logistics_schema(db: AsyncSession):
     await add_column_if_not_exists("logistics_sub_dispatch_orders", "receipt_photos", "JSON NULL")
     await add_column_if_not_exists("logistics_sub_dispatch_orders", "receipt_signature", "VARCHAR(500) NULL")
 
+    # Add columns to dispatch_handovers
+    await add_column_if_not_exists("dispatch_handovers", "received_by_emp_code", "VARCHAR(50) NULL")
+    await add_column_if_not_exists("dispatch_handovers", "received_by_aadhar_no", "VARCHAR(50) NULL")
+    await add_column_if_not_exists("dispatch_handovers", "received_by_designation", "VARCHAR(100) NULL")
+
     # Modify logistics_sub_dispatch_orders status column type from Enum to VARCHAR (safe upgrade)
     # Must handle the case where the column is an ENUM that doesn't include all needed values.
     try:
@@ -1070,6 +1075,9 @@ async def create_mdo(payload: MdoCreate, db: AsyncSession = Depends(get_db), cur
             handed_over_by_entity_id=current_user.id,
             received_by_name=payload.received_by_name or "Carrier Receiver",
             received_by_phone=payload.received_by_phone,
+            received_by_emp_code=payload.received_by_emp_code,
+            received_by_aadhar_no=payload.received_by_aadhar_no,
+            received_by_designation=payload.received_by_designation,
             vehicle_no=payload.vehicle_no,
             driver_name=payload.driver_name,
             driver_phone=payload.driver_phone,
@@ -3717,6 +3725,9 @@ async def create_handover(payload: DispatchHandoverCreate, db: AsyncSession = De
         handed_over_by_entity_id=current_user.id,
         received_by_name=payload.received_by_name,
         received_by_phone=payload.received_by_phone,
+        received_by_emp_code=payload.received_by_emp_code,
+        received_by_aadhar_no=payload.received_by_aadhar_no,
+        received_by_designation=payload.received_by_designation,
         transporter_id=payload.transporter_id,
         vehicle_no=payload.vehicle_no,
         driver_name=payload.driver_name,

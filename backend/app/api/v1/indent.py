@@ -806,6 +806,7 @@ async def create_indent(
         position_id=user_position_id,
         vehicle_code=payload.vehicle_code,
         vehicle_number=payload.vehicle_number,
+        service_code=payload.service_code,
     )
 
     db.add(indent)

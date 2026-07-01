@@ -24,6 +24,7 @@ class Indent(Base):
     position_id = Column(BigInteger, ForeignKey("positions.id"), nullable=True)
     vehicle_code = Column(String(50), nullable=True)
     vehicle_number = Column(String(50), nullable=True)
+    service_code = Column(String(50), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

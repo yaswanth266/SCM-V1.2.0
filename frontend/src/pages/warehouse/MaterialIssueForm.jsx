@@ -390,6 +390,9 @@ const MaterialIssueForm = () => {
         destination_warehouse_id: ind.warehouse_id,
         department: ind.department || form.getFieldValue('department'),
         issued_to: ind.raised_by || form.getFieldValue('issued_to'),
+        vehicle_code: ind.vehicle_code || undefined,
+        vehicle_number: ind.vehicle_number || undefined,
+        service_code: ind.service_code || undefined,
       });
 
       const lines = (ind.items || []).map((it) => ({
@@ -443,6 +446,9 @@ const MaterialIssueForm = () => {
         issued_to: data.issued_to,
         issue_date: data.issue_date ? dayjs(data.issue_date) : null,
         remarks: data.remarks,
+        vehicle_code: data.vehicle_code || undefined,
+        vehicle_number: data.vehicle_number || undefined,
+        service_code: data.service_code || undefined,
       });
 
       const items = (data.items || []).map((item, idx) => ({
@@ -1012,6 +1018,9 @@ const MaterialIssueForm = () => {
             <Descriptions.Item label="Issued To">{recordData.issued_to_name || recordData.issued_to || '-'}</Descriptions.Item>
             <Descriptions.Item label="MR Reference">{recordData.mr_number || recordData.mr_id || '-'}</Descriptions.Item>
             <Descriptions.Item label="Indent Reference">{recordData.indent_number || recordData.indent_id || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Vehicle Code">{recordData.vehicle_code || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Vehicle Number">{recordData.vehicle_number || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Service Code">{recordData.service_code || '-'}</Descriptions.Item>
             <Descriptions.Item label="Remarks" span={3}>{recordData.remarks || '-'}</Descriptions.Item>
           </Descriptions>
         </Card>
@@ -1542,6 +1551,24 @@ const MaterialIssueForm = () => {
             <Col span={12}>
               <Form.Item name="remarks" label="Remarks">
                 <Input placeholder="Any remarks" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col span={8}>
+              <Form.Item name="vehicle_code" label="Vehicle Code">
+                <Input placeholder="Auto-loaded from Indent" disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="vehicle_number" label="Vehicle Number">
+                <Input placeholder="Auto-loaded from Indent" disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="service_code" label="Service Code">
+                <Input placeholder="Auto-loaded from Indent" disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
               </Form.Item>
             </Col>
           </Row>

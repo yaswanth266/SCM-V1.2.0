@@ -86,9 +86,10 @@ const StockBalance = () => {
     const itemName = record.item_name || '-';
     const batch = record.batch_number || record.batch_name || '-';
     const wh = record.warehouse_name || '-';
+    const expLabel = record.item_type === 'asset' ? 'Warranty' : 'Expiry';
     const exp = record.expiry_date ? dayjs(record.expiry_date).format('YYYY-MM-DD') : '-';
     
-    const payload = `Material: ${matCode}\nItem: ${itemName}\nBatch: ${batch}\nCode: ${code}\nWarehouse: ${wh}\nExpiry: ${exp}`;
+    const payload = `Material: ${matCode}\nItem: ${itemName}\nBatch: ${batch}\nCode: ${code}\nWarehouse: ${wh}\n${expLabel}: ${exp}`;
     
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -284,22 +285,26 @@ const StockBalance = () => {
       });
       const data = res.data;
       const items = data.items || data.data || data || [];
-      const exportData = items.map((r) => ({
-        'Item Code': r.item_code,
-        'Item Name': r.item_name,
-        'Warehouse': r.warehouse_name || r.warehouse,
-        'Location': r.location || '',
-        'Rack': r.rack || '',
-        'Bin': r.bin_code || r.bin || '',
-        'Batch': r.batch_number || r.batch || '',
-        'Expiry Date': r.expiry_date ? formatDate(r.expiry_date) : '',
-        'Available Qty': r.available_qty || 0,
-        'Reserved Qty': r.reserved_qty || 0,
-        'Transit Qty': r.transit_qty || 0,
-        'Total Qty': r.total_qty || 0,
-        'Valuation Rate': r.valuation_rate || 0,
-        'Stock Value': r.stock_value || 0,
-      }));
+      const exportData = items.map((r) => {
+        const row = {
+          'Item Code': r.item_code,
+          'Item Name': r.item_name,
+          'Warehouse': r.warehouse_name || r.warehouse,
+          'Location': r.location || '',
+          'Rack': r.rack || '',
+          'Bin': r.bin_code || r.bin || '',
+          'Batch': r.batch_number || r.batch || '',
+        };
+        const dateKey = r.item_type === 'asset' ? 'Warranty End Date' : 'Expiry Date';
+        row[dateKey] = r.expiry_date ? formatDate(r.expiry_date) : '';
+        row['Available Qty'] = r.available_qty || 0;
+        row['Reserved Qty'] = r.reserved_qty || 0;
+        row['Transit Qty'] = r.transit_qty || 0;
+        row['Total Qty'] = r.total_qty || 0;
+        row['Valuation Rate'] = r.valuation_rate || 0;
+        row['Stock Value'] = r.stock_value || 0;
+        return row;
+      });
       downloadExcel(exportData, 'Stock_Balance');
       message.success('Export downloaded');
     } catch (err) {
@@ -353,9 +358,15 @@ const StockBalance = () => {
             </Tooltip>
           )}
           {record.is_expiring_soon && (
-            <Tooltip title="Expiring Soon">
-              <ClockCircleOutlined style={{ color: '#faad14' }} />
-            </Tooltip>
+            record.item_type === 'asset' ? (
+              <Tooltip title="Warranty Expiring Soon">
+                <ClockCircleOutlined style={{ color: '#1890ff' }} />
+              </Tooltip>
+            ) : (
+              <Tooltip title="Expiring Soon">
+                <ClockCircleOutlined style={{ color: '#faad14' }} />
+              </Tooltip>
+            )
           )}
         </Space>
       ),
@@ -392,18 +403,26 @@ const StockBalance = () => {
       render: (val) => val || '-',
     },
     {
-      title: 'Expiry Date',
+      title: filterCategory === 'asset' 
+        ? 'Warranty End Date' 
+        : (filterCategory === 'consumable' ? 'Expiry Date' : 'Expiry / Warranty End Date'),
       dataIndex: 'expiry_date',
       width: 120,
       sorter: true,
-      render: (val) => {
+      render: (val, record) => {
         if (!val) return '-';
         const d = dayjs(val);
         const isExpiring = d.diff(dayjs(), 'day') <= 30;
+        const tooltipTitle = record.item_type === 'asset' ? 'Warranty End Date' : 'Expiry Date';
         return (
-          <Text type={isExpiring ? 'warning' : undefined}>
-            {formatDate(val)}
-          </Text>
+          <Tooltip title={tooltipTitle}>
+            <Text 
+              type={isExpiring ? 'warning' : undefined} 
+              style={isExpiring && record.item_type === 'asset' ? { color: '#1890ff' } : undefined}
+            >
+              {formatDate(val)}
+            </Text>
+          </Tooltip>
         );
       },
     },
@@ -595,7 +614,7 @@ const StockBalance = () => {
       width: 110,
     },
     {
-      title: 'Expiry Date',
+      title: drillDownItem?.item_type === 'asset' ? 'Warranty End Date' : 'Expiry Date',
       dataIndex: 'expiry_date',
       width: 110,
       render: (val) => formatDate(val),
@@ -893,8 +912,9 @@ const StockBalance = () => {
                               const itemName = drillDownItem?.item_name || '-';
                               const bNum = batch.batch_number || '-';
                               const whName = wh.name || '-';
+                              const expLabel = drillDownItem?.item_type === 'asset' ? 'Warranty' : 'Expiry';
                               const expDate = batch.expiry_date ? dayjs(batch.expiry_date).format('YYYY-MM-DD') : '-';
-                              return `Material: ${matCode}\nItem: ${itemName}\nBatch: ${bNum}\nCode: ${code}\nWarehouse: ${whName}\nExpiry: ${expDate}`;
+                              return `Material: ${matCode}\nItem: ${itemName}\nBatch: ${bNum}\nCode: ${code}\nWarehouse: ${whName}\n${expLabel}: ${expDate}`;
                             };
                             
                             return (
@@ -906,7 +926,12 @@ const StockBalance = () => {
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
                                   <div>
                                     <Tag color="purple">Batch: {batch.batch_number}</Tag>
-                                    {batch.expiry_date && <Tag color="red">Exp: {formatDate(batch.expiry_date)}</Tag>}
+                                    {batch.expiry_date && (
+                                      <Tag color={drillDownItem?.item_type === 'asset' ? 'blue' : 'red'}>
+                                        {drillDownItem?.item_type === 'asset' ? 'Warranty: ' : 'Exp: '}
+                                        {formatDate(batch.expiry_date)}
+                                      </Tag>
+                                    )}
                                   </div>
                                   <Space>
                                     <Tag color="green">Avail: {formatNumber(batch.available_qty)}</Tag>
@@ -1037,7 +1062,7 @@ const StockBalance = () => {
             iconColor="#faad14"
             iconBg="#fffbe6"
             value={formatNumber(stats.expiring_soon)}
-            label="Expiring Soon"
+            label={filterCategory === 'asset' ? "Warranty Ending Soon" : (filterCategory === 'consumable' ? "Expiring Soon" : "Expiring / Warranty Ending")}
           />
         </Col>
       </Row>

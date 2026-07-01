@@ -20,6 +20,9 @@ class MaterialIssue(Base):
     remarks = Column(Text)
     issued_by = Column(BigInteger)
     dispatched_at = Column(DateTime, nullable=True)
+    vehicle_code = Column(String(50), nullable=True)
+    vehicle_number = Column(String(50), nullable=True)
+    service_code = Column(String(50), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     # Wave 5 — needed for ordering / "last edited" UX (BUG-ISS-014).
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

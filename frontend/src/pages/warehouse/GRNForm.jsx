@@ -592,13 +592,15 @@ const GRNForm = () => {
           dateErrors.push(`"${label}": Rate cannot be negative`);
         }
         if (exp && exp.isBefore(today)) {
-          dateErrors.push(`"${label}": Expiry date (${exp.format('DD-MM-YYYY')}) cannot be in the past`);
+          const dateLabel = item.item_type === 'asset' ? 'Warranty end date' : 'Expiry date';
+          dateErrors.push(`"${label}": ${dateLabel} (${exp.format('DD-MM-YYYY')}) cannot be in the past`);
         }
         if (mfg && mfg.isAfter(today.add(1, 'day'))) {
           dateErrors.push(`"${label}": Manufacturing date (${mfg.format('DD-MM-YYYY')}) cannot be more than 1 day in the future`);
         }
         if (mfg && exp && mfg.isAfter(exp)) {
-          dateErrors.push(`"${label}": Manufacturing date must be before expiry date`);
+          const expLabel = item.item_type === 'asset' ? 'warranty end date' : 'expiry date';
+          dateErrors.push(`"${label}": Manufacturing date must be before ${expLabel}`);
         }
       });
       if (dateErrors.length > 0) {
@@ -717,6 +719,7 @@ const GRNForm = () => {
   // ============================
   if (!isNew && grn && !editMode) {
     const grnItemsList = grn.items || [];
+    const hasAssetInView = grnItemsList.some(r => r.item_type === 'asset' || (r.item && r.item.item_type === 'asset'));
     const statusIdx = GRN_STATUS_FLOW.indexOf(grn.status);
     const typeMap = { inward_based: 'Inward Based', po_based: 'PO Based', direct: 'Direct', transfer: 'Transfer', return: 'Return' };
 
@@ -822,7 +825,16 @@ const GRNForm = () => {
               { title: 'Ordered Qty', dataIndex: 'ordered_qty', width: 100, align: 'right', render: (v) => formatNumber(v || 0) },
               { title: 'Received Qty', dataIndex: 'received_qty', width: 110, align: 'right', render: (v) => <Text strong>{formatNumber(v || 0)}</Text> },
               { title: 'Batch No', dataIndex: 'batch_number', width: 100, render: (v) => v || '-' },
-              { title: 'Expiry Date', dataIndex: 'expiry_date', width: 110, render: (v) => formatDate(v) },
+              { title: 'Expiry / Warranty End Date', dataIndex: 'expiry_date', width: 110, render: (v, r) => {
+                if (!v) return '-';
+                const isAsset = r.item_type === 'asset' || (r.item && r.item.item_type === 'asset');
+                const label = isAsset ? 'Warranty: ' : 'Exp: ';
+                return (
+                  <Tooltip title={isAsset ? 'Warranty End Date' : 'Expiry Date'}>
+                    <span>{label}{formatDate(v)}</span>
+                  </Tooltip>
+                );
+              } },
               { title: 'Rate', dataIndex: 'rate', width: 100, align: 'right', render: (v) => formatCurrency(v) },
               { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right', render: (v) => <Text strong>{formatCurrency(v)}</Text> },
               { title: 'Remarks', dataIndex: 'remarks', width: 150, ellipsis: true, render: (v) => v || '-' },
@@ -1014,13 +1026,16 @@ const GRNForm = () => {
       ),
     },
     {
-      title: 'Expiry Date', dataIndex: 'expiry_date', width: 120,
+      title: 'Expiry / Warranty End Date',
+      dataIndex: 'expiry_date',
+      width: 120,
       render: (val, record) => (
         <DatePicker
           value={val ? dayjs(val) : null}
           onChange={(d) => updateItemRow(record.key, 'expiry_date', d)}
           size="small"
           format={DATE_FORMAT}
+          placeholder={record.item_type === 'asset' ? 'Warranty End' : 'Expiry Date'}
           style={{ width: '100%' }}
         />
       ),

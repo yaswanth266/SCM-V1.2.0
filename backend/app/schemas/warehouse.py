@@ -320,6 +320,9 @@ class MaterialIssueCreate(BaseModel):
     department: Optional[str] = None
     issued_to: Optional[int] = None
     remarks: Optional[str] = None
+    vehicle_code: Optional[str] = None
+    vehicle_number: Optional[str] = None
+    service_code: Optional[str] = None
     items: List[MaterialIssueItemCreate]
 
     @field_validator("items")
@@ -350,6 +353,9 @@ class MaterialIssueUpdate(BaseModel):
     department: Optional[str] = None
     issued_to: Optional[int] = None
     remarks: Optional[str] = None
+    vehicle_code: Optional[str] = None
+    vehicle_number: Optional[str] = None
+    service_code: Optional[str] = None
     items: Optional[List[MaterialIssueItemCreate]] = None
 
     @field_validator("issue_date")
@@ -375,6 +381,7 @@ class MaterialIssueItemResponse(BaseModel):
     uom_name: Optional[str] = None
     batch_id: Optional[int] = None
     batch_number: Optional[str] = None
+    expiry_date: Optional[str] = None
     qty: Decimal
     uom_id: int
     bin_id: Optional[int] = None
@@ -404,6 +411,9 @@ class MaterialIssueResponse(BaseModel):
     status: str
     remarks: Optional[str] = None
     issued_by: Optional[int] = None
+    vehicle_code: Optional[str] = None
+    vehicle_number: Optional[str] = None
+    service_code: Optional[str] = None
     position_code: Optional[str] = None
     created_at: Optional[datetime] = None
     items: List[MaterialIssueItemResponse] = []

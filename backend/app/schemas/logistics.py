@@ -133,6 +133,9 @@ class MdoCreate(BaseModel):
     driver_phone: Optional[str] = None
     received_by_name: Optional[str] = None
     received_by_phone: Optional[str] = None
+    received_by_emp_code: Optional[str] = None
+    received_by_aadhar_no: Optional[str] = None
+    received_by_designation: Optional[str] = None
     handover_remarks: Optional[str] = None
 
     @field_validator("driver_phone", "received_by_phone")
@@ -250,6 +253,9 @@ class DispatchHandoverResponse(BaseModel):
     handed_over_by_entity_id: int
     received_by_name: str
     received_by_phone: Optional[str] = None
+    received_by_emp_code: Optional[str] = None
+    received_by_aadhar_no: Optional[str] = None
+    received_by_designation: Optional[str] = None
     transporter_id: Optional[int] = None
     vehicle_no: Optional[str] = None
     driver_name: Optional[str] = None
@@ -325,6 +331,9 @@ class DispatchHandoverCreate(BaseModel):
     handover_type: str
     received_by_name: str
     received_by_phone: Optional[str] = None
+    received_by_emp_code: Optional[str] = None
+    received_by_aadhar_no: Optional[str] = None
+    received_by_designation: Optional[str] = None
     transporter_id: Optional[int] = None
     vehicle_no: Optional[str] = None
     driver_name: Optional[str] = None

@@ -573,9 +573,17 @@ async def stock_balance_breakdown(
     serials_map = {}
     asset_codes_map = {}
     consumable_codes_map = {}
+    all_existing_sns = set()
     if is_serial_tracked or is_asset_or_consumable:
         from app.models.warehouse import SerialNumber
         from sqlalchemy.orm import joinedload
+        
+        all_existing_sns = {
+            s[0] for s in (await db.execute(
+                select(SerialNumber.serial_number).where(SerialNumber.item_id == item_id)
+            )).all()
+        }
+
         s_query = (
             select(SerialNumber)
             .options(joinedload(SerialNumber.item))
@@ -647,30 +655,35 @@ async def stock_balance_breakdown(
             if qty_int > 0:
                 from app.services.asset_service import generate_asset_code
                 from app.models.warehouse import SerialNumber as DB_SerialNumber
-                for i in range(1, qty_int + 1):
-                    if i > 1000:
-                        break
+                
+                i = 1
+                generated_count = 0
+                while generated_count < qty_int and generated_count < 1000:
                     v_sn = f"V{i}"
-                    v_code = generate_asset_code(v_sn, r.item.item_code)
-                    
-                    new_sn = DB_SerialNumber(
-                        item_id=r.item_id,
-                        serial_number=v_sn,
-                        batch_id=r.batch_id,
-                        status="available",
-                        warehouse_id=r.warehouse_id,
-                        bin_id=r.bin_id,
-                        asset_code=v_code if r.item.item_type == "asset" else None,
-                        consumable_code=v_code if r.item.item_type == "consumable" else None
-                    )
-                    db.add(new_sn)
-                    should_commit = True
-                    
-                    sns.append(v_sn)
-                    if r.item.item_type == "asset":
-                        acs.append(v_code)
-                    else:
-                        ccs.append(v_code)
+                    if v_sn not in all_existing_sns:
+                        v_code = generate_asset_code(v_sn, r.item.item_code)
+                        
+                        new_sn = DB_SerialNumber(
+                            item_id=r.item_id,
+                            serial_number=v_sn,
+                            batch_id=r.batch_id,
+                            status="available",
+                            warehouse_id=r.warehouse_id,
+                            bin_id=r.bin_id,
+                            asset_code=v_code if r.item.item_type == "asset" else None,
+                            consumable_code=v_code if r.item.item_type == "consumable" else None
+                        )
+                        db.add(new_sn)
+                        all_existing_sns.add(v_sn)
+                        should_commit = True
+                        
+                        sns.append(v_sn)
+                        if r.item.item_type == "asset":
+                            acs.append(v_code)
+                        else:
+                            ccs.append(v_code)
+                        generated_count += 1
+                    i += 1
 
         data = {
             "warehouse_id": r.warehouse_id,

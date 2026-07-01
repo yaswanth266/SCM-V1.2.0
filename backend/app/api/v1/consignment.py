@@ -44,6 +44,7 @@ from app.models.consignment import (
     ConsignmentParentPackageChild,
 )
 from app.models.user import User
+from app.models.issue import MaterialIssueItem
 from app.services.number_series import generate_number
 from app.utils.dependencies import get_current_user, require_any_role, require_key
 from app.utils.schema_sync import ensure_consignment_schema
@@ -306,7 +307,7 @@ def _pkg_response(pkg: ConsignmentPackage, include_items: bool = True) -> dict:
 
 def _pkg_item_response(it: ConsignmentPackageItem) -> dict:
     mat = it.material
-    batch = it.batch
+    batch = it.batch or (it.material_issue_item.batch if it.material_issue_item else None)
     return {
         "id": it.id,
         "package_id": it.package_id,
@@ -315,7 +316,7 @@ def _pkg_item_response(it: ConsignmentPackageItem) -> dict:
         "material_code": mat.item_code if mat else None,
         "material_name": mat.name if mat else None,
         "material_type": mat.item_type if mat else None,
-        "batch_id": it.batch_id,
+        "batch_id": it.batch_id or (it.material_issue_item.batch_id if it.material_issue_item else None),
         "batch_number": batch.batch_number if batch else None,
         "expiry_date": batch.expiry_date.strftime("%d-%b-%Y") if (batch and batch.expiry_date) else None,
         "mfg_date": batch.manufacturing_date.strftime("%d-%b-%Y") if (batch and getattr(batch, "manufacturing_date", None)) else None,
@@ -670,6 +671,10 @@ async def create_consignment(
             selectinload(Consignment.packages)
             .selectinload(ConsignmentPackage.items)
             .joinedload(ConsignmentPackageItem.batch),
+            selectinload(Consignment.packages)
+            .selectinload(ConsignmentPackage.items)
+            .joinedload(ConsignmentPackageItem.material_issue_item)
+            .joinedload(MaterialIssueItem.batch),
             selectinload(Consignment.packages).joinedload(ConsignmentPackage.container),
         )
         .where(Consignment.id == consignment.id)
@@ -969,6 +974,10 @@ async def update_consignment(
             selectinload(Consignment.packages)
             .selectinload(ConsignmentPackage.items)
             .joinedload(ConsignmentPackageItem.batch),
+            selectinload(Consignment.packages)
+            .selectinload(ConsignmentPackage.items)
+            .joinedload(ConsignmentPackageItem.material_issue_item)
+            .joinedload(MaterialIssueItem.batch),
             selectinload(Consignment.packages).joinedload(ConsignmentPackage.container),
         )
         .where(Consignment.id == consignment.id)
@@ -1184,6 +1193,7 @@ async def scan_any_barcode(
         .options(
             selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.material),
             selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.batch),
+            selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.material_issue_item).joinedload(MaterialIssueItem.batch),
             selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.uom),
             joinedload(ConsignmentPackage.container),
             joinedload(ConsignmentPackage.consignment),
@@ -1234,6 +1244,7 @@ async def scan_any_barcode(
                 .options(
                     selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.material),
                     selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.batch),
+                    selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.material_issue_item).joinedload(MaterialIssueItem.batch),
                     selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.uom),
                     joinedload(ConsignmentPackage.container),
                     joinedload(ConsignmentPackage.consignment),
@@ -1395,6 +1406,7 @@ async def get_consignment(consignment_id: int, db: AsyncSession = Depends(get_db
             joinedload(Consignment.destination_warehouse),
             selectinload(Consignment.packages).selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.material),
             selectinload(Consignment.packages).selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.batch),
+            selectinload(Consignment.packages).selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.material_issue_item).joinedload(MaterialIssueItem.batch),
             selectinload(Consignment.packages).joinedload(ConsignmentPackage.container),
         )
         .where(Consignment.id == consignment_id)
@@ -1729,6 +1741,7 @@ async def scan_package_barcode(
                 .options(
                     selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.material),
                     selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.batch),
+                    selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.material_issue_item).joinedload(MaterialIssueItem.batch),
                     selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.uom),
                     joinedload(ConsignmentPackage.container),
                     joinedload(ConsignmentPackage.consignment),
@@ -1749,6 +1762,7 @@ async def get_package(package_id: int, db: AsyncSession = Depends(get_db), curre
         .options(
             selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.material),
             selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.batch),
+            selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.material_issue_item).joinedload(MaterialIssueItem.batch),
             selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.uom),
             joinedload(ConsignmentPackage.container),
         )
@@ -1769,6 +1783,7 @@ async def get_package_manifest(package_id: int, db: AsyncSession = Depends(get_d
             joinedload(ConsignmentPackage.consignment),
             selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.material),
             selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.batch),
+            selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.material_issue_item).joinedload(MaterialIssueItem.batch),
             selectinload(ConsignmentPackage.items).joinedload(ConsignmentPackageItem.uom),
         )
         .where(ConsignmentPackage.id == package_id)
@@ -1779,7 +1794,7 @@ async def get_package_manifest(package_id: int, db: AsyncSession = Depends(get_d
     manifest_items = []
     for idx, it in enumerate(pkg.items, start=1):
         mat = it.material
-        batch = it.batch
+        batch = it.batch or (it.material_issue_item.batch if it.material_issue_item else None)
         manifest_items.append({
             "sr": idx,
             "material_code": mat.item_code if mat else None,

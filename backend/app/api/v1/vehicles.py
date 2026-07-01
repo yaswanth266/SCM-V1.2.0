@@ -17,6 +17,7 @@ async def list_vehicles(
     db: AsyncSession = Depends(get_db),
     search: Optional[str] = Query(None, description="Search by code or number"),
     is_active: Optional[bool] = Query(None),
+    limit: int = Query(100, ge=1, le=1000),
     current_user: User = Depends(get_current_user),
 ):
     query = select(Vehicle)
@@ -30,7 +31,7 @@ async def list_vehicles(
                 Vehicle.vehicle_number.ilike(search_pattern),
             )
         )
-    query = query.order_by(Vehicle.vehicle_code)
+    query = query.order_by(Vehicle.vehicle_code).limit(limit)
     result = await db.execute(query)
     return result.scalars().all()
 

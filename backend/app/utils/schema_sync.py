@@ -1179,6 +1179,12 @@ async def ensure_material_issue_schema(session: AsyncSession) -> None:
 
     if "dispatched_at" not in columns:
         await conn.execute(text("ALTER TABLE material_issues ADD COLUMN dispatched_at DATETIME NULL"))
+    if "vehicle_code" not in columns:
+        await conn.execute(text("ALTER TABLE material_issues ADD COLUMN vehicle_code VARCHAR(50) NULL"))
+    if "vehicle_number" not in columns:
+        await conn.execute(text("ALTER TABLE material_issues ADD COLUMN vehicle_number VARCHAR(50) NULL"))
+    if "service_code" not in columns:
+        await conn.execute(text("ALTER TABLE material_issues ADD COLUMN service_code VARCHAR(50) NULL"))
 
     try:
         await conn.execute(text("""
@@ -1187,6 +1193,36 @@ async def ensure_material_issue_schema(session: AsyncSession) -> None:
         """))
     except Exception:
         pass
+
+    # Ensure indents table has service_code column
+    indent_columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'indents'
+        """))).all()
+    }
+    if "service_code" not in indent_columns:
+        await conn.execute(text("ALTER TABLE indents ADD COLUMN service_code VARCHAR(50) NULL"))
+
+    # Ensure vehicles table has is_active, created_at, updated_at columns
+    vehicle_columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'vehicles'
+        """))).all()
+    }
+    if "is_active" not in vehicle_columns:
+        await conn.execute(text("ALTER TABLE vehicles ADD COLUMN is_active TINYINT(1) NOT NULL DEFAULT 1"))
+    if "created_at" not in vehicle_columns:
+        await conn.execute(text("ALTER TABLE vehicles ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP"))
+    if "updated_at" not in vehicle_columns:
+        await conn.execute(text("ALTER TABLE vehicles ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"))
 
     items_columns = {
         row[0]

@@ -65,6 +65,7 @@ const IndentForm = () => {
   const [uoms, setUoms] = useState([]);
   const [bomOptions, setBomOptions] = useState([]);
   const [vehicles, setVehicles] = useState([]);
+  const [vehiclesLoading, setVehiclesLoading] = useState(false);
   const [bomLoading, setBomLoading] = useState(false);
   const [bomLoadMode, setBomLoadMode] = useState('normal');
   const [originalBomComponents, setOriginalBomComponents] = useState([]);
@@ -75,13 +76,12 @@ const IndentForm = () => {
     try {
       const bomParams = { page_size: 200, is_active: true, position_id: user?.position_id || -1 };
 
-      const [deptRes, whRes, projRes, uomRes, bomRes, vehRes] = await Promise.allSettled([
+      const [deptRes, whRes, projRes, uomRes, bomRes] = await Promise.allSettled([
         api.get('/masters/departments', { params: { page_size: 200 } }),
         api.get('/masters/warehouses', { params: { page_size: 200, user_id: uid } }),
         api.get('/masters/projects', { params: { page_size: 200, user_id: uid } }),
         api.get('/masters/uom', { params: { page_size: 200 } }),
         api.get('/masters/boms', { params: bomParams }),
-        api.get('/masters/vehicles', { params: { is_active: true } }),
       ]);
       if (deptRes.status === 'fulfilled') {
         const d = deptRes.value.data;
@@ -140,16 +140,41 @@ const IndentForm = () => {
             }))
         );
       }
-      if (vehRes.status === 'fulfilled') {
-        setVehicles(vehRes.value.data || []);
-      }
     } catch {
       // silent
     }
   }, [user]);
 
+  const loadVehicleOptions = useCallback(async (search = '') => {
+    setVehiclesLoading(true);
+    try {
+      const res = await api.get('/masters/vehicles', {
+        params: { is_active: true, search, limit: 100 },
+      });
+      const data = res.data || [];
+      
+      const currentVal = form.getFieldValue('vehicle_code');
+      if (currentVal) {
+        setVehicles((prev) => {
+          const matched = prev.find((v) => v.vehicle_code === currentVal);
+          if (matched && !data.some((v) => v.vehicle_code === currentVal)) {
+            return [matched, ...data];
+          }
+          return data;
+        });
+      } else {
+        setVehicles(data);
+      }
+    } catch (err) {
+      console.error('Error loading vehicles:', err);
+    } finally {
+      setVehiclesLoading(false);
+    }
+  }, [form]);
+
   useEffect(() => {
     loadLookups();
+    loadVehicleOptions();
     if (!isNew) {
       fetchIndent();
     } else {
@@ -160,7 +185,7 @@ const IndentForm = () => {
         department: user?.department || null,
       });
     }
-  }, [id, user]);
+  }, [id, user, loadVehicleOptions]);
 
   const fetchIndent = async () => {
     setLoading(true);
@@ -174,6 +199,9 @@ const IndentForm = () => {
         required_date: data.required_date ? dayjs(data.required_date) : null,
         source_bom_id: data.source_bom_id || null,
       });
+      if (data.vehicle_code) {
+        loadVehicleOptions(data.vehicle_code);
+      }
       const items = (data.items || []).map((item, idx) => ({
         key: item.id || Date.now() + idx,
         item_id: item.item_id,
@@ -346,6 +374,7 @@ const IndentForm = () => {
         project_id: values.project_id || null,
         vehicle_code: values.vehicle_code || null,
         vehicle_number: values.vehicle_number || null,
+        service_code: values.service_code || null,
         remarks: values.remarks || '',
         items: validItems.map((item) => ({
           item_id: item.item_id,
@@ -529,6 +558,7 @@ const IndentForm = () => {
             </Descriptions.Item>
             <Descriptions.Item label="Vehicle Code">{indent.vehicle_code || '-'}</Descriptions.Item>
             <Descriptions.Item label="Vehicle Number">{indent.vehicle_number || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Service Code">{indent.service_code || '-'}</Descriptions.Item>
             <Descriptions.Item label="Status"><StatusTag status={indent.status} /></Descriptions.Item>
             <Descriptions.Item label="Created By">{indent.created_by_name || indent.requested_by_name || indent.raised_by_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="Raising Position">
@@ -759,8 +789,11 @@ const IndentForm = () => {
                   placeholder="Select vehicle code"
                   allowClear
                   showSearch
-                  optionFilterProp="label"
+                  filterOption={false}
+                  onSearch={loadVehicleOptions}
+                  onFocus={() => loadVehicleOptions()}
                   onChange={handleVehicleChange}
+                  loading={vehiclesLoading}
                   options={vehicles.map((v) => ({ label: v.vehicle_code, value: v.vehicle_code }))}
                 />
               </Form.Item>
@@ -768,6 +801,11 @@ const IndentForm = () => {
             <Col xs={24} sm={12} md={8}>
               <Form.Item name="vehicle_number" label="Vehicle Number">
                 <Input placeholder="Auto-populated from code" disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={8}>
+              <Form.Item name="service_code" label="Service Code">
+                <Input placeholder="Enter service code" />
               </Form.Item>
             </Col>
           </Row>

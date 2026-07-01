@@ -88,7 +88,7 @@ async def _job_expiring_batches() -> None:
             stmt = (
                 select(
                     Batch.id, Batch.batch_number, Batch.expiry_date,
-                    Item.code, Item.name,
+                    Item.item_code, Item.name, Item.item_type,
                     func.coalesce(func.sum(StockBalance.available_qty), 0).label("qty"),
                 )
                 .select_from(Batch)
@@ -100,31 +100,57 @@ async def _job_expiring_batches() -> None:
                     Batch.expiry_date >= today,
                     Batch.status == "active",
                 )
-                .group_by(Batch.id, Batch.batch_number, Batch.expiry_date, Item.code, Item.name)
+                .group_by(Batch.id, Batch.batch_number, Batch.expiry_date, Item.item_code, Item.name, Item.item_type)
                 .having(func.coalesce(func.sum(StockBalance.available_qty), 0) > 0)
             )
             rows = (await session.execute(stmt)).all()
             if not rows:
                 logger.info("scheduler: expiring_batches — no rows in 30-day window")
                 return
-            count = len(rows)
-            sample = ", ".join(
-                f"{r.code} {r.batch_number} (exp {r.expiry_date})" for r in rows[:5]
-            )
-            recipients = await _notify_managers(
-                session,
-                title=f"{count} batch(es) expiring within 30 days",
-                message=(
-                    f"There are {count} active batches with stock that expire on or before "
-                    f"{horizon.isoformat()}. First {min(5, count)}: {sample}."
-                ),
-                notification_type="warning",
-                module="alerts",
-                reference_type="batch_expiry",
-            )
+
+            asset_rows = [r for r in rows if r.item_type == "asset"]
+            expiry_rows = [r for r in rows if r.item_type != "asset"]
+
+            recipients = 0
+            if asset_rows:
+                count = len(asset_rows)
+                sample = ", ".join(
+                    f"{r.item_code} {r.batch_number} (warranty end {r.expiry_date.strftime('%d-%m-%Y') if hasattr(r.expiry_date, 'strftime') else r.expiry_date})"
+                    for r in asset_rows[:5]
+                )
+                recipients += await _notify_managers(
+                    session,
+                    title=f"Warranty expiry: {count} asset(s) warranty ending soon",
+                    message=(
+                        f"There are {count} active assets with stock whose warranty ends on or before "
+                        f"{horizon.isoformat()}. First {min(5, count)}: {sample}."
+                    ),
+                    notification_type="warning",
+                    module="alerts",
+                    reference_type="warranty_expiry",
+                )
+
+            if expiry_rows:
+                count = len(expiry_rows)
+                sample = ", ".join(
+                    f"{r.item_code} {r.batch_number} (exp {r.expiry_date.strftime('%d-%m-%Y') if hasattr(r.expiry_date, 'strftime') else r.expiry_date})"
+                    for r in expiry_rows[:5]
+                )
+                recipients += await _notify_managers(
+                    session,
+                    title=f"Stock expiry: {count} batch(es) expiring within 30 days",
+                    message=(
+                        f"There are {count} active batches with stock that expire on or before "
+                        f"{horizon.isoformat()}. First {min(5, count)}: {sample}."
+                    ),
+                    notification_type="warning",
+                    module="alerts",
+                    reference_type="batch_expiry",
+                )
+
             await session.commit()
             logger.info("scheduler: expiring_batches — %s rows, notified %s recipients",
-                        count, recipients)
+                        len(rows), recipients)
         except Exception as exc:
             await session.rollback()
             logger.exception("scheduler: expiring_batches failed: %s", exc)
@@ -181,7 +207,7 @@ async def _job_low_stock() -> None:
         try:
             stmt = (
                 select(
-                    Item.id, Item.code, Item.name, Item.reorder_level,
+                    Item.id, Item.item_code, Item.name, Item.reorder_level,
                     func.coalesce(func.sum(StockBalance.available_qty), 0).label("qty"),
                 )
                 .select_from(Item)
@@ -189,7 +215,7 @@ async def _job_low_stock() -> None:
                 .where(Item.is_active == True)  # noqa: E712
                 .where(Item.reorder_level.isnot(None))
                 .where(Item.reorder_level > 0)
-                .group_by(Item.id, Item.code, Item.name, Item.reorder_level)
+                .group_by(Item.id, Item.item_code, Item.name, Item.reorder_level)
                 .having(func.coalesce(func.sum(StockBalance.available_qty), 0) < Item.reorder_level)
             )
             rows = (await session.execute(stmt)).all()
@@ -197,7 +223,7 @@ async def _job_low_stock() -> None:
                 logger.info("scheduler: low_stock — none below reorder")
                 return
             count = len(rows)
-            sample = ", ".join(f"{r.code} ({float(r.qty):.0f}/{float(r.reorder_level):.0f})"
+            sample = ", ".join(f"{r.item_code} ({float(r.qty):.0f}/{float(r.reorder_level):.0f})"
                                for r in rows[:5])
             # 4-hourly notifications would be too chatty; cap email to once a day.
             now = datetime.now(timezone.utc)
