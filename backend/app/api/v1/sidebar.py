@@ -73,6 +73,8 @@ _ALL_KEYS: Set[str] = {
     'settings-reports-v2', 'settings-reports-system',
     # Logistics
     'logistics', 'logistics-dashboard', 'logistics-master', 'logistics-dispatch', 'logistics-rfq', 'logistics-so', 'logistics-gate-entry', 'logistics-consignments',
+    'inventory-masters-ap104-consumables', 'inventory-masters-ap104-install',
+    'indent-ap104-consumables', 'indent-ap104-install',
 }
 
 
@@ -83,12 +85,14 @@ _ROLE_KEYS = {
     'field_staff': {
         'lms',
         'indent', 'indent-dashboard', 'indent-indents', 'indent-acknowledgement', 'indent-notifications',
+        'indent-ap104-consumables', 'indent-ap104-install',
         'consumption', 'consumption-entry',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-notifications',
     },
     'lab_technician': {
         'lms',
         'indent', 'indent-dashboard', 'indent-indents', 'indent-acknowledgement', 'indent-notifications',
+        'indent-ap104-consumables', 'indent-ap104-install',
         'consumption', 'consumption-entry',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-notifications',
     },
@@ -117,6 +121,8 @@ _ROLE_KEYS = {
         'inventory-stock-balance', 'inventory-stock-ledger',
         'inventory-stock-transfer', 'inventory-stock-audit',
         'inventory-replenishment',
+        'inventory-masters-ap104-consumables', 'inventory-masters-ap104-install',
+        'indent-ap104-consumables', 'indent-ap104-install',
         'logistics', 'logistics-dashboard', 'logistics-master', 'logistics-dispatch', 'logistics-rfq', 'logistics-so', 'logistics-gate-entry', 'logistics-consignments', 'logistics-consignments',
     },
     'warehouse_operator': {
@@ -136,6 +142,8 @@ _ROLE_KEYS = {
         'warehouse-material-issues', 'warehouse-material-inward',
         'warehouse-dispatch', 'warehouse-notifications',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-stock-transfer', 'inventory-notifications',
+        'inventory-masters-ap104-consumables', 'inventory-masters-ap104-install',
+        'indent-ap104-consumables', 'indent-ap104-install',
         'procurement-material-requests',
         'logistics', 'logistics-gate-entry', 'logistics-dashboard', 'logistics-master',
         'logistics-dispatch', 'logistics-consignments', 'logistics-rfq', 'logistics-so',
@@ -147,6 +155,8 @@ _ROLE_KEYS = {
         'warehouse-material-issues', 'warehouse-material-inward',
         'warehouse-dispatch', 'warehouse-notifications',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-stock-transfer', 'inventory-notifications',
+        'inventory-masters-ap104-consumables', 'inventory-masters-ap104-install',
+        'indent-ap104-consumables', 'indent-ap104-install',
         'procurement-material-requests',
         'logistics', 'logistics-gate-entry', 'logistics-dashboard', 'logistics-master',
         'logistics-dispatch', 'logistics-consignments', 'logistics-rfq', 'logistics-so',
@@ -176,6 +186,7 @@ _ROLE_KEYS = {
         'inventory', 'inventory-dashboard', 'inventory-reports', 'inventory-notifications',
         'procurement', 'procurement-dashboard', 'procurement-reports', 'procurement-notifications',
         'indent', 'indent-dashboard', 'indent-reports', 'indent-notifications',
+        'indent-ap104-consumables', 'indent-ap104-install',
         'consumption', 'consumption-reports',
     },
     'accounts_manager': {
@@ -193,6 +204,8 @@ _ROLE_KEYS = {
         'lms',
         'approvals', 'approvals-pending',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-reports', 'inventory-notifications',
+        'inventory-masters-ap104-consumables', 'inventory-masters-ap104-install',
+        'indent-ap104-consumables', 'indent-ap104-install',
         'procurement', 'procurement-dashboard', 'procurement-reports', 'procurement-notifications',
         'consumption', 'consumption-reports',
     },
@@ -247,7 +260,16 @@ async def allowed_keys_for_role(db: AsyncSession, role: Role) -> List[str]:
         # Map DB permission names to frontend menu keys if they differ
         mapped_keys = [key]
         if key == "indent-transactions":
-            mapped_keys.append("indent-indents")
+            mapped_keys.extend([
+                "indent-indents",
+                "indent-ap104-consumables",
+                "indent-ap104-install",
+            ])
+        elif key == "inventory-masters":
+            mapped_keys.extend([
+                "inventory-masters-ap104-consumables",
+                "inventory-masters-ap104-install",
+            ])
         elif key == "inventory-transactions":
             mapped_keys.extend([
                 "inventory-stock-balance",

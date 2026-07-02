@@ -54,6 +54,7 @@ async def list_indents(
     warehouse_id: int = Query(None),
     project_id: int = Query(None),
     pending_acknowledgement: bool = Query(None),
+    template_type: str = Query(None),
     available_for_issue: bool = Query(
         None,
         description=(
@@ -89,6 +90,9 @@ async def list_indents(
     if project_id:
         query = query.where(Indent.project_id == project_id)
         count_query = count_query.where(Indent.project_id == project_id)
+    if template_type:
+        query = query.where(Indent.template_type == template_type)
+        count_query = count_query.where(Indent.template_type == template_type)
 
     # Draft indents must only be visible to the user who raised them
     from sqlalchemy import or_
@@ -100,7 +104,7 @@ async def list_indents(
         with open("indent_debug.log", "a") as f:
             f.write(f"\n--- REQUEST at {datetime.now()} ---\n")
             f.write(f"User ID: {current_user.id}, Username: {current_user.username}\n")
-            f.write(f"Params - Status: {status}, Type: {indent_type}, WH: {warehouse_id}, Proj: {project_id}\n")
+            f.write(f"Params - Status: {status}, Type: {indent_type}, WH: {warehouse_id}, Proj: {project_id}, Template: {template_type}\n")
     except Exception:
         pass
 
@@ -807,6 +811,7 @@ async def create_indent(
         vehicle_code=payload.vehicle_code,
         vehicle_number=payload.vehicle_number,
         service_code=payload.service_code,
+        template_type=payload.template_type,
     )
 
     db.add(indent)

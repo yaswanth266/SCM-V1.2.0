@@ -907,9 +907,20 @@ async def dashboard_kpis(db: AsyncSession, warehouse_id: Optional[int] = None) -
         select(func.count(Indent.id))
         .where(Indent.status.in_(["draft", "pending_approval"]))
     )
+    total_indents_q = select(func.count(Indent.id))
+    approved_indents_q = select(func.count(Indent.id)).where(Indent.status.in_(["approved", "partially_fulfilled", "fulfilled"]))
+    rejected_indents_q = select(func.count(Indent.id)).where(Indent.status.in_(["rejected", "cancelled"]))
+
     if warehouse_id:
         pending_indents_q = pending_indents_q.where(Indent.warehouse_id == warehouse_id)
-    pending_indents = (await db.execute(pending_indents_q)).scalar()
+        total_indents_q = total_indents_q.where(Indent.warehouse_id == warehouse_id)
+        approved_indents_q = approved_indents_q.where(Indent.warehouse_id == warehouse_id)
+        rejected_indents_q = rejected_indents_q.where(Indent.warehouse_id == warehouse_id)
+
+    pending_indents = (await db.execute(pending_indents_q)).scalar() or 0
+    total_indents = (await db.execute(total_indents_q)).scalar() or 0
+    approved_indents = (await db.execute(approved_indents_q)).scalar() or 0
+    rejected_indents = (await db.execute(rejected_indents_q)).scalar() or 0
 
     # Unpaid invoices
     # BUG-FIN-124: Invoice has no warehouse_id column today, so per-warehouse
@@ -946,6 +957,9 @@ async def dashboard_kpis(db: AsyncSession, warehouse_id: Optional[int] = None) -
             select(func.count(ApprovalRequest.id))
             .where(ApprovalRequest.status == "pending")
         )).scalar() or 0,
-        "pending_indents": pending_indents or 0,
+        "pending_indents": pending_indents,
+        "total_indents": total_indents,
+        "approved_indents": approved_indents,
+        "rejected_indents": rejected_indents,
         "unpaid_invoice_amount": float(unpaid_invoices or 0),
     }

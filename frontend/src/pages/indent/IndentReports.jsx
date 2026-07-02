@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Select, DatePicker, Button, Table, Tag, Space, Spin } from 'antd';
+import { Card, Row, Col, Select, DatePicker, Button, Table, Tag, Space, Spin, Empty } from 'antd';
 import { DownloadOutlined, FilterOutlined } from '@ant-design/icons';
 import {
   ResponsiveContainer,
@@ -52,56 +52,98 @@ const IndentReports = () => {
 
   const loadReportData = async () => {
     setLoading(true);
-    // Simulating endpoint responses with curated metrics derived from the indent list
-    setTimeout(async () => {
-      try {
-        const res = await api.get('/indent/indents', { params: { page_size: 50 } });
-        const indents = res.data?.items || res.data || [];
-        
-        if (reportType === 'project_volume') {
-          // Group by project
-          const projMap = {};
-          indents.forEach(ind => {
-            const pName = ind.project_name || `Project ${ind.project_id || 'Unknown'}`;
-            if (!projMap[pName]) projMap[pName] = { name: pName, count: 0, itemsCount: 0 };
-            projMap[pName].count += 1;
-            projMap[pName].itemsCount += (ind.items?.length || 0);
-          });
-          setData(Object.values(projMap));
-        } else if (reportType === 'tat_sla') {
-          // Average TAT trend per month
-          setData([
-            { month: 'Jan 2026', raiseToApprove: 1.1, approveToIssue: 2.2, slaTarget: 3.0 },
-            { month: 'Feb 2026', raiseToApprove: 0.9, approveToIssue: 2.1, slaTarget: 3.0 },
-            { month: 'Mar 2026', raiseToApprove: 1.2, approveToIssue: 2.6, slaTarget: 3.0 },
-            { month: 'Apr 2026', raiseToApprove: 1.0, approveToIssue: 2.3, slaTarget: 3.0 },
-            { month: 'May 2026', raiseToApprove: 0.8, approveToIssue: 1.9, slaTarget: 3.0 },
-          ]);
-        } else if (reportType === 'fill_rate') {
-          // Item category fill rates
-          setData([
-            { category: 'Medicines', requested: 1200, issued: 1140 },
-            { category: 'Consumables', requested: 850, issued: 780 },
-            { category: 'Lab Supplies', requested: 500, issued: 420 },
-            { category: 'Equipment Spare', requested: 250, issued: 190 },
-            { category: 'Office Supplies', requested: 300, issued: 280 },
-          ]);
-        } else {
-          // Emergency trend
-          setData([
-            { month: 'Jan 2026', routine: 15, emergency: 2 },
-            { month: 'Feb 2026', routine: 18, emergency: 4 },
-            { month: 'Mar 2026', routine: 22, emergency: 5 },
-            { month: 'Apr 2026', routine: 19, emergency: 1 },
-            { month: 'May 2026', routine: 25, emergency: 3 },
-          ]);
-        }
-      } catch (e) {
-        console.error(e);
-      } finally {
+    try {
+      const res = await api.get('/indent/indents', { params: { page_size: 200 } });
+      const indents = res.data?.items || res.data || [];
+      
+      if (indents.length === 0) {
+        setData([]);
         setLoading(false);
+        return;
       }
-    }, 500);
+
+      if (reportType === 'project_volume') {
+        // Group by project
+        const projMap = {};
+        indents.forEach(ind => {
+          const pName = ind.project?.name || ind.project_name || `Project ${ind.project_id || 'Unknown'}`;
+          if (!projMap[pName]) projMap[pName] = { name: pName, count: 0, itemsCount: 0 };
+          projMap[pName].count += 1;
+          projMap[pName].itemsCount += (ind.items?.length || 0);
+        });
+        setData(Object.values(projMap));
+      } else if (reportType === 'tat_sla') {
+        // Average TAT trend per month
+        const monthMap = {};
+        indents.forEach(ind => {
+          if (!ind.indent_date) return;
+          const date = new Date(ind.indent_date);
+          const monthStr = date.toLocaleString('default', { month: 'short', year: 'numeric' });
+          if (!monthMap[monthStr]) {
+            monthMap[monthStr] = { month: monthStr, raiseToApproveSum: 0, raiseToApproveCount: 0, approveToIssueSum: 0, approveToIssueCount: 0 };
+          }
+          
+          if (ind.approved_date) {
+            const raiseTime = new Date(ind.indent_date).getTime();
+            const approveTime = new Date(ind.approved_date).getTime();
+            const diffDays = Math.max(0, (approveTime - raiseTime) / (1000 * 3600 * 24));
+            monthMap[monthStr].raiseToApproveSum += diffDays;
+            monthMap[monthStr].raiseToApproveCount += 1;
+          }
+
+          if (ind.status === 'fulfilled' || ind.status === 'partially_fulfilled') {
+            if (ind.approved_date && ind.updated_at) {
+              const approveTime = new Date(ind.approved_date).getTime();
+              const issueTime = new Date(ind.updated_at).getTime();
+              const diffDays = Math.max(0, (issueTime - approveTime) / (1000 * 3600 * 24));
+              monthMap[monthStr].approveToIssueSum += diffDays;
+              monthMap[monthStr].approveToIssueCount += 1;
+            }
+          }
+        });
+        const list = Object.values(monthMap).map(m => ({
+          month: m.month,
+          raiseToApprove: m.raiseToApproveCount > 0 ? parseFloat((m.raiseToApproveSum / m.raiseToApproveCount).toFixed(1)) : 0,
+          approveToIssue: m.approveToIssueCount > 0 ? parseFloat((m.approveToIssueSum / m.approveToIssueCount).toFixed(1)) : 0,
+          slaTarget: 3.0
+        }));
+        setData(list);
+      } else if (reportType === 'fill_rate') {
+        // Item category fill rates
+        const catMap = {};
+        indents.forEach(ind => {
+          (ind.items || []).forEach(item => {
+            const catName = item.item?.category?.name || 'Consumables';
+            if (!catMap[catName]) catMap[catName] = { category: catName, requested: 0, issued: 0 };
+            catMap[catName].requested += parseFloat(item.requested_qty || 0);
+            catMap[catName].issued += parseFloat(item.issued_qty || 0);
+          });
+        });
+        setData(Object.values(catMap));
+      } else {
+        // Emergency trend
+        const monthMap = {};
+        indents.forEach(ind => {
+          if (!ind.indent_date) return;
+          const date = new Date(ind.indent_date);
+          const monthStr = date.toLocaleString('default', { month: 'short', year: 'numeric' });
+          if (!monthMap[monthStr]) {
+            monthMap[monthStr] = { month: monthStr, routine: 0, emergency: 0 };
+          }
+          if (ind.indent_type === 'urgent') {
+            monthMap[monthStr].emergency += 1;
+          } else {
+            monthMap[monthStr].routine += 1;
+          }
+        });
+        setData(Object.values(monthMap));
+      }
+    } catch (e) {
+      console.error('Failed to load indent reports:', e);
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleExport = () => {
@@ -208,52 +250,56 @@ const IndentReports = () => {
         <>
           {/* Recharts Graphical Analysis */}
           <Card style={{ marginBottom: 24, borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-            <div style={{ height: '350px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                {reportType === 'project_volume' ? (
-                  <BarChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="name" tickLine={false} />
-                    <YAxis tickLine={false} />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="count" name="Total Indents Raised" fill="#481890" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="itemsCount" name="Total Items Requested" fill="#fa8c16" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                ) : reportType === 'tat_sla' ? (
-                  <LineChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
-                    <YAxis />
-                    <Tooltip />
-                    <Legend />
-                    <Line type="monotone" dataKey="raiseToApprove" name="Approval Delay (Days)" stroke="#fa8c16" strokeWidth={2} activeDot={{ r: 8 }} />
-                    <Line type="monotone" dataKey="approveToIssue" name="Issuance Delay (Days)" stroke="#481890" strokeWidth={2} />
-                    <Line type="monotone" dataKey="slaTarget" name="SLA Target Limit (Days)" stroke="#f5222d" strokeDasharray="5 5" />
-                  </LineChart>
-                ) : reportType === 'fill_rate' ? (
-                  <BarChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="category" tickLine={false} />
-                    <YAxis tickLine={false} />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="requested" name="Requested Qty" fill="#fa8c16" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="issued" name="Issued Qty" fill="#52c41a" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                ) : (
-                  <BarChart data={data} stackOffset="expand">
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="month" tickLine={false} />
-                    <YAxis tickLine={false} />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="routine" name="Routine Indents" stackId="a" fill="#481890" />
-                    <Bar dataKey="emergency" name="Emergency Indents" stackId="a" fill="#f5222d" />
-                  </BarChart>
-                )}
-              </ResponsiveContainer>
-            </div>
+           <div style={{ height: '350px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+             {data.length > 0 ? (
+               <ResponsiveContainer width="100%" height="100%">
+                 {reportType === 'project_volume' ? (
+                   <BarChart data={data}>
+                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                     <XAxis dataKey="name" tickLine={false} />
+                     <YAxis tickLine={false} />
+                     <Tooltip />
+                     <Legend />
+                     <Bar dataKey="count" name="Total Indents Raised" fill="#481890" radius={[4, 4, 0, 0]} />
+                     <Bar dataKey="itemsCount" name="Total Items Requested" fill="#fa8c16" radius={[4, 4, 0, 0]} />
+                   </BarChart>
+                 ) : reportType === 'tat_sla' ? (
+                   <LineChart data={data}>
+                     <CartesianGrid strokeDasharray="3 3" />
+                     <XAxis dataKey="month" />
+                     <YAxis />
+                     <Tooltip />
+                     <Legend />
+                     <Line type="monotone" dataKey="raiseToApprove" name="Approval Delay (Days)" stroke="#fa8c16" strokeWidth={2} activeDot={{ r: 8 }} />
+                     <Line type="monotone" dataKey="approveToIssue" name="Issuance Delay (Days)" stroke="#481890" strokeWidth={2} />
+                     <Line type="monotone" dataKey="slaTarget" name="SLA Target Limit (Days)" stroke="#f5222d" strokeDasharray="5 5" />
+                   </LineChart>
+                 ) : reportType === 'fill_rate' ? (
+                   <BarChart data={data}>
+                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                     <XAxis dataKey="category" tickLine={false} />
+                     <YAxis tickLine={false} />
+                     <Tooltip />
+                     <Legend />
+                     <Bar dataKey="requested" name="Requested Qty" fill="#fa8c16" radius={[4, 4, 0, 0]} />
+                     <Bar dataKey="issued" name="Issued Qty" fill="#52c41a" radius={[4, 4, 0, 0]} />
+                   </BarChart>
+                 ) : (
+                   <BarChart data={data} stackOffset="expand">
+                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                     <XAxis dataKey="month" tickLine={false} />
+                     <YAxis tickLine={false} />
+                     <Tooltip />
+                     <Legend />
+                     <Bar dataKey="routine" name="Routine Indents" stackId="a" fill="#481890" />
+                     <Bar dataKey="emergency" name="Emergency Indents" stackId="a" fill="#f5222d" />
+                   </BarChart>
+                 )}
+               </ResponsiveContainer>
+             ) : (
+               <Empty description="No report metrics available for the selected filters" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+             )}
+           </div>
           </Card>
 
           {/* Tabular Details */}

@@ -33,7 +33,7 @@ const TemplateIndentList = ({ templateType, title }) => {
 
   const fetchData = useCallback(
     async (params) => {
-      const qp = { ...params };
+      const qp = { ...params, template_type: templateType };
       if (filterStatus) qp.status = filterStatus;
       if (filterProject) qp.project_id = filterProject;
       // Fetch indents
@@ -43,7 +43,7 @@ const TemplateIndentList = ({ templateType, title }) => {
       // Or we can just let it display all. Let's filter to only show indents that have a project.
       return res;
     },
-    [filterStatus, filterProject]
+    [filterStatus, filterProject, templateType]
   );
 
   const handleAction = async (id, action) => {

@@ -180,6 +180,7 @@ const TemplateIndentForm = ({ templateType, title }) => {
       const payload = {
         warehouse_id: values.warehouse_id,
         indent_type: 'regular',
+        template_type: templateType,
         indent_date: formatDateForAPI(values.indent_date),
         required_date: formatDateForAPI(values.required_date),
         project_id: values.project_id,

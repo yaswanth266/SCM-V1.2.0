@@ -128,7 +128,7 @@ const WarehouseDashboard = () => {
           >
             <Statistic
               title={<span style={{ color: '#6C757D', fontWeight: 500 }}>GRNs Pending Putaway</span>}
-              value={grnStats.putaway_pending || 4}
+              value={grnStats.putaway_pending ?? 0}
               prefix={<InboxOutlined style={{ color: '#F09000', marginRight: '8px' }} />}
             />
           </Card>
@@ -141,7 +141,7 @@ const WarehouseDashboard = () => {
           >
             <Statistic
               title={<span style={{ color: '#6C757D', fontWeight: 500 }}>Pending QA Inspections</span>}
-              value={grnStats.pending_qi || 2}
+              value={grnStats.pending_qi ?? 0}
               prefix={<CheckSquareOutlined style={{ color: '#fa8c16', marginRight: '8px' }} />}
             />
           </Card>
@@ -154,7 +154,7 @@ const WarehouseDashboard = () => {
           >
             <Statistic
               title={<span style={{ color: '#6C757D', fontWeight: 500 }}>Active Picklists</span>}
-              value={3}
+              value={procSummary.warehouse_ops?.active_picklists ?? 0}
               prefix={<SolutionOutlined style={{ color: '#52c41a', marginRight: '8px' }} />}
             />
           </Card>
@@ -167,7 +167,7 @@ const WarehouseDashboard = () => {
           >
             <Statistic
               title={<span style={{ color: '#6C757D', fontWeight: 500 }}>Picked & Unissued</span>}
-              value={5}
+              value={procSummary.warehouse_ops?.picked_unissued ?? 0}
               prefix={<AppstoreOutlined style={{ color: '#1890ff', marginRight: '8px' }} />}
             />
           </Card>

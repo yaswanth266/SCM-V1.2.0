@@ -258,6 +258,8 @@ export const MENU_CONFIG = [
       { key: 'inventory-stock-transfer', label: 'Stock Transfer', path: '/inventory/stock-transfer' },
       { key: 'inventory-stock-audit', label: 'Stock Audit', path: '/inventory/stock-audit' },
       { key: 'inventory-replenishment', label: 'Replenishment', path: '/inventory/replenishment' },
+      { key: 'inventory-masters-ap104-consumables', label: 'AP 104 DP / Consumables - Indent Master', path: '/inventory/masters/ap104-consumables' },
+      { key: 'inventory-masters-ap104-install', label: 'AP 104 DP Install - Indent Master', path: '/inventory/masters/ap104-install' },
     ],
   },
   {
@@ -266,6 +268,8 @@ export const MENU_CONFIG = [
     icon: 'FileTextOutlined',
     children: [
       { key: 'indent-indents', label: 'Indents', path: '/indent/indents' },
+      { key: 'indent-ap104-consumables', label: 'AP 104 DP / Consumables', path: '/indent/ap104-consumables' },
+      { key: 'indent-ap104-install', label: 'AP 104 DP Install', path: '/indent/ap104-install' },
       { key: 'indent-acknowledgement', label: 'Acknowledgement', path: '/indent/acknowledgement' },
     ],
   },

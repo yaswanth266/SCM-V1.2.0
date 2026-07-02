@@ -3,7 +3,7 @@ import {
   Card, Form, Space, Button, Select, InputNumber, Row, Col, Spin, Tooltip, message
 } from 'antd';
 import { ArrowLeftOutlined, PlusOutlined, DeleteOutlined, SaveOutlined } from '@ant-design/icons';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import PageHeader from '../../../components/PageHeader';
 import ItemSelector from '../../../components/ItemSelector';
 import api from '../../../config/api';
@@ -11,6 +11,7 @@ import { getErrorMessage } from '../../../utils/helpers';
 
 const ProjectIndentTemplateForm = ({ templateType, title }) => {
   const navigate = useNavigate();
+  const { projectId } = useParams();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -39,8 +40,8 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
     }
   }, []);
 
-  const fetchTemplateForProject = async (projectId) => {
-    if (!projectId) {
+  const fetchTemplateForProject = useCallback(async (pId) => {
+    if (!pId) {
       form.setFieldsValue({ items: [{ item_id: undefined, quantity: 1, uom_id: undefined }] });
       return;
     }
@@ -48,14 +49,14 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
     setLoading(true);
     try {
       const res = await api.get('/masters/project-indent-templates', {
-        params: { project_id: projectId, template_type: templateType }
+        params: { project_id: pId, template_type: templateType }
       });
       const data = res.data;
       if (data) {
         form.setFieldsValue({
           items: (data.items || []).map((c) => ({
             item_id: c.item_id,
-            quantity: c.quantity,
+            quantity: Number(c.quantity) || 1,
             uom_id: c.uom_id,
           })),
         });
@@ -70,14 +71,21 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [form, templateType]);
 
   useEffect(() => {
     loadLookups();
-    form.setFieldsValue({
-      items: [{ item_id: undefined, quantity: 1, uom_id: undefined }],
-    });
-  }, [templateType, loadLookups]);
+    if (projectId) {
+      const pId = Number(projectId);
+      form.setFieldsValue({ project_id: pId });
+      fetchTemplateForProject(pId);
+    } else {
+      form.setFieldsValue({
+        project_id: undefined,
+        items: [{ item_id: undefined, quantity: 1, uom_id: undefined }],
+      });
+    }
+  }, [templateType, projectId, loadLookups, fetchTemplateForProject, form]);
 
   const handleItemChange = (val, itemObj, index) => {
     if (itemObj) {
@@ -89,6 +97,11 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
       };
       form.setFieldsValue({ items: currentItems });
     }
+  };
+
+  const handleBack = () => {
+    const routeType = templateType === 'consumables' ? 'ap104-consumables' : 'ap104-install';
+    navigate(`/inventory/masters/${routeType}`);
   };
 
   const handleSubmit = async () => {
@@ -112,6 +125,7 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
       setSubmitting(true);
       await api.post('/masters/project-indent-templates', payload);
       message.success('Project indent template configured successfully');
+      handleBack();
     } catch (err) {
       if (err.errorFields) return;
       message.error(getErrorMessage(err));
@@ -124,7 +138,7 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
     <div>
       <PageHeader title={title} subtitle="Configure fixed items and quantities for this project">
         <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/inventory/dashboard')}>Back to Dashboard</Button>
+          <Button icon={<ArrowLeftOutlined />} onClick={handleBack}>Back to List</Button>
           <Button type="primary" icon={<SaveOutlined />} onClick={handleSubmit} loading={submitting}>
             Save Template
           </Button>
@@ -146,6 +160,7 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
                     showSearch
                     optionFilterProp="label"
                     onChange={(val) => fetchTemplateForProject(val)}
+                    disabled={!!projectId}
                   />
                 </Form.Item>
               </Col>

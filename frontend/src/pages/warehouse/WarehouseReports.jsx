@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Select, DatePicker, Button, Table, Tag, Space, Spin } from 'antd';
+import { Card, Row, Col, Select, DatePicker, Button, Table, Tag, Space, Spin, Empty } from 'antd';
 import { DownloadOutlined, FilterOutlined } from '@ant-design/icons';
 import {
   ResponsiveContainer,
@@ -56,51 +56,141 @@ const WarehouseReports = () => {
 
   const loadReportData = async () => {
     setLoading(true);
-    // Simulating endpoint responses with curated metrics derived from the warehouse transactions
-    setTimeout(async () => {
-      try {
-        if (reportType === 'putaway_efficiency') {
-          // Putaway TAT efficiency over months
-          setData([
-            { name: 'Jan 2026', avgHours: 4.2, targetHours: 8.0, itemsPutaway: 120 },
-            { name: 'Feb 2026', avgHours: 3.8, targetHours: 8.0, itemsPutaway: 145 },
-            { name: 'Mar 2026', avgHours: 5.1, targetHours: 8.0, itemsPutaway: 180 },
-            { name: 'Apr 2026', avgHours: 6.3, targetHours: 8.0, itemsPutaway: 195 },
-            { name: 'May 2026', avgHours: 3.2, targetHours: 8.0, itemsPutaway: 210 },
-          ]);
-        } else if (reportType === 'pick_sla') {
-          // Picking speed and SLA breaches
-          setData([
-            { zone: 'Zone A - Medicines', totalPicks: 340, breachedPicks: 12, compliance: 96.5 },
-            { zone: 'Zone B - Consumables', totalPicks: 450, breachedPicks: 34, compliance: 92.4 },
-            { zone: 'Zone C - Lab Supplies', totalPicks: 210, breachedPicks: 18, compliance: 91.4 },
-            { zone: 'Zone D - Equipment', totalPicks: 95, breachedPicks: 15, compliance: 84.2 },
-          ]);
-        } else if (reportType === 'qa_log') {
-          // QA Inspection results grouped by vendor
-          setData([
-            { vendor: 'Acme Corp Pharma', passed: 45, failed: 2, totalInspected: 47 },
-            { vendor: 'Global Bio-Medicals', passed: 38, failed: 5, totalInspected: 43 },
-            { vendor: 'HealthCare Logistics', passed: 60, failed: 0, totalInspected: 60 },
-            { vendor: 'Apex Laboratories', passed: 22, failed: 4, totalInspected: 26 },
-            { vendor: 'Zenith Surgical', passed: 15, failed: 1, totalInspected: 16 },
-          ]);
-        } else {
-          // Gate Entry logistics wait times
-          setData([
-            { date: '2026-06-08', entries: 12, avgWaitMins: 32, maxWaitMins: 75 },
-            { date: '2026-06-09', entries: 15, avgWaitMins: 45, maxWaitMins: 90 },
-            { date: '2026-06-10', entries: 9, avgWaitMins: 28, maxWaitMins: 45 },
-            { date: '2026-06-11', entries: 18, avgWaitMins: 55, maxWaitMins: 110 },
-            { date: '2026-06-12', entries: 14, avgWaitMins: 38, maxWaitMins: 80 },
-          ]);
+    try {
+      if (reportType === 'putaway_efficiency') {
+        const res = await api.get('/warehouse/putaways', { params: { page_size: 200 } });
+        const putaways = res.data?.items || res.data || [];
+        if (putaways.length === 0) {
+          setData([]);
+          setLoading(false);
+          return;
         }
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
+        
+        // Group by month of completed_at
+        const monthMap = {};
+        putaways.forEach(p => {
+          if (p.status !== 'completed' || !p.completed_at || !p.started_at) return;
+          const date = new Date(p.completed_at);
+          const monthStr = date.toLocaleString('default', { month: 'short', year: 'numeric' });
+          if (!monthMap[monthStr]) {
+            monthMap[monthStr] = { name: monthStr, totalHours: 0, count: 0, itemsPutaway: 0 };
+          }
+          const start = new Date(p.started_at).getTime();
+          const end = new Date(p.completed_at).getTime();
+          const hours = Math.max(0, (end - start) / (1000 * 3600));
+          monthMap[monthStr].totalHours += hours;
+          monthMap[monthStr].count += 1;
+          monthMap[monthStr].itemsPutaway += (p.completed_items || p.total_items || 0);
+        });
+        const list = Object.values(monthMap).map(m => ({
+          name: m.name,
+          avgHours: parseFloat((m.totalHours / m.count).toFixed(1)),
+          targetHours: 8.0,
+          itemsPutaway: m.itemsPutaway
+        }));
+        setData(list);
+      } else if (reportType === 'pick_sla') {
+        const res = await api.get('/outbound/picking-orders', { params: { page_size: 200 } });
+        const picks = res.data?.items || res.data || [];
+        if (picks.length === 0) {
+          setData([]);
+          setLoading(false);
+          return;
+        }
+
+        const zoneMap = {};
+        picks.forEach(p => {
+          const zone = p.warehouse_name || 'Main Zone';
+          if (!zoneMap[zone]) {
+            zoneMap[zone] = { zone, totalPicks: 0, breachedPicks: 0 };
+          }
+          zoneMap[zone].totalPicks += 1;
+          if (p.status === 'completed' && p.completed_at && p.assigned_at) {
+            const durationHrs = (new Date(p.completed_at).getTime() - new Date(p.assigned_at).getTime()) / (1000 * 3600);
+            if (durationHrs > 4.0) { // SLA breach if > 4 hours
+              zoneMap[zone].breachedPicks += 1;
+            }
+          } else if (p.status !== 'completed' && p.created_at) {
+            const pendingHrs = (new Date().getTime() - new Date(p.created_at).getTime()) / (1000 * 3600);
+            if (pendingHrs > 24.0) {
+              zoneMap[zone].breachedPicks += 1;
+            }
+          }
+        });
+        const list = Object.values(zoneMap).map(z => ({
+          zone: z.zone,
+          totalPicks: z.totalPicks,
+          breachedPicks: z.breachedPicks,
+          compliance: parseFloat(((z.totalPicks - z.breachedPicks) / z.totalPicks * 100).toFixed(1))
+        }));
+        setData(list);
+      } else if (reportType === 'qa_log') {
+        const res = await api.get('/warehouse/quality-inspections', { params: { page_size: 200 } });
+        const inspections = res.data?.items || res.data || [];
+        if (inspections.length === 0) {
+          setData([]);
+          setLoading(false);
+          return;
+        }
+
+        const vendorMap = {};
+        inspections.forEach(qi => {
+          const vendor = qi.vendor_name || qi.grn?.vendor_name || 'Vendor';
+          if (!vendorMap[vendor]) {
+            vendorMap[vendor] = { vendor, passed: 0, failed: 0, totalInspected: 0 };
+          }
+          vendorMap[vendor].totalInspected += 1;
+          if (qi.overall_result === 'pass') {
+            vendorMap[vendor].passed += 1;
+          } else if (qi.overall_result === 'fail') {
+            vendorMap[vendor].failed += 1;
+          } else {
+            vendorMap[vendor].passed += 1;
+          }
+        });
+        setData(Object.values(vendorMap));
+      } else {
+        const res = await api.get('/warehouse/gate-entries', { params: { page_size: 200 } });
+        const entries = res.data?.items || res.data || [];
+        if (entries.length === 0) {
+          setData([]);
+          setLoading(false);
+          return;
+        }
+
+        const dateMap = {};
+        entries.forEach(e => {
+          if (!e.created_at) return;
+          const dateStr = new Date(e.created_at).toISOString().split('T')[0];
+          if (!dateMap[dateStr]) {
+            dateMap[dateStr] = { date: dateStr, entries: 0, waitSum: 0, maxWait: 0 };
+          }
+          dateMap[dateStr].entries += 1;
+          
+          if (e.gate_in_time) {
+            const raised = new Date(e.created_at).getTime();
+            const gateIn = new Date(e.gate_in_time).getTime();
+            const waitMins = Math.max(0, (gateIn - raised) / (1000 * 60));
+            dateMap[dateStr].waitSum += waitMins;
+            if (waitMins > dateMap[dateStr].maxWait) {
+              dateMap[dateStr].maxWait = waitMins;
+            }
+          }
+        });
+        const list = Object.values(dateMap).map(d => ({
+          date: d.date,
+          entries: d.entries,
+          avgWaitMins: d.entries > 0 ? Math.round(d.waitSum / d.entries) : 0,
+          maxWaitMins: Math.round(d.maxWait)
+        }));
+        setData(list);
       }
-    }, 500);
+    } catch (err) {
+      console.error('Failed to load warehouse report data:', err);
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleExport = () => {
@@ -216,51 +306,55 @@ const WarehouseReports = () => {
         <>
           {/* Graphical Analysis */}
           <Card style={{ marginBottom: 24, borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-            <div style={{ height: '350px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                {reportType === 'putaway_efficiency' ? (
-                  <LineChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
-                    <YAxis label={{ value: 'Hours', angle: -90, position: 'insideLeft' }} stroke="#6C757D" tickLine={false} />
-                    <Tooltip />
-                    <Legend />
-                    <Line type="monotone" dataKey="avgHours" name="Avg Putaway TAT (Hrs)" stroke="#F09000" strokeWidth={2.5} activeDot={{ r: 8 }} />
-                    <Line type="monotone" dataKey="targetHours" name="SLA SLA Limit (Hrs)" stroke="#f5222d" strokeDasharray="5 5" strokeWidth={1.5} />
-                  </LineChart>
-                ) : reportType === 'pick_sla' ? (
-                  <BarChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="zone" stroke="#6C757D" tickLine={false} />
-                    <YAxis stroke="#6C757D" tickLine={false} />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="totalPicks" name="Total Picks" fill="#F09000" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="breachedPicks" name="SLA Breaches" fill="#fa541c" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                ) : reportType === 'qa_log' ? (
-                  <BarChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                    <XAxis dataKey="vendor" stroke="#6C757D" tickLine={false} />
-                    <YAxis stroke="#6C757D" tickLine={false} />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="passed" name="Accepted Batches" fill="#52c41a" stackId="a" />
-                    <Bar dataKey="failed" name="Rejected Batches" fill="#f5222d" stackId="a" />
-                  </BarChart>
-                ) : (
-                  <LineChart data={data}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="date" stroke="#6C757D" tickLine={false} />
-                    <YAxis label={{ value: 'Minutes', angle: -90, position: 'insideLeft' }} stroke="#6C757D" tickLine={false} />
-                    <Tooltip />
-                    <Legend />
-                    <Line type="monotone" dataKey="avgWaitMins" name="Avg Wait (Mins)" stroke="#F09000" strokeWidth={2} />
-                    <Line type="monotone" dataKey="maxWaitMins" name="Max Wait (Mins)" stroke="#fa541c" strokeWidth={2} />
-                  </LineChart>
-                )}
-              </ResponsiveContainer>
-            </div>
+           <div style={{ height: '350px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+             {data.length > 0 ? (
+               <ResponsiveContainer width="100%" height="100%">
+                 {reportType === 'putaway_efficiency' ? (
+                   <LineChart data={data}>
+                     <CartesianGrid strokeDasharray="3 3" />
+                     <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
+                     <YAxis label={{ value: 'Hours', angle: -90, position: 'insideLeft' }} stroke="#6C757D" tickLine={false} />
+                     <Tooltip />
+                     <Legend />
+                     <Line type="monotone" dataKey="avgHours" name="Avg Putaway TAT (Hrs)" stroke="#F09000" strokeWidth={2.5} activeDot={{ r: 8 }} />
+                     <Line type="monotone" dataKey="targetHours" name="SLA SLA Limit (Hrs)" stroke="#f5222d" strokeDasharray="5 5" strokeWidth={1.5} />
+                   </LineChart>
+                 ) : reportType === 'pick_sla' ? (
+                   <BarChart data={data}>
+                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                     <XAxis dataKey="zone" stroke="#6C757D" tickLine={false} />
+                     <YAxis stroke="#6C757D" tickLine={false} />
+                     <Tooltip />
+                     <Legend />
+                     <Bar dataKey="totalPicks" name="Total Picks" fill="#F09000" radius={[4, 4, 0, 0]} />
+                     <Bar dataKey="breachedPicks" name="SLA Breaches" fill="#fa541c" radius={[4, 4, 0, 0]} />
+                   </BarChart>
+                 ) : reportType === 'qa_log' ? (
+                   <BarChart data={data}>
+                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                     <XAxis dataKey="vendor" stroke="#6C757D" tickLine={false} />
+                     <YAxis stroke="#6C757D" tickLine={false} />
+                     <Tooltip />
+                     <Legend />
+                     <Bar dataKey="passed" name="Accepted Batches" fill="#52c41a" stackId="a" />
+                     <Bar dataKey="failed" name="Rejected Batches" fill="#f5222d" stackId="a" />
+                   </BarChart>
+                 ) : (
+                   <LineChart data={data}>
+                     <CartesianGrid strokeDasharray="3 3" />
+                     <XAxis dataKey="date" stroke="#6C757D" tickLine={false} />
+                     <YAxis label={{ value: 'Minutes', angle: -90, position: 'insideLeft' }} stroke="#6C757D" tickLine={false} />
+                     <Tooltip />
+                     <Legend />
+                     <Line type="monotone" dataKey="avgWaitMins" name="Avg Wait (Mins)" stroke="#F09000" strokeWidth={2} />
+                     <Line type="monotone" dataKey="maxWaitMins" name="Max Wait (Mins)" stroke="#fa541c" strokeWidth={2} />
+                   </LineChart>
+                 )}
+               </ResponsiveContainer>
+             ) : (
+               <Empty description="No report metrics available for the selected filters" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+             )}
+           </div>
           </Card>
 
           {/* Details Table */}

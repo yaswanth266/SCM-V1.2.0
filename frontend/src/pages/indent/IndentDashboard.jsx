@@ -68,9 +68,12 @@ const IndentDashboard = () => {
   ];
 
   // Types distribution
+  const routineCount = recentIndents.filter(i => i.indent_type === 'routine').length;
+  const emergencyCount = recentIndents.filter(i => i.indent_type === 'emergency').length;
+  const hasTypeData = routineCount > 0 || emergencyCount > 0;
   const typeData = [
-    { name: 'Routine', value: recentIndents.filter(i => i.indent_type === 'routine').length || 4 },
-    { name: 'Emergency', value: recentIndents.filter(i => i.indent_type === 'emergency').length || 1 },
+    { name: 'Routine', value: routineCount },
+    { name: 'Emergency', value: emergencyCount },
   ];
 
   const getStatusTag = (status) => {
@@ -132,7 +135,7 @@ const IndentDashboard = () => {
           >
             <Statistic
               title={<span style={{ color: '#6C757D', fontWeight: 500 }}>Total Indents</span>}
-              value={isFieldUser ? kpis.my_indents_total : (kpis.pending_indents + 42)} // Approximation of total indents
+              value={isFieldUser ? (kpis.my_indents_total ?? 0) : (kpis.total_indents ?? 0)}
               prefix={<FileTextOutlined style={{ color: '#481890', marginRight: '8px' }} />}
             />
           </Card>
@@ -145,7 +148,7 @@ const IndentDashboard = () => {
           >
             <Statistic
               title={<span style={{ color: '#6C757D', fontWeight: 500 }}>Awaiting Approval</span>}
-              value={isFieldUser ? kpis.my_indents_pending_approval : kpis.pending_indents}
+              value={isFieldUser ? (kpis.my_indents_pending_approval ?? 0) : (kpis.pending_indents ?? 0)}
               prefix={<ClockCircleOutlined style={{ color: '#fa8c16', marginRight: '8px' }} />}
             />
           </Card>
@@ -158,7 +161,7 @@ const IndentDashboard = () => {
           >
             <Statistic
               title={<span style={{ color: '#6C757D', fontWeight: 500 }}>Approved & Active</span>}
-              value={isFieldUser ? kpis.my_indents_approved : 18}
+              value={isFieldUser ? (kpis.my_indents_approved ?? 0) : (kpis.approved_indents ?? 0)}
               prefix={<CheckCircleOutlined style={{ color: '#52c41a', marginRight: '8px' }} />}
             />
           </Card>
@@ -171,7 +174,7 @@ const IndentDashboard = () => {
           >
             <Statistic
               title={<span style={{ color: '#6C757D', fontWeight: 500 }}>Rejected / Cancelled</span>}
-              value={isFieldUser ? (kpis.my_indents_rejected + kpis.my_indents_cancelled) : 4}
+              value={isFieldUser ? ((kpis.my_indents_rejected ?? 0) + (kpis.my_indents_cancelled ?? 0)) : (kpis.rejected_indents ?? 0)}
               prefix={<CloseCircleOutlined style={{ color: '#f5222d', marginRight: '8px' }} />}
             />
           </Card>
@@ -208,32 +211,38 @@ const IndentDashboard = () => {
             style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
             <div style={{ height: '300px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie
-                    data={typeData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {typeData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+              {hasTypeData ? (
+                <>
+                  <ResponsiveContainer width="100%" height={220}>
+                    <PieChart>
+                      <Pie
+                        data={typeData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={80}
+                        paddingAngle={5}
+                        dataKey="value"
+                      >
+                        {typeData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div style={{ display: 'flex', gap: '16px', marginTop: '10px' }}>
+                    {typeData.map((t, idx) => (
+                      <div key={t.name} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div style={{ width: '12px', height: '12px', borderRadius: '2px', background: COLORS[idx % COLORS.length] }} />
+                        <span style={{ fontSize: '13px', color: '#495057' }}>{t.name} ({t.value})</span>
+                      </div>
                     ))}
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-              <div style={{ display: 'flex', gap: '16px', marginTop: '10px' }}>
-                {typeData.map((t, idx) => (
-                  <div key={t.name} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <div style={{ width: '12px', height: '12px', borderRadius: '2px', background: COLORS[idx % COLORS.length] }} />
-                    <span style={{ fontSize: '13px', color: '#495057' }}>{t.name}</span>
                   </div>
-                ))}
-              </div>
+                </>
+              ) : (
+                <Empty description="No indent type data available" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
             </div>
           </Card>
         </Col>

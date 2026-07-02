@@ -114,7 +114,7 @@ const ProcurementDashboard = () => {
   const poStats = procSummary.purchase_orders || {};
 
   const openMRs = (mrStats.pending_approval || 0) + (mrStats.approved || 0);
-  const activeRFQs = 4; // Mock active count
+  const activeRFQs = procSummary.rfq_stats?.active ?? 0;
   const posAwaitingConfirm = poStats.approved || 0;
   const overduePOs = alerts.overdue_po_count || 0;
 
@@ -148,7 +148,7 @@ const ProcurementDashboard = () => {
           >
             <Statistic
               title={<span style={{ color: '#6C757D', fontWeight: 500 }}>Open Material Requests</span>}
-              value={openMRs || 8}
+              value={openMRs}
               prefix={<FileTextOutlined style={{ color: '#D80048', marginRight: '8px' }} />}
             />
           </Card>
@@ -174,7 +174,7 @@ const ProcurementDashboard = () => {
           >
             <Statistic
               title={<span style={{ color: '#6C757D', fontWeight: 500 }}>POs Awaiting Vendor</span>}
-              value={posAwaitingConfirm || 3}
+              value={posAwaitingConfirm}
               prefix={<ShoppingOutlined style={{ color: '#52c41a', marginRight: '8px' }} />}
             />
           </Card>

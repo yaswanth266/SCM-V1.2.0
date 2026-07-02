@@ -31,6 +31,7 @@ class IndentCreate(BaseModel):
     vehicle_code: Optional[str] = None
     vehicle_number: Optional[str] = None
     service_code: Optional[str] = None
+    template_type: Optional[str] = None
 
     # BUG-IND-028 — `department_id` is a foreign key to the departments
     # table; previously typed as Optional[str] which silently accepted
@@ -98,6 +99,7 @@ class IndentUpdate(BaseModel):
     vehicle_code: Optional[str] = None
     vehicle_number: Optional[str] = None
     service_code: Optional[str] = None
+    template_type: Optional[str] = None
     # When provided, replaces all existing items on the indent. Only allowed
 
     # while the indent is still in draft status (handler enforces).
@@ -144,6 +146,7 @@ class IndentResponse(BaseModel):
     vehicle_code: Optional[str] = None
     vehicle_number: Optional[str] = None
     service_code: Optional[str] = None
+    template_type: Optional[str] = None
     position_id: Optional[int] = None
 
     position_name: Optional[str] = None

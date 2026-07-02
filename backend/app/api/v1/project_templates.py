@@ -14,6 +14,59 @@ from app.schemas.master import ProjectIndentTemplateCreate, ProjectIndentTemplat
 router = APIRouter()
 
 
+@router.get("/list")
+async def list_project_indent_templates(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),
+    search: Optional[str] = Query(None),
+    template_type: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from sqlalchemy import func
+    from app.utils.helpers import build_paginated_response
+    offset = (page - 1) * page_size
+    q = (
+        select(ProjectIndentTemplate)
+        .options(
+            selectinload(ProjectIndentTemplate.project),
+            selectinload(ProjectIndentTemplate.items),
+        )
+    )
+    if template_type:
+        q = q.where(ProjectIndentTemplate.template_type == template_type)
+    
+    if search:
+        q = q.join(ProjectIndentTemplate.project).where(
+            (Project.name.ilike(f"%{search}%")) | (Project.code.ilike(f"%{search}%"))
+        )
+        
+    count_q = select(func.count(ProjectIndentTemplate.id))
+    if template_type:
+        count_q = count_q.where(ProjectIndentTemplate.template_type == template_type)
+    if search:
+        count_q = count_q.join(ProjectIndentTemplate.project).where(
+            (Project.name.ilike(f"%{search}%")) | (Project.code.ilike(f"%{search}%"))
+        )
+        
+    total = (await db.execute(count_q)).scalar() or 0
+    res = await db.execute(q.order_by(ProjectIndentTemplate.updated_at.desc()).offset(offset).limit(page_size))
+    rows = res.scalars().all()
+    
+    items = [{
+        "id": r.id,
+        "project_id": r.project_id,
+        "project_name": r.project.name if r.project else None,
+        "project_code": r.project.code if r.project else None,
+        "template_type": r.template_type,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        "items_count": len(r.items)
+    } for r in rows]
+    
+    return build_paginated_response(items, total, page, page_size)
+
+
 @router.get("", response_model=Optional[ProjectIndentTemplateResponse])
 async def get_project_indent_template(
     project_id: int,

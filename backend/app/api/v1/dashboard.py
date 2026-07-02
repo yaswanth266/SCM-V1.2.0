@@ -291,6 +291,7 @@ async def get_procurement_summary(
             "material_requests": {"draft": 0, "pending_approval": 0, "approved": 0, "ordered": 0},
             "purchase_orders": {"draft": 0, "pending_approval": 0, "approved": 0, "accepted": 0, "rejected": 0, "partially_received": 0},
             "grns": {"draft": 0, "pending_qi": 0, "putaway_pending": 0},
+            "warehouse_ops": {"active_picklists": 0, "picked_unissued": 0},
         }
     mr_statuses = ["draft", "pending_approval", "approved", "ordered"]
     po_statuses = ["draft", "pending_approval", "approved", "accepted", "rejected", "partially_received"]
@@ -323,10 +324,35 @@ async def get_procurement_summary(
     for s, c in grn_rows:
         grn_counts[s] = c or 0
 
+    # Calculate active picklists and picked & unissued (packing orders)
+    from app.models.outbound import PickingOrder, PackingOrder
+    from app.models.procurement import RFQ
+    active_picklists = (await db.execute(
+        select(func.count(PickingOrder.id))
+        .where(PickingOrder.status.in_(["assigned", "in_progress"]))
+    )).scalar() or 0
+
+    picked_unissued = (await db.execute(
+        select(func.count(PackingOrder.id))
+        .where(PackingOrder.status.in_(["draft", "in_progress"]))
+    )).scalar() or 0
+
+    active_rfqs = (await db.execute(
+        select(func.count(RFQ.id))
+        .where(RFQ.status.in_(["draft", "sent", "under_evaluation"]))
+    )).scalar() or 0
+
     return {
         "material_requests": mr_counts,
         "purchase_orders": po_counts,
         "grns": grn_counts,
+        "rfq_stats": {
+            "active": int(active_rfqs)
+        },
+        "warehouse_ops": {
+            "active_picklists": int(active_picklists),
+            "picked_unissued": int(picked_unissued),
+        }
     }
 
 

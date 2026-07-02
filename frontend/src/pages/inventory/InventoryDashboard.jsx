@@ -63,11 +63,7 @@ const InventoryDashboard = () => {
         value: Math.round(value),
       })).sort((a, b) => b.value - a.value).slice(0, 5); // top 5 warehouses
       
-      setWarehouseDistribution(whData.length > 0 ? whData : [
-        { name: 'Main Warehouse', value: 1200000 },
-        { name: 'Sub-Store A', value: 340000 },
-        { name: 'Sub-Store B', value: 210000 },
-      ]);
+      setWarehouseDistribution(whData);
 
     } catch (error) {
       console.error('Failed to fetch inventory dashboard data:', error);
@@ -131,7 +127,7 @@ const InventoryDashboard = () => {
           >
             <Statistic
               title={<span style={{ color: '#6C757D', fontWeight: 500 }}>Total Stock Value</span>}
-              value={summary.total_stock_value || 1750000}
+              value={summary.total_stock_value ?? 0}
               precision={2}
               formatter={(val) => formatCurrency(val)}
               prefix={<DollarOutlined style={{ color: '#900078', marginRight: '8px' }} />}
@@ -146,7 +142,7 @@ const InventoryDashboard = () => {
           >
             <Statistic
               title={<span style={{ color: '#6C757D', fontWeight: 500 }}>Active SKUs</span>}
-              value={summary.total_items || 154}
+              value={summary.total_items ?? 0}
               prefix={<InboxOutlined style={{ color: '#481890', marginRight: '8px' }} />}
             />
           </Card>
@@ -187,20 +183,24 @@ const InventoryDashboard = () => {
             title="Stock Value Distribution by Warehouse" 
             style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
-            <div style={{ height: '300px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={warehouseDistribution} margin={{ top: 20, right: 30, left: 10, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
-                  <YAxis tickLine={false} />
-                  <Tooltip formatter={(value) => formatCurrency(value)} />
-                  <Bar dataKey="value" name="Stock Value" fill="#900078" radius={[4, 4, 0, 0]}>
-                    {warehouseDistribution.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
+            <div style={{ height: '300px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              {warehouseDistribution.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={warehouseDistribution} margin={{ top: 20, right: 30, left: 10, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                    <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
+                    <YAxis tickLine={false} />
+                    <Tooltip formatter={(value) => formatCurrency(value)} />
+                    <Bar dataKey="value" name="Stock Value" fill="#900078" radius={[4, 4, 0, 0]}>
+                      {warehouseDistribution.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <Empty description="No warehouse stock value distribution data available" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
             </div>
           </Card>
         </Col>

@@ -14,6 +14,7 @@ import {
   Button,
   Empty,
   Input,
+  Tabs,
 } from 'antd';
 import {
   DashboardOutlined,
@@ -475,6 +476,36 @@ const MainLayout = () => {
   const { collapsed, toggleSidebar, notifications, unreadCount, markAllRead, fetchNotifications } =
     useAppStore();
 
+  const [activeNotifTab, setActiveNotifTab] = useState('all');
+
+  const handleNotificationClick = async (item) => {
+    try {
+      await api.post(`/notifications/${item.id}/read`);
+      // Update store state
+      useAppStore.getState().markNotificationRead(item.id);
+    } catch (err) {
+      console.error('Failed to mark notification as read:', err);
+    }
+    const mod = (item.module || '').toLowerCase();
+    if (item.reference_type === 'indent' && item.reference_id) {
+      navigate(`/indent/indents/${item.reference_id}`);
+    } else if (item.reference_type === 'purchase_order' && item.reference_id) {
+      navigate(`/procurement/purchase-orders/${item.reference_id}`);
+    } else if (item.reference_type === 'grn' && item.reference_id) {
+      navigate(`/warehouse/grn/${item.reference_id}`);
+    } else {
+      if (mod === 'indent') {
+        navigate('/indent/notifications');
+      } else if (mod === 'warehouse') {
+        navigate('/warehouse/notifications');
+      } else if (mod === 'procurement') {
+        navigate('/procurement/notifications');
+      } else if (mod === 'inventory') {
+        navigate('/inventory/notifications');
+      }
+    }
+  };
+
   // Task 7: hydrate the server-driven sidebar on mount. If the call fails
   // (offline, backend not yet on Task 6, etc.) we silently fall back to
   // the legacy client-built menu — sidebarItems stays empty and the
@@ -597,8 +628,63 @@ const MainLayout = () => {
     ],
   };
 
+  // Count calculations for tabs
+  const allCount = notifications.filter(n => !n.read).length;
+  const procurementCount = notifications.filter(n => !n.read && (n.module || '').toLowerCase() === 'procurement').length;
+  const inventoryCount = notifications.filter(n => !n.read && (n.module || '').toLowerCase() === 'inventory').length;
+  const warehouseCount = notifications.filter(n => !n.read && (n.module || '').toLowerCase() === 'warehouse').length;
+  const indentCount = notifications.filter(n => !n.read && (n.module || '').toLowerCase() === 'indent').length;
+
+  const filteredNotifications = useMemo(() => {
+    if (activeNotifTab === 'all') return notifications;
+    return notifications.filter(n => (n.module || '').toLowerCase() === activeNotifTab);
+  }, [notifications, activeNotifTab]);
+
+  const tabItems = [
+    {
+      key: 'all',
+      label: (
+        <Badge count={allCount} size="small" offset={[8, -2]}>
+          <span style={{ fontSize: '12px', paddingRight: allCount > 0 ? 6 : 0 }}>All</span>
+        </Badge>
+      ),
+    },
+    {
+      key: 'procurement',
+      label: (
+        <Badge count={procurementCount} size="small" offset={[8, -2]}>
+          <span style={{ fontSize: '12px', paddingRight: procurementCount > 0 ? 6 : 0 }}>Proc</span>
+        </Badge>
+      ),
+    },
+    {
+      key: 'inventory',
+      label: (
+        <Badge count={inventoryCount} size="small" offset={[8, -2]}>
+          <span style={{ fontSize: '12px', paddingRight: inventoryCount > 0 ? 6 : 0 }}>Inv</span>
+        </Badge>
+      ),
+    },
+    {
+      key: 'warehouse',
+      label: (
+        <Badge count={warehouseCount} size="small" offset={[8, -2]}>
+          <span style={{ fontSize: '12px', paddingRight: warehouseCount > 0 ? 6 : 0 }}>WH</span>
+        </Badge>
+      ),
+    },
+    {
+      key: 'indent',
+      label: (
+        <Badge count={indentCount} size="small" offset={[8, -2]}>
+          <span style={{ fontSize: '12px', paddingRight: indentCount > 0 ? 6 : 0 }}>Indent</span>
+        </Badge>
+      ),
+    },
+  ];
+
   const notificationContent = (
-    <div className="notification-dropdown">
+    <div className="notification-dropdown" style={{ minWidth: '320px' }}>
       <div
         style={{
           padding: '8px 16px',
@@ -615,37 +701,62 @@ const MainLayout = () => {
           </Button>
         )}
       </div>
-      {notifications.length > 0 ? (
-        <List
-          dataSource={notifications.slice(0, 10)}
-          renderItem={(item) => (
-            <div
-              className="notification-item"
-              style={{
-                background: item.read ? 'transparent' : '#e6f7ff',
-              }}
-            >
-              <div className="notification-item-title">{item.title}</div>
-              {item.description && (
-                <div className="notification-item-desc">
-                  {item.description}
+      <Tabs
+        activeKey={activeNotifTab}
+        onChange={setActiveNotifTab}
+        items={tabItems}
+        size="small"
+        tabBarStyle={{ margin: 0, padding: '0 8px' }}
+      />
+      <div style={{ maxHeight: '320px', overflowY: 'auto' }}>
+        {filteredNotifications.length > 0 ? (
+          <List
+            dataSource={filteredNotifications.slice(0, 15)}
+            renderItem={(item) => (
+              <div
+                className="notification-item"
+                onClick={() => handleNotificationClick(item)}
+                style={{
+                  padding: '12px 16px',
+                  borderBottom: '1px solid #f0f0f0',
+                  cursor: 'pointer',
+                  background: item.read ? 'transparent' : '#e6f7ff',
+                  transition: 'background 0.2s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#f5f5f5'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = item.read ? 'transparent' : '#e6f7ff'; }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div className="notification-item-title" style={{ fontWeight: item.read ? 500 : 700, color: '#1A1A1A' }}>
+                    {item.title}
+                  </div>
+                  {item.module && (
+                    <Tag color="purple" style={{ fontSize: '10px', textTransform: 'capitalize', margin: 0 }}>
+                      {item.module}
+                    </Tag>
+                  )}
                 </div>
-              )}
-              {item.created_at && (
-                <div className="notification-item-time">
-                  {formatDateTime(item.created_at)}
-                </div>
-              )}
-            </div>
-          )}
-        />
-      ) : (
-        <Empty
-          image={Empty.PRESENTED_IMAGE_SIMPLE}
-          description="No notifications"
-          style={{ padding: 24 }}
-        />
-      )}
+                {item.description && (
+                  <div className="notification-item-desc" style={{ fontSize: '13px', color: '#495057', marginTop: '4px' }}>
+                    {item.description}
+                  </div>
+                )}
+                {item.created_at && (
+                  <div className="notification-item-time" style={{ fontSize: '11px', color: '#8c8c8c', marginTop: '6px' }}>
+                    {formatDateTime(item.created_at)}
+                  </div>
+                )}
+              </div>
+            )}
+          />
+        ) : (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={`No ${activeNotifTab === 'all' ? '' : activeNotifTab} notifications`}
+            style={{ padding: 24 }}
+          />
+        )}
+      </div>
     </div>
   );
 

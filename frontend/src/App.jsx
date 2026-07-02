@@ -98,6 +98,7 @@ const BOMs = lazy(() => import('./pages/inventory/masters/BOMs'));
 const BOMForm = lazy(() => import('./pages/inventory/masters/BOMForm'));
 const Vehicles = lazy(() => import('./pages/inventory/masters/Vehicles'));
 const ProjectIndentTemplateForm = lazy(() => import('./pages/inventory/masters/ProjectIndentTemplateForm'));
+const ProjectIndentTemplateList = lazy(() => import('./pages/inventory/masters/ProjectIndentTemplateList'));
 
 const Lms = lazy(() => import('./pages/lms/Lms'));
 
@@ -581,8 +582,12 @@ const App = () => {
             <Route path="/inventory/masters/boms" element={<KeyRoute requiredKey="inventory-masters-boms"><BOMs /></KeyRoute>} />
             <Route path="/inventory/masters/boms/new" element={<KeyRoute requiredKey="inventory-masters-boms"><BOMForm /></KeyRoute>} />
             <Route path="/inventory/masters/boms/:id/edit" element={<KeyRoute requiredKey="inventory-masters-boms"><BOMForm /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-consumables" element={<KeyRoute requiredKey="inventory-masters-boms"><ProjectIndentTemplateForm templateType="consumables" title="AP 104 DP / Consumables - Indent Master" /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-install" element={<KeyRoute requiredKey="inventory-masters-boms"><ProjectIndentTemplateForm templateType="install" title="AP 104 DP Install - Indent Master" /></KeyRoute>} />
+            <Route path="/inventory/masters/ap104-consumables" element={<KeyRoute requiredKey="inventory-masters-ap104-consumables"><ProjectIndentTemplateList templateType="consumables" title="AP 104 DP / Consumables - Indent Master" /></KeyRoute>} />
+            <Route path="/inventory/masters/ap104-consumables/new" element={<KeyRoute requiredKey="inventory-masters-ap104-consumables"><ProjectIndentTemplateForm templateType="consumables" title="AP 104 DP / Consumables - Indent Master" /></KeyRoute>} />
+            <Route path="/inventory/masters/ap104-consumables/edit/:projectId" element={<KeyRoute requiredKey="inventory-masters-ap104-consumables"><ProjectIndentTemplateForm templateType="consumables" title="AP 104 DP / Consumables - Indent Master" /></KeyRoute>} />
+            <Route path="/inventory/masters/ap104-install" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateList templateType="install" title="AP 104 DP Install - Indent Master" /></KeyRoute>} />
+            <Route path="/inventory/masters/ap104-install/new" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateForm templateType="install" title="AP 104 DP Install - Indent Master" /></KeyRoute>} />
+            <Route path="/inventory/masters/ap104-install/edit/:projectId" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateForm templateType="install" title="AP 104 DP Install - Indent Master" /></KeyRoute>} />
             <Route path="/inventory/masters/vehicles" element={<KeyRoute requiredKey="inventory-masters-items"><Vehicles /></KeyRoute>} />
             <Route path="/inventory/masters/price-lists" element={<KeyRoute requiredKey="inventory-masters-price-lists"><PriceLists /></KeyRoute>} />
 
@@ -609,10 +614,10 @@ const App = () => {
             <Route path="/indent/indents/new" element={<PermissionRoute module="indent"><IndentForm /></PermissionRoute>} />
             <Route path="/indent/indents/create" element={<Navigate to="/indent/indents/new" replace />} />
             <Route path="/indent/indents/:id" element={<PermissionRoute module="indent"><IndentForm /></PermissionRoute>} />
-            <Route path="/indent/ap104-consumables" element={<KeyRoute requiredKey="indent-indents"><TemplateIndentList templateType="consumables" title="AP 104 DP / Consumables Indents" /></KeyRoute>} />
+            <Route path="/indent/ap104-consumables" element={<KeyRoute requiredKey="indent-ap104-consumables"><TemplateIndentList templateType="consumables" title="AP 104 DP / Consumables Indents" /></KeyRoute>} />
             <Route path="/indent/ap104-consumables/new" element={<PermissionRoute module="indent"><TemplateIndentForm templateType="consumables" title="Create AP 104 DP / Consumables Indent" /></PermissionRoute>} />
             <Route path="/indent/ap104-consumables/:id" element={<PermissionRoute module="indent"><TemplateIndentForm templateType="consumables" title="AP 104 DP / Consumables Indent" /></PermissionRoute>} />
-            <Route path="/indent/ap104-install" element={<KeyRoute requiredKey="indent-indents"><TemplateIndentList templateType="install" title="AP 104 DP Install Indents" /></KeyRoute>} />
+            <Route path="/indent/ap104-install" element={<KeyRoute requiredKey="indent-ap104-install"><TemplateIndentList templateType="install" title="AP 104 DP Install Indents" /></KeyRoute>} />
             <Route path="/indent/ap104-install/new" element={<PermissionRoute module="indent"><TemplateIndentForm templateType="install" title="Create AP 104 DP Install Indent" /></PermissionRoute>} />
             <Route path="/indent/ap104-install/:id" element={<PermissionRoute module="indent"><TemplateIndentForm templateType="install" title="AP 104 DP Install Indent" /></PermissionRoute>} />
 
