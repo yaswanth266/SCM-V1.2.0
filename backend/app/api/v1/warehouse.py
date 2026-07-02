@@ -1256,10 +1256,14 @@ async def confirm_putaway_item(
         select(PutawayItem)
         .options(selectinload(PutawayItem.item))
         .where(PutawayItem.id == item_id, PutawayItem.putaway_id == putaway_id)
+        .with_for_update()
     )
     pi = result.scalar_one_or_none()
     if not pi:
         raise HTTPException(status_code=404, detail="Putaway item not found")
+
+    if pi.status in ("done", "skipped"):
+        return {"success": True, "message": "Putaway item already confirmed"}
 
     has_serial = bool(pi.item.has_serial) if (pi and pi.item) else False
     if has_serial:
