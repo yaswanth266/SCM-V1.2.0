@@ -373,17 +373,45 @@ const MaterialIssueForm = () => {
         return [newOption, ...prev];
       });
 
-      let sourceWarehouseId = ind.warehouse_id;
+      let sourceWarehouseId = null;
       try {
         const whRes = await api.get('/masters/warehouses', { params: { page_size: 200 } });
         const whList = Array.isArray(whRes.data) ? whRes.data : (whRes.data?.items || []);
-        const indentWh = whList.find((w) => w.id === ind.warehouse_id);
-        const isVirtual = indentWh && indentWh.type === 'virtual';
-        if (isVirtual) {
-          const realWh = whList.find((w) => w.type === 'main' || w.type === 'regional');
-          if (realWh) sourceWarehouseId = realWh.id;
+        
+        const userRole = (user?.user_type || '').toLowerCase();
+        const isAdmin = ['admin', 'superadmin', 'super_admin', 'manager'].includes(userRole);
+        
+        if (isAdmin) {
+          // Look for central warehouse: parent_id is null/undefined or name/code contains central
+          const centralWh = whList.find(w => 
+            w.parent_id === null || 
+            w.parent_id === undefined || 
+            (w.code || '').toUpperCase().includes('CENTRAL') || 
+            (w.name || '').toUpperCase().includes('CENTRAL')
+          );
+          if (centralWh) {
+            sourceWarehouseId = centralWh.id;
+          }
         }
-      } catch { /* fall back to indent's warehouse */ }
+        
+        // If not admin, or central warehouse not found, default to user's assigned warehouse
+        if (!sourceWarehouseId && user?.warehouse_id) {
+          sourceWarehouseId = Number(user.warehouse_id);
+        }
+        
+        // If still not resolved, fall back to indent's warehouse
+        if (!sourceWarehouseId) {
+          sourceWarehouseId = ind.warehouse_id;
+          const indentWh = whList.find((w) => w.id === ind.warehouse_id);
+          const isVirtual = indentWh && indentWh.type === 'virtual';
+          if (isVirtual) {
+            const realWh = whList.find((w) => w.type === 'main' || w.type === 'regional');
+            if (realWh) sourceWarehouseId = realWh.id;
+          }
+        }
+      } catch {
+        sourceWarehouseId = ind.warehouse_id;
+      }
 
       form.setFieldsValue({
         warehouse_id: sourceWarehouseId,
@@ -521,13 +549,34 @@ const MaterialIssueForm = () => {
     const queryParams = new URLSearchParams(location.search);
     if (queryParams.get('indent_id')) return;
 
-    const assignedWarehouseId = Number(user?.warehouse_id);
-    const assignedWarehouseOption = warehouses.find(
-      (warehouse) => Number(warehouse.value) === assignedWarehouseId
-    );
-    const defaultWarehouseId = assignedWarehouseOption
-      ? assignedWarehouseOption.value
-      : (warehouses.length === 1 ? warehouses[0].value : null);
+    const userRole = (user?.user_type || '').toLowerCase();
+    const isAdmin = ['admin', 'superadmin', 'super_admin', 'manager'].includes(userRole);
+    
+    let defaultWarehouseId = null;
+    if (isAdmin) {
+      const centralOption = warehouses.find(w => 
+        (w.label || '').toUpperCase().includes('CENTRAL') || 
+        (w.label || '').toUpperCase().includes('HQ') ||
+        (w.label || '').toUpperCase().includes('HEAD')
+      );
+      if (centralOption) {
+        defaultWarehouseId = centralOption.value;
+      }
+    }
+    
+    if (!defaultWarehouseId && user?.warehouse_id) {
+      const assignedWarehouseId = Number(user?.warehouse_id);
+      const assignedWarehouseOption = warehouses.find(
+        (warehouse) => Number(warehouse.value) === assignedWarehouseId
+      );
+      if (assignedWarehouseOption) {
+        defaultWarehouseId = assignedWarehouseOption.value;
+      }
+    }
+    
+    if (!defaultWarehouseId) {
+      defaultWarehouseId = warehouses.length === 1 ? warehouses[0].value : null;
+    }
 
     if (!defaultWarehouseId) return;
 
