@@ -510,6 +510,27 @@ async def ensure_organization_structure_schema(session: AsyncSession) -> None:
           AND u.employee_code <> ''
     """))
 
+    # Sync warehouse.office_id column and FK
+    warehouse_office_exists = (await conn.execute(text("""
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = 'warehouses'
+          AND column_name = 'office_id'
+        LIMIT 1
+    """))).scalar_one_or_none()
+    if warehouse_office_exists is None:
+        await conn.execute(text("ALTER TABLE warehouses ADD COLUMN office_id BIGINT NULL"))
+        try:
+            await conn.execute(text("""
+                ALTER TABLE warehouses
+                ADD CONSTRAINT fk_warehouses_office_id
+                FOREIGN KEY (office_id) REFERENCES offices (id)
+                ON DELETE SET NULL
+            """))
+        except Exception as exc:
+            print(f"Ignored fk_warehouses_office_id error: {exc}")
+
     # ── Speed-search indexes for positions, employees, offices ────────────
     # B-tree indexes on frequently filtered/joined columns
     _search_indexes = (
@@ -533,6 +554,8 @@ async def ensure_organization_structure_schema(session: AsyncSession) -> None:
         ("idx_projects_name", "CREATE INDEX idx_projects_name ON projects (name)"),
         # roles
         ("idx_roles_name", "CREATE INDEX idx_roles_name ON roles (name)"),
+        # warehouses
+        ("idx_warehouses_office_id", "CREATE INDEX idx_warehouses_office_id ON warehouses (office_id)"),
     )
     existing_indexes = {
         row[0]
@@ -540,7 +563,7 @@ async def ensure_organization_structure_schema(session: AsyncSession) -> None:
             SELECT DISTINCT index_name
             FROM information_schema.statistics
             WHERE table_schema = DATABASE()
-              AND table_name IN ('positions', 'employees', 'offices', 'projects', 'roles')
+              AND table_name IN ('positions', 'employees', 'offices', 'projects', 'roles', 'warehouses')
         """))).all()
     }
     for idx_name, ddl in _search_indexes:

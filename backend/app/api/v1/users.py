@@ -1190,6 +1190,8 @@ async def create_office(
     row = Office(**payload.model_dump())
     db.add(row)
     await db.flush()
+    from app.services.office_warehouse_sync import sync_office_to_warehouse
+    await sync_office_to_warehouse(db, row, organization_id=current_user.organization_id)
     return {"id": row.id, "message": "Office created"}
 
 
@@ -1207,6 +1209,8 @@ async def update_office(
     for key, value in payload.model_dump().items():
         setattr(row, key, value)
     await db.flush()
+    from app.services.office_warehouse_sync import sync_office_to_warehouse
+    await sync_office_to_warehouse(db, row, organization_id=current_user.organization_id)
     return {"id": row.id, "message": "Office updated"}
 
 
@@ -1417,6 +1421,8 @@ async def create_position(
     row = Position(**payload.model_dump())
     db.add(row)
     await db.flush()
+    from app.services.employee_warehouse_sync import sync_position_employee_to_warehouse
+    await sync_position_employee_to_warehouse(db, row)
     return {"id": row.id, "message": "Position created"}
 
 
@@ -1438,6 +1444,8 @@ async def update_position(
     for key, value in payload.model_dump().items():
         setattr(row, key, value)
     await db.flush()
+    from app.services.employee_warehouse_sync import sync_position_employee_to_warehouse
+    await sync_position_employee_to_warehouse(db, row)
     return {"id": row.id, "message": "Position updated"}
 
 
@@ -1927,6 +1935,8 @@ async def _office_id_from_external(db: AsyncSession, row: dict, stats: dict[str,
         if address:
             office.address = address
             
+    from app.services.office_warehouse_sync import sync_office_to_warehouse
+    await sync_office_to_warehouse(db, office)
     return office.id
 
 
@@ -2129,6 +2139,8 @@ async def _upsert_external_employee(db: AsyncSession, row: dict, stats: dict[str
         pos = (await db.execute(select(Position).where(Position.id == pos_id))).scalar_one_or_none()
         if pos:
             pos.employee_id = employee.id
+            from app.services.employee_warehouse_sync import sync_position_employee_to_warehouse
+            await sync_position_employee_to_warehouse(db, pos)
     return True, created
 
 
@@ -2334,6 +2346,13 @@ async def _execute_sync(
     try:
         linked_users = await _link_users_to_employees(db)
         role_links_applied = await _apply_position_roles_to_linked_users(db)
+        
+        # Auto-sync offices to SCM warehouses and map employees to warehouses
+        from app.services.office_warehouse_sync import sync_all_offices_to_warehouses
+        from app.services.employee_warehouse_sync import sync_all_position_employees
+        await sync_all_offices_to_warehouses(db, organization_id=organization_id or 1)
+        await sync_all_position_employees(db)
+        
         await db.commit()
     except Exception as exc:
         print(f"Error post-processing sync: {exc}")
@@ -3017,4 +3036,29 @@ async def rpt_user_activity(
         .order_by(func.count(ActivityLog.id).desc())
     )
     return [dict(row._mapping) for row in result.all()]
+
+
+@router.post("/offices/sync-warehouses", status_code=200)
+async def backfill_offices_to_warehouses(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("masters", "update", "warehouses")),
+):
+    """Bulk backfill all offices as SCM warehouses."""
+    from app.services.office_warehouse_sync import sync_all_offices_to_warehouses
+    stats = await sync_all_offices_to_warehouses(db, organization_id=current_user.organization_id)
+    await db.commit()
+    return stats
+
+
+@router.post("/employees/sync-warehouse-mappings", status_code=200)
+async def backfill_employee_warehouse_mappings(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_permission("masters", "update", "users")),
+):
+    """Bulk backfill employee-to-warehouse mappings based on positions."""
+    from app.services.employee_warehouse_sync import sync_all_position_employees
+    stats = await sync_all_position_employees(db)
+    await db.commit()
+    return stats
+
 

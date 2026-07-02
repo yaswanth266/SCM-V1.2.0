@@ -24,6 +24,7 @@ class Warehouse(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     parent_id = Column(BigInteger, ForeignKey("warehouses.id"), nullable=True)
+    office_id = Column(BigInteger, ForeignKey("offices.id", ondelete="SET NULL"), nullable=True)
 
     organization = relationship("Organization", back_populates="warehouses")
     locations = relationship("WarehouseLocation", back_populates="warehouse")

@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     HR_EMPLOYEE_API_URL: str = ""
     HR_API_KEY: str = ""
     HR_API_TIMEOUT: int = 30
+    HRMS_WEBHOOK_SECRET: str = ""
 
     @property
     def effective_refresh_token_days(self) -> int:

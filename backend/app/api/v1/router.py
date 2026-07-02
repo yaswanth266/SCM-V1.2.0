@@ -12,11 +12,12 @@ from app.api.v1 import (
     rate_contracts, cycle_count, landed_cost, lms, sidebar, packaging, inward, dispatch, api_keys, external,
     logistics, carrier_auth, carrier_portal,
     vendor_auth, vendor_portal,
-    consignment, bulk_upload, vehicles, project_templates,
+    consignment, bulk_upload, vehicles, project_templates, hrms_webhook,
 )
 
 api_router = APIRouter(prefix="/api/v1")
 
+api_router.include_router(hrms_webhook.router, prefix="/webhooks", tags=["Webhooks"])
 api_router.include_router(packaging.router)
 api_router.include_router(consignment.router, prefix="/consignment", tags=["Consignment & Packaging"])
 api_router.include_router(auth.router, prefix="/auth", tags=["Authentication"])
