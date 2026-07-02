@@ -1362,14 +1362,15 @@ async def confirm_putaway_item(
         material_code = pi.item.item_code if (pi and pi.item) else ""
         
         if is_asset or is_consumable:
-            from app.services.asset_service import get_next_system_serial_number, generate_asset_code
+            from app.services.asset_service import get_max_system_serial_number, generate_asset_code
             qty_int = int(pi.qty)
             serial_list = []
             if has_serial and payload.serial_numbers:
                 serial_list = [sn.strip() for sn in payload.serial_numbers]
             else:
+                max_val = await get_max_system_serial_number(db)
                 for offset in range(qty_int):
-                    sys_sn = await get_next_system_serial_number(db, offset)
+                    sys_sn = str(max_val + 1 + offset)
                     serial_list.append(sys_sn)
 
             for sn in serial_list:

@@ -5,12 +5,8 @@ from app.models.warehouse import SerialNumber
 
 logger = logging.getLogger(__name__)
 
-async def get_next_system_serial_number(db: AsyncSession, offset: int = 0) -> str:
-    """Get the next system-generated serial number.
-    Queries the serial_numbers table, parses out any system serial numbers
-    (either standalone or embedded in asset/consumable codes like 1-X-XXXXXX or X-1-X),
-    finds the maximum value, and returns the next sequential number plus the offset.
-    """
+async def get_max_system_serial_number(db: AsyncSession) -> int:
+    """Find the maximum system-generated serial number in the DB."""
     res = await db.execute(select(SerialNumber.serial_number, SerialNumber.asset_code, SerialNumber.consumable_code))
     sns = []
     for r_sn, r_ac, r_cc in res.all():
@@ -38,7 +34,13 @@ async def get_next_system_serial_number(db: AsyncSession, offset: int = 0) -> st
                 if serial_part.isdigit():
                     sns.append(int(serial_part))
 
-    max_val = max(sns) if sns else 0
+    return max(sns) if sns else 0
+
+async def get_next_system_serial_number(db: AsyncSession, offset: int = 0) -> str:
+    """Get the next system-generated serial number.
+    Uses get_max_system_serial_number to find the maximum value, and returns the next sequential number plus the offset.
+    """
+    max_val = await get_max_system_serial_number(db)
     next_val = max_val + 1 + offset
     return str(next_val)
 
