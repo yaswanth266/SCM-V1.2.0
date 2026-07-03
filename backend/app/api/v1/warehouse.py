@@ -3041,7 +3041,95 @@ async def create_material_issue(
                         "must be approved or partially_fulfilled"
                     ),
                 )
-        except ImportError:
+            # Access scoping on linked indent
+            from app.utils.dependencies import get_user_role_codes, user_warehouse_ids
+            role_codes = set(await get_user_role_codes(db, current_user.id))
+            is_super_or_admin = bool({"super_admin", "admin"} & role_codes)
+
+            wh_ids = await user_warehouse_ids(db, current_user.id)
+            is_mapped_to_central = False
+            if wh_ids:
+                from app.models.warehouse import Warehouse as WhModel
+                central_wh_res = await db.execute(
+                    select(WhModel.id).where(
+                        WhModel.id.in_(wh_ids),
+                        (func.lower(WhModel.name) == "central") | (WhModel.name == "Central - Vijayawada") | (WhModel.code == "20070") | (WhModel.id == 18)
+                    )
+                )
+                if central_wh_res.scalars().all():
+                    is_mapped_to_central = True
+
+            has_all_visibility = is_super_or_admin or is_mapped_to_central
+
+            if not has_all_visibility:
+                from app.models.settings_master import Employee, Position
+                from app.models.user import User as UserModel
+                from app.services.approval_service import get_position_descendants
+
+                user_pos_ids = []
+                user_role_id = current_user.active_role_id
+                desc_user_ids = []
+
+                if current_user.employee_id:
+                    if user_role_id:
+                        pos_q = await db.execute(
+                            select(Position.id).where(
+                                Position.employee_id == current_user.employee_id,
+                                Position.role_id == user_role_id
+                            )
+                        )
+                        user_pos_ids = list(pos_q.scalars().all())
+
+                    if not user_pos_ids:
+                        emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
+                        emp = emp_res.scalar_one_or_none()
+                        if emp:
+                            if emp.position_id:
+                                user_pos_ids = [emp.position_id]
+                                if user_role_id is None:
+                                    pos_res = await db.execute(select(Position).where(Position.id == emp.position_id))
+                                    pos = pos_res.scalar_one_or_none()
+                                    if pos:
+                                        user_role_id = pos.role_id
+                            else:
+                                pos_q = await db.execute(
+                                    select(Position.id).where(Position.employee_id == current_user.employee_id)
+                                )
+                                user_pos_ids = list(pos_q.scalars().all())
+
+                desc_pos_ids = []
+                if user_pos_ids:
+                    for pos_id in user_pos_ids:
+                        descendants = await get_position_descendants(db, pos_id)
+                        desc_pos_ids.extend([d.id for d in descendants])
+
+                    if desc_pos_ids:
+                        emp_q2 = select(Position.employee_id).where(
+                            Position.id.in_(desc_pos_ids),
+                            Position.employee_id.is_not(None)
+                        )
+                        desc_emps_res = await db.execute(
+                            select(Employee.id).where(
+                                (Employee.position_id.in_(desc_pos_ids)) |
+                                (Employee.id.in_(emp_q2))
+                            )
+                        )
+                        desc_emp_ids = [r[0] for r in desc_emps_res.all()]
+                        if desc_emp_ids:
+                            desc_users_res = await db.execute(
+                                select(UserModel.id).where(UserModel.employee_id.in_(desc_emp_ids))
+                            )
+                            desc_user_ids = [r[0] for r in desc_users_res.all()]
+
+                allowed = (
+                    ind.raised_by == current_user.id
+                    or (desc_user_ids and ind.raised_by in desc_user_ids)
+                )
+                if not allowed:
+                    raise HTTPException(status_code=403, detail="Not authorized to issue against this indent")
+        except HTTPException:
+            raise
+        except Exception:
             pass
 
     # BUG-ISS-004 — block cross-org / cross-warehouse MR linkage.
@@ -3298,7 +3386,95 @@ async def bulk_create_material_issues(
                             "must be approved or partially_fulfilled"
                         ),
                     )
-            except ImportError:
+                # Access scoping on linked indent
+                from app.utils.dependencies import get_user_role_codes, user_warehouse_ids
+                role_codes = set(await get_user_role_codes(db, current_user.id))
+                is_super_or_admin = bool({"super_admin", "admin"} & role_codes)
+
+                wh_ids = await user_warehouse_ids(db, current_user.id)
+                is_mapped_to_central = False
+                if wh_ids:
+                    from app.models.warehouse import Warehouse as WhModel
+                    central_wh_res = await db.execute(
+                        select(WhModel.id).where(
+                            WhModel.id.in_(wh_ids),
+                            (func.lower(WhModel.name) == "central") | (WhModel.name == "Central - Vijayawada") | (WhModel.code == "20070") | (WhModel.id == 18)
+                        )
+                    )
+                    if central_wh_res.scalars().all():
+                        is_mapped_to_central = True
+
+                has_all_visibility = is_super_or_admin or is_mapped_to_central
+
+                if not has_all_visibility:
+                    from app.models.settings_master import Employee, Position
+                    from app.models.user import User as UserModel
+                    from app.services.approval_service import get_position_descendants
+
+                    user_pos_ids = []
+                    user_role_id = current_user.active_role_id
+                    desc_user_ids = []
+
+                    if current_user.employee_id:
+                        if user_role_id:
+                            pos_q = await db.execute(
+                                select(Position.id).where(
+                                    Position.employee_id == current_user.employee_id,
+                                    Position.role_id == user_role_id
+                                )
+                            )
+                            user_pos_ids = list(pos_q.scalars().all())
+
+                        if not user_pos_ids:
+                            emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
+                            emp = emp_res.scalar_one_or_none()
+                            if emp:
+                                if emp.position_id:
+                                    user_pos_ids = [emp.position_id]
+                                    if user_role_id is None:
+                                        pos_res = await db.execute(select(Position).where(Position.id == emp.position_id))
+                                        pos = pos_res.scalar_one_or_none()
+                                        if pos:
+                                            user_role_id = pos.role_id
+                                else:
+                                    pos_q = await db.execute(
+                                        select(Position.id).where(Position.employee_id == current_user.employee_id)
+                                    )
+                                    user_pos_ids = list(pos_q.scalars().all())
+
+                    desc_pos_ids = []
+                    if user_pos_ids:
+                        for pos_id in user_pos_ids:
+                            descendants = await get_position_descendants(db, pos_id)
+                            desc_pos_ids.extend([d.id for d in descendants])
+
+                        if desc_pos_ids:
+                            emp_q2 = select(Position.employee_id).where(
+                                Position.id.in_(desc_pos_ids),
+                                Position.employee_id.is_not(None)
+                            )
+                            desc_emps_res = await db.execute(
+                                select(Employee.id).where(
+                                    (Employee.position_id.in_(desc_pos_ids)) |
+                                    (Employee.id.in_(emp_q2))
+                                )
+                            )
+                            desc_emp_ids = [r[0] for r in desc_emps_res.all()]
+                            if desc_emp_ids:
+                                desc_users_res = await db.execute(
+                                    select(UserModel.id).where(UserModel.employee_id.in_(desc_emp_ids))
+                                )
+                                desc_user_ids = [r[0] for r in desc_users_res.all()]
+
+                    allowed = (
+                        ind.raised_by == current_user.id
+                        or (desc_user_ids and ind.raised_by in desc_user_ids)
+                    )
+                    if not allowed:
+                        raise HTTPException(status_code=403, detail="Not authorized to issue against this indent")
+            except HTTPException:
+                raise
+            except Exception:
                 pass
 
         # Link validation for MRs
