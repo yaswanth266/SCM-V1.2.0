@@ -2552,6 +2552,13 @@ async def get_stock_visibility(
 
         desc_pos_ids = []
         if user_pos_ids:
+            # Find all positions with the same name to bridge template/instance duplicate records
+            pos_names_res = await db.execute(select(Position.name).where(Position.id.in_(user_pos_ids)))
+            user_pos_names = [r[0] for r in pos_names_res.all() if r[0]]
+            if user_pos_names:
+                all_pos_res = await db.execute(select(Position.id).where(Position.name.in_(user_pos_names)))
+                user_pos_ids = list(set(user_pos_ids + [r[0] for r in all_pos_res.all()]))
+
             for pos_id in user_pos_ids:
                 descendants = await get_position_descendants(db, pos_id)
                 desc_pos_ids.extend([d.id for d in descendants])
@@ -2687,6 +2694,13 @@ async def list_material_issues(
 
         desc_pos_ids = []
         if user_pos_ids:
+            # Find all positions with the same name to bridge template/instance duplicate records
+            pos_names_res = await db.execute(select(Position.name).where(Position.id.in_(user_pos_ids)))
+            user_pos_names = [r[0] for r in pos_names_res.all() if r[0]]
+            if user_pos_names:
+                all_pos_res = await db.execute(select(Position.id).where(Position.name.in_(user_pos_names)))
+                user_pos_ids = list(set(user_pos_ids + [r[0] for r in all_pos_res.all()]))
+
             for pos_id in user_pos_ids:
                 descendants = await get_position_descendants(db, pos_id)
                 desc_pos_ids.extend([d.id for d in descendants])
@@ -3099,6 +3113,13 @@ async def create_material_issue(
 
                 desc_pos_ids = []
                 if user_pos_ids:
+                    # Find all positions with the same name to bridge template/instance duplicate records
+                    pos_names_res = await db.execute(select(Position.name).where(Position.id.in_(user_pos_ids)))
+                    user_pos_names = [r[0] for r in pos_names_res.all() if r[0]]
+                    if user_pos_names:
+                        all_pos_res = await db.execute(select(Position.id).where(Position.name.in_(user_pos_names)))
+                        user_pos_ids = list(set(user_pos_ids + [r[0] for r in all_pos_res.all()]))
+
                     for pos_id in user_pos_ids:
                         descendants = await get_position_descendants(db, pos_id)
                         desc_pos_ids.extend([d.id for d in descendants])
@@ -3444,6 +3465,13 @@ async def bulk_create_material_issues(
 
                     desc_pos_ids = []
                     if user_pos_ids:
+                        # Find all positions with the same name to bridge template/instance duplicate records
+                        pos_names_res = await db.execute(select(Position.name).where(Position.id.in_(user_pos_ids)))
+                        user_pos_names = [r[0] for r in pos_names_res.all() if r[0]]
+                        if user_pos_names:
+                            all_pos_res = await db.execute(select(Position.id).where(Position.name.in_(user_pos_names)))
+                            user_pos_ids = list(set(user_pos_ids + [r[0] for r in all_pos_res.all()]))
+
                         for pos_id in user_pos_ids:
                             descendants = await get_position_descendants(db, pos_id)
                             desc_pos_ids.extend([d.id for d in descendants])
@@ -3662,6 +3690,13 @@ async def get_material_issue(
 
         desc_pos_ids = []
         if user_pos_ids:
+            # Find all positions with the same name to bridge template/instance duplicate records
+            pos_names_res = await db.execute(select(Position.name).where(Position.id.in_(user_pos_ids)))
+            user_pos_names = [r[0] for r in pos_names_res.all() if r[0]]
+            if user_pos_names:
+                all_pos_res = await db.execute(select(Position.id).where(Position.name.in_(user_pos_names)))
+                user_pos_ids = list(set(user_pos_ids + [r[0] for r in all_pos_res.all()]))
+
             for pos_id in user_pos_ids:
                 descendants = await get_position_descendants(db, pos_id)
                 desc_pos_ids.extend([d.id for d in descendants])
