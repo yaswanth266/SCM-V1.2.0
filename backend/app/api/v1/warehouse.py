@@ -2629,6 +2629,94 @@ async def list_material_issues(
     query = select(MaterialIssue)
     count_query = select(func.count(MaterialIssue.id))
 
+    # ACCESS SCOPING
+    from app.utils.dependencies import get_user_role_codes, user_warehouse_ids
+    role_codes = set(await get_user_role_codes(db, current_user.id))
+    is_super_or_admin = bool({"super_admin", "admin"} & role_codes)
+
+    wh_ids = await user_warehouse_ids(db, current_user.id)
+    is_mapped_to_central = False
+    if wh_ids:
+        from app.models.warehouse import Warehouse as WhModel
+        central_wh_res = await db.execute(
+            select(WhModel.id).where(
+                WhModel.id.in_(wh_ids),
+                (func.lower(WhModel.name) == "central") | (WhModel.name == "Central - Vijayawada") | (WhModel.code == "20070") | (WhModel.id == 18)
+            )
+        )
+        if central_wh_res.scalars().all():
+            is_mapped_to_central = True
+
+    has_all_visibility = is_super_or_admin or is_mapped_to_central
+
+    if not has_all_visibility:
+        from app.models.settings_master import Employee, Position
+        from app.models.user import User as UserModel
+        from app.services.approval_service import get_position_descendants
+
+        user_pos_ids = []
+        user_role_id = current_user.active_role_id
+        desc_user_ids = []
+
+        if current_user.employee_id:
+            if user_role_id:
+                pos_q = await db.execute(
+                    select(Position.id).where(
+                        Position.employee_id == current_user.employee_id,
+                        Position.role_id == user_role_id
+                    )
+                )
+                user_pos_ids = list(pos_q.scalars().all())
+
+            if not user_pos_ids:
+                emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
+                emp = emp_res.scalar_one_or_none()
+                if emp:
+                    if emp.position_id:
+                        user_pos_ids = [emp.position_id]
+                        if user_role_id is None:
+                            pos_res = await db.execute(select(Position).where(Position.id == emp.position_id))
+                            pos = pos_res.scalar_one_or_none()
+                            if pos:
+                                user_role_id = pos.role_id
+                    else:
+                        pos_q = await db.execute(
+                            select(Position.id).where(Position.employee_id == current_user.employee_id)
+                        )
+                        user_pos_ids = list(pos_q.scalars().all())
+
+        desc_pos_ids = []
+        if user_pos_ids:
+            for pos_id in user_pos_ids:
+                descendants = await get_position_descendants(db, pos_id)
+                desc_pos_ids.extend([d.id for d in descendants])
+
+            if desc_pos_ids:
+                emp_q2 = select(Position.employee_id).where(
+                    Position.id.in_(desc_pos_ids),
+                    Position.employee_id.is_not(None)
+                )
+                desc_emps_res = await db.execute(
+                    select(Employee.id).where(
+                        (Employee.position_id.in_(desc_pos_ids)) |
+                        (Employee.id.in_(emp_q2))
+                    )
+                )
+                desc_emp_ids = [r[0] for r in desc_emps_res.all()]
+                if desc_emp_ids:
+                    desc_users_res = await db.execute(
+                        select(UserModel.id).where(UserModel.employee_id.in_(desc_emp_ids))
+                    )
+                    desc_user_ids = [r[0] for r in desc_users_res.all()]
+
+        from sqlalchemy import or_
+
+        scope = MaterialIssue.issued_by == current_user.id
+        if desc_user_ids:
+            scope = or_(scope, MaterialIssue.issued_by.in_(desc_user_ids))
+        query = query.where(scope)
+        count_query = count_query.where(scope)
+
     if status:
         query = query.where(MaterialIssue.status == status)
         count_query = count_query.where(MaterialIssue.status == status)
@@ -3339,6 +3427,94 @@ async def get_material_issue(
     mi = result.scalar_one_or_none()
     if not mi:
         raise HTTPException(status_code=404, detail="Material issue not found")
+
+    # ACCESS SCOPING
+    from app.utils.dependencies import get_user_role_codes, user_warehouse_ids
+    role_codes = set(await get_user_role_codes(db, current_user.id))
+    is_super_or_admin = bool({"super_admin", "admin"} & role_codes)
+
+    wh_ids = await user_warehouse_ids(db, current_user.id)
+    is_mapped_to_central = False
+    if wh_ids:
+        from app.models.warehouse import Warehouse as WhModel
+        central_wh_res = await db.execute(
+            select(WhModel.id).where(
+                WhModel.id.in_(wh_ids),
+                (func.lower(WhModel.name) == "central") | (WhModel.name == "Central - Vijayawada") | (WhModel.code == "20070") | (WhModel.id == 18)
+            )
+        )
+        if central_wh_res.scalars().all():
+            is_mapped_to_central = True
+
+    has_all_visibility = is_super_or_admin or is_mapped_to_central
+
+    if not has_all_visibility:
+        from app.models.settings_master import Employee, Position
+        from app.models.user import User as UserModel
+        from app.services.approval_service import get_position_descendants
+
+        user_pos_ids = []
+        user_role_id = current_user.active_role_id
+        desc_user_ids = []
+
+        if current_user.employee_id:
+            if user_role_id:
+                pos_q = await db.execute(
+                    select(Position.id).where(
+                        Position.employee_id == current_user.employee_id,
+                        Position.role_id == user_role_id
+                    )
+                )
+                user_pos_ids = list(pos_q.scalars().all())
+
+            if not user_pos_ids:
+                emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
+                emp = emp_res.scalar_one_or_none()
+                if emp:
+                    if emp.position_id:
+                        user_pos_ids = [emp.position_id]
+                        if user_role_id is None:
+                            pos_res = await db.execute(select(Position).where(Position.id == emp.position_id))
+                            pos = pos_res.scalar_one_or_none()
+                            if pos:
+                                user_role_id = pos.role_id
+                    else:
+                        pos_q = await db.execute(
+                            select(Position.id).where(Position.employee_id == current_user.employee_id)
+                        )
+                        user_pos_ids = list(pos_q.scalars().all())
+
+        desc_pos_ids = []
+        if user_pos_ids:
+            for pos_id in user_pos_ids:
+                descendants = await get_position_descendants(db, pos_id)
+                desc_pos_ids.extend([d.id for d in descendants])
+
+            if desc_pos_ids:
+                emp_q2 = select(Position.employee_id).where(
+                    Position.id.in_(desc_pos_ids),
+                    Position.employee_id.is_not(None)
+                )
+                desc_emps_res = await db.execute(
+                    select(Employee.id).where(
+                        (Employee.position_id.in_(desc_pos_ids)) |
+                        (Employee.id.in_(emp_q2))
+                    )
+                )
+                desc_emp_ids = [r[0] for r in desc_emps_res.all()]
+                if desc_emp_ids:
+                    desc_users_res = await db.execute(
+                        select(UserModel.id).where(UserModel.employee_id.in_(desc_emp_ids))
+                    )
+                    desc_user_ids = [r[0] for r in desc_users_res.all()]
+
+        # Verify authorization: only the creator (sender) or their parent/superiors
+        allowed = (
+            mi.issued_by == current_user.id
+            or (desc_user_ids and mi.issued_by in desc_user_ids)
+        )
+        if not allowed:
+            raise HTTPException(status_code=403, detail="Not authorized to view this material issue")
     response = MaterialIssueResponse.model_validate(mi).model_dump()
     response["warehouse_name"] = mi.warehouse.name if mi.warehouse else None
     response["destination_warehouse_name"] = mi.destination_warehouse.name if mi.destination_warehouse else None
