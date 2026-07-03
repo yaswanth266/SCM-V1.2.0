@@ -12,12 +12,14 @@ async def cleanup_alembic():
             row = res.scalar()
             if row in ("fc465c3aec2f", "1c85ec8ff435", "9633eb1124b1"):
                 print(f"Detected rolled-back alembic version {row} in production DB. Resetting local alembic_version to 2abb14031d2a...")
-                await db.execute(text("UPDATE alembic_version SET version_num = '2abb14031d2a'"))
+                await db.execute(text("DELETE FROM alembic_version"))
+                await db.execute(text("INSERT INTO alembic_version (version_num) VALUES ('2abb14031d2a')"))
                 await db.commit()
                 print("Database alembic version successfully reset.")
             elif row == "4401ccb0df6f":
                 print(f"Detected missing/phantom alembic version {row} in production DB. Resetting local alembic_version to head (8a1c56d19deb)...")
-                await db.execute(text("UPDATE alembic_version SET version_num = '8a1c56d19deb'"))
+                await db.execute(text("DELETE FROM alembic_version"))
+                await db.execute(text("INSERT INTO alembic_version (version_num) VALUES ('8a1c56d19deb')"))
                 await db.commit()
                 print("Database alembic version successfully reset to head.")
         except Exception as e:

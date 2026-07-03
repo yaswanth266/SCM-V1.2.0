@@ -19,12 +19,26 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_index(
-        'ix_indents_raised_by_created',
-        'indents',
-        ['raised_by', 'created_at'],
-    )
+    import sqlalchemy as sa
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    
+    if insp.has_table('indents'):
+        indexes = [idx['name'] for idx in insp.get_indexes('indents')]
+        if 'ix_indents_raised_by_created' not in indexes:
+            op.create_index(
+                'ix_indents_raised_by_created',
+                'indents',
+                ['raised_by', 'created_at'],
+            )
 
 
 def downgrade() -> None:
-    op.drop_index('ix_indents_raised_by_created', 'indents')
+    import sqlalchemy as sa
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    
+    if insp.has_table('indents'):
+        indexes = [idx['name'] for idx in insp.get_indexes('indents')]
+        if 'ix_indents_raised_by_created' in indexes:
+            op.drop_index('ix_indents_raised_by_created', 'indents')
