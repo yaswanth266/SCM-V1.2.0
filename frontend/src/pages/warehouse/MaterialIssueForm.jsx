@@ -488,6 +488,8 @@ const MaterialIssueForm = () => {
         uom_id: item.uom_id,
         qty: Number(item.qty || 0),
         batch_id: item.batch_id || null,
+        // Capture the batch_number from API for display when breakdown returns null IDs (non-central wh)
+        batch_number: item.batch_number || null,
         // Populate arrays so the multi-select shows the saved value immediately
         batch_ids: item.batch_id ? [item.batch_id] : [],
         bin_id: item.bin_id || null,
@@ -520,6 +522,7 @@ const MaterialIssueForm = () => {
                     return {
                       ...row,
                       batch_id: it.batch_id,
+                      batch_number: it.batch_number,
                       batch_ids: it.batch_id ? [it.batch_id] : row.batch_ids || [],
                       bin_id: it.bin_id,
                       bin_ids: it.bin_id ? [it.bin_id] : row.bin_ids || [],
@@ -1238,6 +1241,20 @@ const MaterialIssueForm = () => {
             />
           );
         }
+
+        // Non-central warehouse: breakdown returns batch_id=null for all rows.
+        // Batch selection is meaningless (backend clears it on issue anyway).
+        // Show saved batch_number as read-only info if one was previously saved.
+        const allBatchIdsNull = details.batches.length > 0 && details.batches.every(b => b.id === null);
+        if (allBatchIdsNull) {
+          const savedBatchLabel = record.batch_number || (record.batch_id ? `Batch #${record.batch_id}` : null);
+          return savedBatchLabel ? (
+            <Tag color="blue" style={{ margin: 0 }}>{savedBatchLabel}</Tag>
+          ) : (
+            <Select disabled placeholder="Not required" size="small" style={{ width: '100%' }} />
+          );
+        }
+
         if (!record.has_batch && details.batches.length === 0) {
           return (
             <Select
@@ -1250,6 +1267,11 @@ const MaterialIssueForm = () => {
           );
         }
         if (record.has_batch && details.batches.length === 0) {
+          // Show saved batch_number if available even though breakdown has no rows yet
+          const savedBatchLabel = record.batch_number || (record.batch_id ? `Batch #${record.batch_id}` : null);
+          if (savedBatchLabel) {
+            return <Tag color="blue" style={{ margin: 0 }}>{savedBatchLabel}</Tag>;
+          }
           return (
             <Select
               value={val}
