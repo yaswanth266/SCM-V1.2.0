@@ -174,15 +174,7 @@ const MaterialIssues = () => {
               <Tooltip title="Issue Material (Reserve)">
                 <Popconfirm
                   title="Issue this material? Stock will be reserved."
-                  onConfirm={() => {
-                    const missingBatch = (record.items || []).some(item => item.has_batch && !item.batch_id);
-                    const missingSerial = (record.items || []).some(item => item.has_serial && (!item.serial_numbers || item.serial_numbers.length === 0));
-                    if (missingBatch || missingSerial) {
-                      message.error("Some items are missing batch or serial number selections. Please Edit the draft to select them before issuing.");
-                      return;
-                    }
-                    handleIssue(record.id);
-                  }}
+                  onConfirm={() => handleIssue(record.id)}
                 >
                   <Button type="link" size="small" icon={<SendOutlined />} style={{ color: '#eb2f96' }} />
                 </Popconfirm>
