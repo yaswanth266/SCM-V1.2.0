@@ -261,12 +261,26 @@ async def list_indents(
 
     if not has_all_visibility:
         from sqlalchemy import or_
-        scope = Indent.raised_by == current_user.id
-        if desc_user_ids:
-            scope = or_(scope, Indent.raised_by.in_(desc_user_ids))
-
-        query = query.where(scope)
-        count_query = count_query.where(scope)
+        if available_for_issue:
+            # Dropdown for Material Issue: ONLY descendants are allowed to show, NOT the user themselves
+            if desc_user_ids:
+                query = query.where(Indent.raised_by.in_(desc_user_ids))
+                count_query = count_query.where(Indent.raised_by.in_(desc_user_ids))
+            else:
+                # If no descendants, they cannot see any indents for issue
+                query = query.where(Indent.id == -1)
+                count_query = count_query.where(Indent.id == -1)
+        else:
+            scope = Indent.raised_by == current_user.id
+            if desc_user_ids:
+                scope = or_(scope, Indent.raised_by.in_(desc_user_ids))
+            query = query.where(scope)
+            count_query = count_query.where(scope)
+    else:
+        # Admins or Central users: if it is for the dropdown, exclude their own indents
+        if available_for_issue:
+            query = query.where(Indent.raised_by != current_user.id)
+            count_query = count_query.where(Indent.raised_by != current_user.id)
 
     if has_multiple_positions and user_pos_ids:
         from sqlalchemy import or_

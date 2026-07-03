@@ -3121,12 +3121,12 @@ async def create_material_issue(
                             )
                             desc_user_ids = [r[0] for r in desc_users_res.all()]
 
-                allowed = (
-                    ind.raised_by == current_user.id
-                    or (desc_user_ids and ind.raised_by in desc_user_ids)
-                )
+                allowed = (desc_user_ids and ind.raised_by in desc_user_ids)
                 if not allowed:
-                    raise HTTPException(status_code=403, detail="Not authorized to issue against this indent")
+                    raise HTTPException(status_code=403, detail="Not authorized to issue against this indent (you can only issue to your descendant positions)")
+            else:
+                if ind.raised_by == current_user.id:
+                    raise HTTPException(status_code=403, detail="Not authorized to issue against your own indent")
         except HTTPException:
             raise
         except Exception:
@@ -3466,12 +3466,12 @@ async def bulk_create_material_issues(
                                 )
                                 desc_user_ids = [r[0] for r in desc_users_res.all()]
 
-                    allowed = (
-                        ind.raised_by == current_user.id
-                        or (desc_user_ids and ind.raised_by in desc_user_ids)
-                    )
+                    allowed = (desc_user_ids and ind.raised_by in desc_user_ids)
                     if not allowed:
-                        raise HTTPException(status_code=403, detail="Not authorized to issue against this indent")
+                        raise HTTPException(status_code=403, detail="Not authorized to issue against this indent (you can only issue to your descendant positions)")
+                else:
+                    if ind.raised_by == current_user.id:
+                        raise HTTPException(status_code=403, detail="Not authorized to issue against your own indent")
             except HTTPException:
                 raise
             except Exception:
