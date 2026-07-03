@@ -417,35 +417,35 @@ async def create_consignment(
     if existing_con.scalar_one_or_none() is not None:
         raise HTTPException(400, "A consignment already exists for this Material Issue. Multiple consignments per MI are not allowed.")
 
+    # Fetch all MI items for this Material Issue
+    all_mi_items_res = await db.execute(
+        select(MaterialIssueItem)
+        .options(selectinload(MaterialIssueItem.item))
+        .where(MaterialIssueItem.issue_id == mi.id)
+    )
+    mi_items = {r.id: r for r in all_mi_items_res.scalars().all()}
+
     # Validate MI items exist
     mi_item_ids = [i.material_issue_item_id for pkg in payload.packages for i in pkg.items]
-    mi_items_res = await db.execute(
-        select(MaterialIssueItem).where(
-            MaterialIssueItem.issue_id == mi.id,
-            MaterialIssueItem.id.in_(mi_item_ids),
-        )
-    )
-    mi_items = {r.id: r for r in mi_items_res.scalars().all()}
     missing = set(mi_item_ids) - set(mi_items.keys())
     if missing:
         raise HTTPException(400, f"MI items not found in this issue: {sorted(missing)}")
 
-    # 🛑 Validation: Sum of quantities per MI item across all packages must NOT exceed MI item qty
+    # 🛑 Validation: Sum of quantities per MI item across all packages must equal MI item qty
     from collections import defaultdict
     item_qty_sum = defaultdict(lambda: Decimal("0"))
     for pkg_in in payload.packages:
         for item_in in pkg_in.items:
             item_qty_sum[item_in.material_issue_item_id] += item_in.quantity_packed
 
-    for mi_item_id, total_packed in item_qty_sum.items():
-        if mi_item_id not in mi_items:
-            continue
-        mi_item = mi_items[mi_item_id]
+    for mi_item_id, mi_item in mi_items.items():
+        total_packed = item_qty_sum.get(mi_item_id, Decimal("0"))
         mi_item_qty = mi_item.qty or Decimal("0")
-        if total_packed > mi_item_qty:
+        if total_packed != mi_item_qty:
+            item_name = mi_item.item.name if mi_item.item else f"Item ID {mi_item.item_id}"
             raise HTTPException(400,
-                f"Total packed quantity ({total_packed}) for MI item ID {mi_item_id} ({mi_item.item.name if mi_item.item else ''}) "
-                f"exceeds the issued quantity ({mi_item_qty})."
+                f"Total packed quantity ({total_packed}) for item '{item_name}' "
+                f"must equal the issued quantity ({mi_item_qty})."
             )
 
     # 🛑 Validation: If MI items have serial numbers, validate subset, uniqueness, and quantity matching
@@ -715,53 +715,35 @@ async def update_consignment(
     if not mi:
         raise HTTPException(404, "Material Issue not found")
 
-    # Validate MI items exist
-    mi_item_ids = [i.material_issue_item_id for pkg in payload.packages for i in pkg.items]
-    mi_items_res = await db.execute(
-        select(MaterialIssueItem).where(
-            MaterialIssueItem.issue_id == mi.id,
-            MaterialIssueItem.id.in_(mi_item_ids),
-        )
+    # Fetch all MI items for this Material Issue
+    all_mi_items_res = await db.execute(
+        select(MaterialIssueItem)
+        .options(selectinload(MaterialIssueItem.item))
+        .where(MaterialIssueItem.issue_id == mi.id)
     )
-    mi_items = {r.id: r for r in mi_items_res.scalars().all()}
+    mi_items = {r.id: r for r in all_mi_items_res.scalars().all()}
+
+    # Validate MI items exist in this issue
+    mi_item_ids = [i.material_issue_item_id for pkg in payload.packages for i in pkg.items]
     missing = set(mi_item_ids) - set(mi_items.keys())
     if missing:
         raise HTTPException(400, f"MI items not found in this issue: {sorted(missing)}")
 
-    # 🛑 Validation: Sum of quantities per MI item across all packages must NOT exceed MI item qty
+    # 🛑 Validation: Sum of quantities per MI item across all packages must equal MI item qty
     from collections import defaultdict
     item_qty_sum = defaultdict(lambda: Decimal("0"))
     for pkg_in in payload.packages:
         for item_in in pkg_in.items:
             item_qty_sum[item_in.material_issue_item_id] += item_in.quantity_packed
 
-    # Get total packed quantity of each MI item in OTHER consignments
-    other_packed_res = await db.execute(
-        select(
-            ConsignmentPackageItem.material_issue_item_id,
-            func.sum(ConsignmentPackageItem.quantity_packed)
-        )
-        .join(ConsignmentPackage, ConsignmentPackageItem.package_id == ConsignmentPackage.id)
-        .join(Consignment, ConsignmentPackage.consignment_id == Consignment.id)
-        .where(
-            ConsignmentPackageItem.material_issue_item_id.in_(mi_item_ids),
-            Consignment.id != consignment_id,
-            Consignment.status != "CANCELLED"
-        )
-        .group_by(ConsignmentPackageItem.material_issue_item_id)
-    )
-    other_packed = {mi_item_id: Decimal(str(qty_p or 0)) for mi_item_id, qty_p in other_packed_res.all()}
-
-    for mi_item_id, total_packed in item_qty_sum.items():
-        if mi_item_id not in mi_items:
-            continue
-        mi_item = mi_items[mi_item_id]
+    for mi_item_id, mi_item in mi_items.items():
+        total_packed = item_qty_sum.get(mi_item_id, Decimal("0"))
         mi_item_qty = mi_item.qty or Decimal("0")
-        packed_in_others = other_packed.get(mi_item_id, Decimal("0"))
-        if total_packed + packed_in_others > mi_item_qty:
+        if total_packed != mi_item_qty:
+            item_name = mi_item.item.name if mi_item.item else f"Item ID {mi_item.item_id}"
             raise HTTPException(400,
-                f"Total packed quantity ({total_packed + packed_in_others}) for MI item ID {mi_item_id} "
-                f"exceeds the issued quantity ({mi_item_qty})."
+                f"Total packed quantity ({total_packed}) for item '{item_name}' "
+                f"must equal the issued quantity ({mi_item_qty})."
             )
 
     # 🛑 Validation: If MI items have serial numbers, validate subset, uniqueness, and quantity matching
@@ -1041,7 +1023,9 @@ async def list_consignments(
         data.append({
             "id": c.id,
             "consignment_number": c.consignment_number,
+            "material_issue_id": c.material_issue_id,
             "material_issue_number": c.material_issue.issue_number if c.material_issue else None,
+            "indent_id": c.indent_id,
             "indent_number": c.indent.indent_number if c.indent else None,
             "warehouse_name": c.source_warehouse.name if c.source_warehouse else None,
             "destination_warehouse_name": c.destination_warehouse.name if c.destination_warehouse else None,
