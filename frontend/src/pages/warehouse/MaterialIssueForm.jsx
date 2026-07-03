@@ -488,7 +488,10 @@ const MaterialIssueForm = () => {
         uom_id: item.uom_id,
         qty: Number(item.qty || 0),
         batch_id: item.batch_id || null,
+        // Populate arrays so the multi-select shows the saved value immediately
+        batch_ids: item.batch_id ? [item.batch_id] : [],
         bin_id: item.bin_id || null,
+        bin_ids: item.bin_id ? [item.bin_id] : [],
         rate: Number(item.rate || 0),
         amount: Number(item.amount || 0),
         has_batch: !!item.has_batch,
@@ -502,11 +505,30 @@ const MaterialIssueForm = () => {
       if (warehouseId) {
         const itemIds = items.map((it) => it.item_id).filter(Boolean);
         await refreshStockForItems(warehouseId, itemIds);
-        items.forEach((it) => {
-          if (it.item_id) {
-            fetchItemStockDetails(warehouseId, it.item_id);
-          }
-        });
+        // Fetch stock details for each item, then restore saved batch/bin selections
+        // (fetchItemStockDetails is async and must not overwrite what we loaded)
+        await Promise.all(
+          items
+            .filter((it) => it.item_id)
+            .map(async (it) => {
+              await fetchItemStockDetails(warehouseId, it.item_id);
+              // Re-apply the saved batch/bin after stock details are loaded
+              if (it.batch_id || it.bin_id) {
+                setIssueItems((prev) =>
+                  prev.map((row) => {
+                    if (row.key !== it.key) return row;
+                    return {
+                      ...row,
+                      batch_id: it.batch_id,
+                      batch_ids: it.batch_id ? [it.batch_id] : row.batch_ids || [],
+                      bin_id: it.bin_id,
+                      bin_ids: it.bin_id ? [it.bin_id] : row.bin_ids || [],
+                    };
+                  })
+                );
+              }
+            })
+        );
       }
 
       const queryParams = new URLSearchParams(location.search);
