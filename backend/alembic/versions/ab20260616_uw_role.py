@@ -1,7 +1,7 @@
 """Add role_id to user_warehouses for role-warehouse mapping
 
 Revision ID: ab20260616_uw_role
-Revises: ab20260606_read_codes
+Revises: 17dc0cd2dd9a
 Create Date: 2026-06-16
 """
 from alembic import op
@@ -9,7 +9,7 @@ import sqlalchemy as sa
 
 
 revision = "ab20260616_uw_role"
-down_revision = ("ab20260606_read_codes", "17dc0cd2dd9a")
+down_revision = "17dc0cd2dd9a"
 branch_labels = None
 depends_on = None
 

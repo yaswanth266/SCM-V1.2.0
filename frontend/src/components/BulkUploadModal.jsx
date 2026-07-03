@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import {
-  Modal, Button, Upload, message, Table, Tag, Space, Alert, Progress, Tooltip,
+  Modal, Button, Upload, Table, Tag, Space, Alert, Progress, Tooltip, App,
 } from 'antd';
 import {
   InboxOutlined, DownloadOutlined, CloudUploadOutlined,
@@ -12,11 +12,41 @@ import { getErrorMessage } from '../utils/helpers';
 
 const { Dragger } = Upload;
 
+const splitCsvIntoRows = (text) => {
+  const lines = [];
+  let row = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    const nextChar = text[i + 1];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      row += char;
+    } else if ((char === '\r' || char === '\n') && !inQuotes) {
+      if (row.trim()) {
+        lines.push(row);
+      }
+      row = '';
+      if (char === '\r' && nextChar === '\n') {
+        i++; // skip \n of \r\n
+      }
+    } else {
+      row += char;
+    }
+  }
+  if (row.trim()) {
+    lines.push(row);
+  }
+  return lines;
+};
+
 const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
+  const { message } = App.useApp();
   const [fileList, setFileList] = useState([]);
   const [validating, setValidating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
 
   const handleDownloadTemplate = () => {
     // Direct API call to trigger template streaming
@@ -62,6 +92,7 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
     try {
       const res = await api.post('/inventory/items-bulk/upload', formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 120000, // Extend timeout to 2 minutes for validation
       });
       setValidationResult(res.data);
       if (res.data.success) {
@@ -93,41 +124,85 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
     }
   };
 
+  const readFileAsText = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target.result);
+      reader.onerror = (e) => reject(e);
+      reader.readAsText(file);
+    });
+  };
+
   const handleImport = async () => {
     if (fileList.length === 0) return;
     setImporting(true);
-    const formData = new FormData();
-    formData.append('file', fileList[0]);
-    formData.append('dry_run', 'false');
+    setImportProgress({ current: 0, total: 0 });
 
     try {
-      const res = await api.post('/inventory/items-bulk/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      message.success(res.data.message || 'Items imported successfully');
-      setFileList([]);
-      setValidationResult(null);
-      onUploadSuccess();
-      onClose();
+      const text = await readFileAsText(fileList[0]);
+      const lines = splitCsvIntoRows(text);
+      if (lines.length <= 1) {
+        message.error('CSV file has no data rows.');
+        setImporting(false);
+        return;
+      }
+
+      const header = lines[0];
+      const dataLines = lines.slice(1);
+      setImportProgress({ current: 0, total: dataLines.length });
+
+      let successCount = 0;
+      const failedRows = [];
+
+      for (let i = 0; i < dataLines.length; i++) {
+        const rowContent = dataLines[i];
+        const csvContent = `${header}\n${rowContent}`;
+        const fileBlob = new Blob([csvContent], { type: 'text/csv' });
+        const file = new File([fileBlob], `row_${i + 1}.csv`, { type: 'text/csv' });
+
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('dry_run', 'false');
+
+        try {
+          await api.post('/inventory/items-bulk/upload', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 60000, // 1 minute per item
+          });
+          successCount++;
+          setImportProgress((prev) => ({ ...prev, current: i + 1 }));
+        } catch (err) {
+          console.error(`Failed to import row ${i + 1}:`, err);
+          let errorMsg = 'Import failed';
+          if (err.response?.data?.detail) {
+            const detail = err.response.data.detail;
+            if (typeof detail === 'object' && detail.message) {
+              errorMsg = detail.message;
+            } else if (typeof detail === 'string') {
+              errorMsg = detail;
+            } else {
+              errorMsg = JSON.stringify(detail);
+            }
+          } else {
+            errorMsg = getErrorMessage(err);
+          }
+          failedRows.push({ rowNum: i + 1, error: errorMsg });
+          break; // Stop sequential upload on first failure
+        }
+      }
+
+      if (failedRows.length > 0) {
+        message.error(`Import stopped. Successfully imported ${successCount} items. Row ${failedRows[0].rowNum} failed: ${failedRows[0].error}`);
+      } else {
+        message.success(`Successfully imported all ${successCount} items.`);
+        setFileList([]);
+        setValidationResult(null);
+        onUploadSuccess();
+        onClose();
+      }
     } catch (err) {
       console.error(err);
-      let errorMsg = 'Import failed';
-      if (err.response?.data?.detail) {
-        const detail = err.response.data.detail;
-        if (typeof detail === 'object' && detail.message) {
-          errorMsg = detail.message;
-          if (detail.report) {
-            setValidationResult(detail);
-          }
-        } else if (typeof detail === 'string') {
-          errorMsg = detail;
-        } else {
-          errorMsg = JSON.stringify(detail);
-        }
-      } else {
-        errorMsg = getErrorMessage(err);
-      }
-      message.error(errorMsg);
+      message.error('Failed to parse CSV file: ' + getErrorMessage(err));
     } finally {
       setImporting(false);
     }
@@ -255,33 +330,60 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
         </div>
 
         <div style={{ marginBottom: 24 }}>
-          <Dragger
-            accept=".csv"
-            fileList={fileList}
-            beforeUpload={beforeUpload}
-            onRemove={handleRemove}
-            showUploadList={true}
-            style={{
+          {importing ? (
+            <div style={{
               background: '#ffffff',
-              border: '2px dashed #cbd5e1',
+              border: '1px solid #cbd5e1',
               borderRadius: 16,
-              padding: '24px'
-            }}
-          >
-            <p className="ant-upload-drag-icon" style={{ color: '#2563eb', fontSize: 40, marginBottom: 8 }}>
-              {validating ? <LoadingOutlined /> : <CloudUploadOutlined />}
-            </p>
-            <p style={{ color: '#0f172a', fontSize: '15px', fontWeight: 600, margin: '0 0 4px 0' }}>
-              {validating ? 'Analyzing file structure...' : 'Click or drag CSV file here to upload'}
-            </p>
-            <p style={{ color: '#475569', fontSize: '12px', margin: 0 }}>
-              Ensure columns match the standard template schema. Level 1, 2, and 3 categories are mandatory.
-            </p>
-          </Dragger>
+              padding: '36px',
+              textAlign: 'center',
+            }}>
+              <Progress
+                type="circle"
+                percent={importProgress.total > 0 ? Math.round((importProgress.current / importProgress.total) * 100) : 0}
+                status="active"
+                strokeWidth={8}
+                strokeColor={{
+                  '0%': '#2563eb',
+                  '100%': '#4f46e5',
+                }}
+              />
+              <h3 style={{ color: '#0f172a', margin: '20px 0 4px 0', fontSize: '16px', fontWeight: 600 }}>
+                Importing items... ({importProgress.current} of {importProgress.total})
+              </h3>
+              <p style={{ color: '#475569', fontSize: '13px', margin: 0 }}>
+                Uploading items synchronously one-by-one to prevent server timeouts and database lock delays.
+              </p>
+            </div>
+          ) : (
+            <Dragger
+              accept=".csv"
+              fileList={fileList}
+              beforeUpload={beforeUpload}
+              onRemove={handleRemove}
+              showUploadList={true}
+              style={{
+                background: '#ffffff',
+                border: '2px dashed #cbd5e1',
+                borderRadius: 16,
+                padding: '24px'
+              }}
+            >
+              <p className="ant-upload-drag-icon" style={{ color: '#2563eb', fontSize: 40, marginBottom: 8 }}>
+                {validating ? <LoadingOutlined /> : <CloudUploadOutlined />}
+              </p>
+              <p style={{ color: '#0f172a', fontSize: '15px', fontWeight: 600, margin: '0 0 4px 0' }}>
+                {validating ? 'Analyzing file structure...' : 'Click or drag CSV file here to upload'}
+              </p>
+              <p style={{ color: '#475569', fontSize: '12px', margin: 0 }}>
+                Ensure columns match the standard template schema. Level 1, 2, and 3 categories are mandatory.
+              </p>
+            </Dragger>
+          )}
         </div>
 
         {/* Validation Summary and Reports */}
-        {validationResult && (
+        {!importing && validationResult && (
           <div style={{ marginBottom: 24 }}>
             <div style={{
               display: 'flex',

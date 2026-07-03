@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Any
 
 from app.database import get_db
 from app.models.user import User
-from app.models.master import Item, ItemCategory, UOM
+from app.models.master import Item, ItemCategory, UOM, ItemType
 from app.models.warehouse import Warehouse, Batch
 from app.utils.dependencies import get_current_user, require_permission
 from app.services.item_coding import generate_item_code, ORG_PREFIX_DEFAULT
@@ -137,6 +137,10 @@ async def _bulk_upload_items_impl(
             cats_by_name[c.name.strip().lower()] = c
     cats_by_id = {c.id: c for c in all_categories}
     
+    # Get all Item Types
+    it_type_res = await db.execute(select(ItemType.name))
+    valid_item_types = {t.strip().lower() for t in it_type_res.scalars().all() if t}
+
     # Get all UOMs
     uom_res = await db.execute(select(UOM).where(UOM.is_active == True))
     all_uoms = uom_res.scalars().all()
@@ -203,6 +207,8 @@ async def _bulk_upload_items_impl(
             row_errors.append("Item Name is required.")
         if not item_type:
             row_errors.append("Item Type is required.")
+        elif item_type not in valid_item_types:
+            row_errors.append(f"Invalid Item Type '{item_type}'. Valid types are: {', '.join(sorted(valid_item_types))}.")
         if not cat_l1 or not cat_l2 or not cat_l3:
             row_errors.append("Category Level 1, Level 2, and Level 3 are all mandatory.")
         if not uom_str:
@@ -529,7 +535,7 @@ async def _bulk_upload_items_impl(
                             dup = (await db.execute(select(Warehouse).where(func.lower(Warehouse.code) == code_val.lower()))).scalar_one_or_none()
                             if not dup:
                                 break
-                            suffix_char = chr(ord("A") + len(suffix_char))
+                            suffix_char += chr(ord("A") + len(suffix_char))
                             code_val = f"{base_code}{suffix_char}"
                         
                         wh_db = Warehouse(

@@ -2664,7 +2664,7 @@ async def _unique_category_code(db: AsyncSession, base: str, category_id: int | 
         exists = (await db.execute(query)).scalar_one_or_none()
         if not exists:
             return attempt
-        suffix = chr(ord("A") + len(suffix))
+        suffix += chr(ord("A") + len(suffix))
         attempt = f"{code}{suffix}"
 
 
