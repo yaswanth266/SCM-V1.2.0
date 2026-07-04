@@ -14,6 +14,19 @@ from app.utils.dependencies import get_current_user
 from app.utils.helpers import paginate_params, build_paginated_response, apply_search_filter
 from app.models.user import User
 
+def normalize_dispatch_type(dt: str) -> str:
+    if not dt:
+        return "THIRD_PARTY"
+    dt_upper = dt.upper().replace(" ", "_").replace("-", "_")
+    if "OWN_VEHICLE" in dt_upper or "OWN_FLEET" in dt_upper or "SELF_OWNED" in dt_upper or dt_upper == "OWN_VEHICLE":
+        return "OWN_VEHICLE"
+    if "COURIER" in dt_upper:
+        return "COURIER"
+    if "IN_PERSON" in dt_upper:
+        return "IN_PERSON"
+    return "THIRD_PARTY"
+
+
 router = APIRouter()
 
 async def process_dispatch_stock_deduction(db: AsyncSession, d: DispatchOrder, created_by_id: int):
@@ -71,11 +84,8 @@ async def process_dispatch_stock_deduction(db: AsyncSession, d: DispatchOrder, c
 
     dispatch_mode_val = getattr(d, "dispatch_mode", "direct") or "direct"
     is_multi = dispatch_mode_val.lower() == "multi-level"
-    is_tp = False
-    if parent_mdo:
-        is_tp = (parent_mdo.dispatch_type or "THIRD_PARTY") == "THIRD_PARTY"
-    else:
-        is_tp = (d.dispatch_type or "THIRD_PARTY") == "THIRD_PARTY"
+    raw_dt = (parent_mdo.dispatch_type or "THIRD_PARTY") if parent_mdo else (d.dispatch_type or "THIRD_PARTY")
+    is_tp = normalize_dispatch_type(raw_dt) == "THIRD_PARTY"
 
     # FLOW 1: Non-TP Multi-level dispatches. Skip entirely (L-1/SDO handles everything).
     if is_multi and not is_tp:
@@ -136,7 +146,7 @@ async def process_dispatch_stock_deduction(db: AsyncSession, d: DispatchOrder, c
             )
         return
 
-    # DIRECT DISPATCH (Standard Flow): Release reservation (R↓), post stock ledger (T↓), and increment transit if inter-warehouse.
+    # DIRECT DISPATCH (Standard Flow): Convert reserved to transit, keep total_qty unchanged if inter-warehouse.
     for item in items:
         batch_id = None
         bin_id = None
@@ -161,34 +171,10 @@ async def process_dispatch_stock_deduction(db: AsyncSession, d: DispatchOrder, c
             rate = mi_item.rate or Decimal("0")
             uom_id = mi_item.uom_id or 1
 
-        # Release reservation (R↓)
-        await release_reservation(
-            db,
-            item_id=item.material_id,
-            warehouse_id=d.warehouse_id,
-            qty=item.dispatched_quantity,
-            bin_id=bin_id,
-            batch_id=batch_id,
-        )
-        
-        # Post stock ledger (T↓)
-        await post_stock_ledger(
-            db,
-            item_id=item.material_id,
-            warehouse_id=d.warehouse_id,
-            transaction_type="material_issue",
-            qty_out=item.dispatched_quantity,
-            rate=rate,
-            bin_id=bin_id,
-            batch_id=batch_id,
-            reference_type="dispatch_order",
-            reference_id=d.id,
-            uom_id=uom_id,
-            created_by=created_by_id,
-        )
+        qty_d = Decimal(str(item.dispatched_quantity))
 
-        # Increment transit_qty if inter-warehouse (Tr↑)
         if d.destination_warehouse_id and d.destination_warehouse_id != d.warehouse_id:
+            # Inter-warehouse direct dispatch: convert reserved to transit directly
             from app.services.stock_service import _get_or_create_balance
             src_balance = await _get_or_create_balance(
                 db,
@@ -198,12 +184,39 @@ async def process_dispatch_stock_deduction(db: AsyncSession, d: DispatchOrder, c
                 batch_id=batch_id,
                 lock=True,
             )
-            src_balance.transit_qty = (src_balance.transit_qty or Decimal("0")) + Decimal(str(item.dispatched_quantity))
+            convert_qty = min(src_balance.reserved_qty or Decimal("0"), qty_d)
+            src_balance.reserved_qty = max(Decimal("0"), (src_balance.reserved_qty or Decimal("0")) - convert_qty)
+            src_balance.transit_qty = (src_balance.transit_qty or Decimal("0")) + qty_d
             src_balance.available_qty = max(
                 Decimal("0"),
                 (src_balance.total_qty or Decimal("0"))
                 - (src_balance.reserved_qty or Decimal("0"))
                 - (src_balance.transit_qty or Decimal("0"))
+            )
+        else:
+            # Standard consumption: release reservation and deduct total_qty
+            await release_reservation(
+                db,
+                item_id=item.material_id,
+                warehouse_id=d.warehouse_id,
+                qty=qty_d,
+                bin_id=bin_id,
+                batch_id=batch_id,
+            )
+            
+            await post_stock_ledger(
+                db,
+                item_id=item.material_id,
+                warehouse_id=d.warehouse_id,
+                transaction_type="material_issue",
+                qty_out=qty_d,
+                rate=rate,
+                bin_id=bin_id,
+                batch_id=batch_id,
+                reference_type="dispatch_order",
+                reference_id=d.id,
+                uom_id=uom_id,
+                created_by=created_by_id,
             )
 
     # Automatically transition the linked MaterialIssue status to "dispatched"
@@ -271,16 +284,10 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
                 )
             )
             res_check = await db.execute(stmt_check)
-            existing = res_check.scalar_one_or_none()
+            existing = res_check.scalars().first()
             
             # Map statuses
-            dt_map = {
-                "own vehicle": "OWN_VEHICLE",
-                "COURIER": "COURIER",
-                "IN_PERSON": "IN_PERSON",
-                "THIRD_PARTY": "THIRD_PARTY"
-            }
-            mapped_dt = dt_map.get(mdo.dispatch_type, "THIRD_PARTY")
+            mapped_dt = normalize_dispatch_type(mdo.dispatch_type)
             
             st_map = {
                 "DISPATCHED": "dispatched",

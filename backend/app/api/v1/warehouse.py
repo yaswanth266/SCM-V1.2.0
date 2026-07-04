@@ -4377,46 +4377,9 @@ async def dispatch_material_issue(
             })
             continue
 
-        # ── Direct dispatch: standard release + deduct flow ──────────────
-        # 1. Release reservation
-        await release_reservation(
-            db,
-            item_id=item.item_id,
-            warehouse_id=mi.warehouse_id,
-            qty=item.qty,
-            bin_id=item.bin_id,
-            batch_id=item.batch_id,
-        )
-
-        # 2. Post stock ledger entry to deduct total quantity
-        ledger_row = await post_stock_ledger(
-            db,
-            item_id=item.item_id,
-            warehouse_id=mi.warehouse_id,
-            transaction_type="material_issue",
-            qty_out=item.qty,
-            rate=item.rate,
-            bin_id=item.bin_id,
-            batch_id=item.batch_id,
-            reference_type="material_issue",
-            reference_id=mi.id,
-            uom_id=item.uom_id,
-            created_by=current_user.id,
-        )
-
-        if ledger_row and ledger_row.rate is not None:
-            effective_rate = Decimal(str(ledger_row.rate))
-            item.rate = effective_rate
-            item.amount = (item.qty or Decimal("0")) * effective_rate
-
-        issue_gl_items.append({
-            "item_id": item.item_id,
-            "qty": item.qty,
-            "rate": (ledger_row.rate if ledger_row else None) or item.rate or Decimal("0"),
-        })
-
-        # 3. For direct inter-warehouse transfers, set transit_qty at source
+        # ── Direct dispatch: standard release + deduct flow OR reserved->transit ──────────────
         if mi.destination_warehouse_id and mi.destination_warehouse_id != mi.warehouse_id:
+            # Direct inter-warehouse: convert reserved to transit, keep total unchanged.
             from app.services.stock_service import _get_or_create_balance
             src_balance = await _get_or_create_balance(
                 db,
@@ -4426,7 +4389,62 @@ async def dispatch_material_issue(
                 batch_id=item.batch_id,
                 lock=True,
             )
-            src_balance.transit_qty = (src_balance.transit_qty or Decimal("0")) + Decimal(str(item.qty))
+            qty_d = Decimal(str(item.qty))
+            convert_qty = min(src_balance.reserved_qty or Decimal("0"), qty_d)
+            src_balance.reserved_qty = max(Decimal("0"), (src_balance.reserved_qty or Decimal("0")) - convert_qty)
+            src_balance.transit_qty = (src_balance.transit_qty or Decimal("0")) + qty_d
+            src_balance.available_qty = max(
+                Decimal("0"),
+                (src_balance.total_qty or Decimal("0"))
+                - (src_balance.reserved_qty or Decimal("0"))
+                - (src_balance.transit_qty or Decimal("0"))
+            )
+            
+            effective_rate = src_balance.valuation_rate or Decimal("0")
+            item.rate = effective_rate
+            item.amount = qty_d * effective_rate
+
+            issue_gl_items.append({
+                "item_id": item.item_id,
+                "qty": item.qty,
+                "rate": effective_rate,
+            })
+        else:
+            # Standard consumption: release reservation and deduct total_qty
+            await release_reservation(
+                db,
+                item_id=item.item_id,
+                warehouse_id=mi.warehouse_id,
+                qty=item.qty,
+                bin_id=item.bin_id,
+                batch_id=item.batch_id,
+            )
+
+            ledger_row = await post_stock_ledger(
+                db,
+                item_id=item.item_id,
+                warehouse_id=mi.warehouse_id,
+                transaction_type="material_issue",
+                qty_out=item.qty,
+                rate=item.rate,
+                bin_id=item.bin_id,
+                batch_id=item.batch_id,
+                reference_type="material_issue",
+                reference_id=mi.id,
+                uom_id=item.uom_id,
+                created_by=current_user.id,
+            )
+
+            if ledger_row and ledger_row.rate is not None:
+                effective_rate = Decimal(str(ledger_row.rate))
+                item.rate = effective_rate
+                item.amount = (item.qty or Decimal("0")) * effective_rate
+
+            issue_gl_items.append({
+                "item_id": item.item_id,
+                "qty": item.qty,
+                "rate": (ledger_row.rate if ledger_row else None) or item.rate or Decimal("0"),
+            })
 
     mi.status = "dispatched"
     mi.dispatched_at = datetime.now(timezone.utc)
@@ -4811,7 +4829,7 @@ async def acknowledge_material_issue(
         from app.services.stock_service import post_stock_ledger, _get_or_create_balance
 
         for item in mi.items:
-            # Decrement transit_qty in source warehouse
+            # Decrement transit_qty and deduct total_qty in source warehouse
             if mi.destination_warehouse_id != mi.warehouse_id:
                 src_balance = await _get_or_create_balance(
                     db,
@@ -4821,7 +4839,8 @@ async def acknowledge_material_issue(
                     batch_id=item.batch_id,
                     lock=True,
                 )
-                src_balance.transit_qty = max(Decimal("0"), (src_balance.transit_qty or Decimal("0")) - Decimal(str(item.qty)))
+                qty_d = Decimal(str(item.qty))
+                src_balance.transit_qty = max(Decimal("0"), (src_balance.transit_qty or Decimal("0")) - qty_d)
                 src_balance.available_qty = max(
                     Decimal("0"),
                     (src_balance.total_qty or Decimal("0"))
@@ -4829,11 +4848,27 @@ async def acknowledge_material_issue(
                     - (src_balance.transit_qty or Decimal("0"))
                 )
 
+                # Post stock ledger to deduct total quantity from source warehouse (goods physically left)
+                await post_stock_ledger(
+                    db,
+                    item_id=item.item_id,
+                    warehouse_id=mi.warehouse_id,
+                    transaction_type="transfer_out",
+                    qty_out=qty_d,
+                    rate=item.rate,
+                    bin_id=item.bin_id,
+                    batch_id=item.batch_id,
+                    reference_type="material_issue_acknowledge",
+                    reference_id=mi.id,
+                    uom_id=item.uom_id,
+                    created_by=current_user.id,
+                )
+
             await post_stock_ledger(
                 db,
                 item_id=item.item_id,
                 warehouse_id=mi.destination_warehouse_id,
-                transaction_type="material_issue",
+                transaction_type="transfer_in",
                 qty_in=item.qty,
                 rate=item.rate,
                 bin_id=None,

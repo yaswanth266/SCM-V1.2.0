@@ -37,6 +37,26 @@ from app.schemas.logistics import (
     SdoHandoverSchema, SdoReceiveSchema
 )
 
+def normalize_dispatch_type(dt: str) -> str:
+    if not dt:
+        return "THIRD_PARTY"
+    dt_upper = dt.upper().replace(" ", "_").replace("-", "_")
+    if "OWN_VEHICLE" in dt_upper or "OWN_FLEET" in dt_upper or "SELF_OWNED" in dt_upper or dt_upper == "OWN_VEHICLE":
+        return "OWN_VEHICLE"
+    if "COURIER" in dt_upper:
+        return "COURIER"
+    if "IN_PERSON" in dt_upper:
+        return "IN_PERSON"
+    return "THIRD_PARTY"
+
+
+def map_to_db_handover_type(dt: str) -> str:
+    norm = normalize_dispatch_type(dt)
+    if norm == "OWN_VEHICLE":
+        return "own vehicle"
+    return norm
+
+
 router = APIRouter()
 
 
@@ -1014,11 +1034,11 @@ async def create_mdo(payload: MdoCreate, db: AsyncSession = Depends(get_db), cur
     tot_volume = 0.0
     tot_value = 0.0
 
-    if payload.dispatch_type != "THIRD_PARTY":
-        if (payload.dispatch_type or "").lower() in ("own vehicle", "courier", "in_person"):
-            initial_status = "IN_TRANSIT"
-        else:
-            initial_status = "DISPATCHED"
+    dt_norm = normalize_dispatch_type(payload.dispatch_type)
+    if dt_norm in ("OWN_VEHICLE", "COURIER", "IN_PERSON"):
+        initial_status = "IN_TRANSIT"
+    elif dt_norm != "THIRD_PARTY" and payload.dispatch_type:
+        initial_status = "DISPATCHED"
     else:
         initial_status = "DRAFT"
     first_delivery_date = date.today() + timedelta(days=2)
@@ -1062,7 +1082,8 @@ async def create_mdo(payload: MdoCreate, db: AsyncSession = Depends(get_db), cur
     db.add(new_mdo)
     await db.flush()
 
-    if payload.dispatch_type != "THIRD_PARTY":
+    dt_norm = normalize_dispatch_type(payload.dispatch_type)
+    if dt_norm in ("OWN_VEHICLE", "COURIER", "IN_PERSON"):
         handover_num = await generate_logistics_sequence_number(
             db,
             prefix="HND",
@@ -1071,7 +1092,7 @@ async def create_mdo(payload: MdoCreate, db: AsyncSession = Depends(get_db), cur
         new_handover = DispatchHandover(
             dispatch_id=new_mdo.id,
             handover_no=handover_num,
-            handover_type=payload.dispatch_type,
+            handover_type=map_to_db_handover_type(payload.dispatch_type),
             handed_over_by_entity_id=current_user.id,
             received_by_name=payload.received_by_name or "Carrier Receiver",
             received_by_phone=payload.received_by_phone,
@@ -1224,7 +1245,8 @@ async def create_mdo(payload: MdoCreate, db: AsyncSession = Depends(get_db), cur
 
         # Run the reserved→transit conversion for:
         #   • Multi-level dispatches from any warehouse (when not THIRD_PARTY)
-        if src_wh_id and is_multi_level and (payload.dispatch_type or "THIRD_PARTY") != "THIRD_PARTY":
+        dt_norm = normalize_dispatch_type(payload.dispatch_type)
+        if src_wh_id and is_multi_level and dt_norm in ("OWN_VEHICLE", "COURIER", "IN_PERSON"):
             for mat in payload.materials:
                 batch_id_r = None
                 bin_id_r = None
@@ -1317,6 +1339,11 @@ async def create_mdo(payload: MdoCreate, db: AsyncSession = Depends(get_db), cur
         reference_id=new_mdo.id
     ))
 
+    await db.flush()
+    if initial_status in ("IN_TRANSIT", "DISPATCHED"):
+        from app.api.v1.dispatch import sync_mdos_to_dispatches
+        await sync_mdos_to_dispatches(db)
+
     await db.commit()
     return {"message": "MDO created successfully", "mdo_id": new_mdo.id, "mdo_number": mdo_num}
 
@@ -1381,7 +1408,8 @@ async def sdo_handover(
         raise HTTPException(403, "You are not authorized to handover this dispatch leg")
 
     # Restrict THIRD_PARTY for intermediate positions in multi-level mode
-    if payload.handover_type == "THIRD_PARTY" and mdo.dispatch_mode == "multi-level":
+    handover_type_norm = normalize_dispatch_type(payload.handover_type)
+    if handover_type_norm == "THIRD_PARTY" and mdo.dispatch_mode == "multi-level":
         from app.api.v1.dispatch import get_destination_position_id
         dest_pos_id = await get_destination_position_id(db, mdo.destination_warehouse_id, mdo.destination_user_id)
         project_id = await resolve_mdo_project_id(db, mdo.indent_id, mdo.material_issue_id)
@@ -1572,6 +1600,10 @@ async def sdo_handover(
         entity_id=sdo.id,
         description=f"SDO leg {sdo.sdo_number} handed over via {payload.handover_type}."
     ))
+
+    await db.flush()
+    from app.api.v1.dispatch import sync_mdos_to_dispatches
+    await sync_mdos_to_dispatches(db)
 
     await db.commit()
     return {"success": True, "message": "Custody leg handed over successfully."}
@@ -3721,7 +3753,7 @@ async def create_handover(payload: DispatchHandoverCreate, db: AsyncSession = De
     new_handover = DispatchHandover(
         dispatch_id=payload.dispatch_id,
         handover_no=hnd_no,
-        handover_type=payload.handover_type,
+        handover_type=map_to_db_handover_type(payload.handover_type),
         handed_over_by_entity_id=current_user.id,
         received_by_name=payload.received_by_name,
         received_by_phone=payload.received_by_phone,
@@ -3744,7 +3776,8 @@ async def create_handover(payload: DispatchHandoverCreate, db: AsyncSession = De
     db.add(new_handover)
 
     # Transition Dispatch Status to IN_TRANSIT directly for non-third-party types to trigger instant stock deductions
-    if payload.handover_type in ("own vehicle", "COURIER", "IN_PERSON"):
+    handover_type_norm = normalize_dispatch_type(payload.handover_type)
+    if handover_type_norm in ("OWN_VEHICLE", "COURIER", "IN_PERSON"):
         mdo.status = "IN_TRANSIT"
     else:
         mdo.status = "DISPATCHED"
@@ -3771,7 +3804,8 @@ async def create_handover(payload: DispatchHandoverCreate, db: AsyncSession = De
     ))
 
     await db.flush()
-    if payload.handover_type in ("own vehicle", "COURIER", "IN_PERSON"):
+    handover_type_norm = normalize_dispatch_type(payload.handover_type)
+    if handover_type_norm in ("OWN_VEHICLE", "COURIER", "IN_PERSON"):
         from app.api.v1.dispatch import sync_mdos_to_dispatches
         await sync_mdos_to_dispatches(db)
 
@@ -3886,7 +3920,8 @@ async def deliver_mdo(
     if not mdo:
         raise HTTPException(404, "Dispatch Plan not found")
 
-    if mdo.dispatch_type == "THIRD_PARTY":
+    dt_norm = normalize_dispatch_type(mdo.dispatch_type)
+    if dt_norm == "THIRD_PARTY":
         raise HTTPException(400, "Third-party dispatches must be delivered via carrier portal service order gating workflow.")
 
     if mdo.status != "IN_TRANSIT":

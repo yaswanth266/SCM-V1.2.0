@@ -2546,7 +2546,7 @@ async def acknowledge_package(
                     import logging
                     logging.getLogger(__name__).error("Stock post failed pkg_item=%s: %s", pi.id, e)
 
-                # Decrement transit_qty from the source warehouse balance
+                # Decrement transit_qty and deduct total_qty from the source warehouse balance
                 if src_wh_id:
                     try:
                         src_balance = await _get_or_create_balance(
@@ -2565,9 +2565,37 @@ async def acknowledge_package(
                             - (src_balance.reserved_qty or Decimal("0"))
                             - (src_balance.transit_qty or Decimal("0"))
                         )
+
+                        # If direct dispatch, we did not deduct total_qty on dispatch, so deduct it now
+                        is_direct = True
+                        if con.mdo_id:
+                            from app.models.logistics import LogisticsMainDispatchOrder
+                            mdo_mode_res = await db.execute(
+                                select(LogisticsMainDispatchOrder.dispatch_mode)
+                                .where(LogisticsMainDispatchOrder.id == con.mdo_id)
+                            )
+                            mdo_mode = mdo_mode_res.scalar()
+                            if mdo_mode == "multi-level":
+                                is_direct = False
+                        
+                        if is_direct and src_wh_id != dest_wh_id:
+                            await post_stock_ledger(
+                                db,
+                                item_id=pi.material_id,
+                                warehouse_id=src_wh_id,
+                                transaction_type="transfer_out",
+                                qty_out=packed_qty,
+                                batch_id=pi.batch_id,
+                                bin_id=pi.source_bin_id,
+                                reference_type="consignment_package_acknowledgement",
+                                reference_id=ack.id,
+                                uom_id=pi.uom_id,
+                                rate=pi.unit_price or Decimal("0"),
+                                created_by=current_user.id,
+                            )
                     except Exception as e:
                         import logging
-                        logging.getLogger(__name__).error("Failed to decrement transit qty on source balance: %s", e)
+                        logging.getLogger(__name__).error("Failed to decrement transit qty / post transfer_out on source balance: %s", e)
 
                 # Move/Update SerialNumber records to destination warehouse
                 try:

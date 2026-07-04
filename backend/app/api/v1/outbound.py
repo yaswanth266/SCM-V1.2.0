@@ -1368,7 +1368,7 @@ async def acknowledge_delivery(
                     - (src_balance.reserved_qty or Decimal("0"))
                     - (src_balance.transit_qty or Decimal("0"))
                 )
-                if d.dispatch_mode == "multi-level" and transit_wh_id != dest_wh_id:
+                if transit_wh_id != dest_wh_id:
                     await post_stock_ledger(
                         db,
                         item_id=it.material_id,
@@ -1387,7 +1387,7 @@ async def acknowledge_delivery(
                     db,
                     item_id=it.material_id,
                     warehouse_id=dest_wh_id,
-                    transaction_type="material_issue",
+                    transaction_type="transfer_in",
                     qty_in=it.quantity_accepted,
                     batch_id=batch_id,
                     bin_id=None,

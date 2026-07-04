@@ -132,8 +132,21 @@ async def get_stock_balances(
 
     # BUG-INV-135: filter by quantity unless show_zero_stock is set.
     if not show_zero_stock:
-        query = query.where(StockBalance.available_qty > 0)
-        count_query = count_query.where(StockBalance.available_qty > 0)
+        from sqlalchemy import or_
+        query = query.where(
+            or_(
+                StockBalance.available_qty > 0,
+                StockBalance.reserved_qty > 0,
+                StockBalance.transit_qty > 0
+            )
+        )
+        count_query = count_query.where(
+            or_(
+                StockBalance.available_qty > 0,
+                StockBalance.reserved_qty > 0,
+                StockBalance.transit_qty > 0
+            )
+        )
 
     result = await db.execute(query)
     balances = result.scalars().all()

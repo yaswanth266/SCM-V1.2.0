@@ -295,7 +295,7 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
                             - (src_balance.transit_qty or Decimal("0"))
                         )
 
-                        if mdo.dispatch_mode.lower() == "multi-level" and transit_wh_id != dest_wh_id:
+                        if transit_wh_id != dest_wh_id:
                             await post_stock_ledger(
                                 db,
                                 item_id=mat.material_id,
@@ -315,7 +315,7 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
                             db,
                             item_id=mat.material_id,
                             warehouse_id=dest_wh_id,
-                            transaction_type="material_issue",
+                            transaction_type="transfer_in",
                             qty_in=qty,
                             batch_id=batch_id,
                             bin_id=None,
