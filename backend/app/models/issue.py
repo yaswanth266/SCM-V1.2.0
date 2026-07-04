@@ -53,6 +53,10 @@ class MaterialIssueItem(Base):
     patient_name = Column(String(255))
     patient_id_text = Column(String(100))
     serial_numbers = Column(JSON, nullable=True)
+    # Non-central warehouse traceability — free-text batch/bin reference (no FK, no ledger validation)
+    batch_number_text = Column(String(100), nullable=True)
+    bin_code_text = Column(String(100), nullable=True)
+
 
     material_issue = relationship("MaterialIssue", back_populates="items")
     item = relationship("Item")

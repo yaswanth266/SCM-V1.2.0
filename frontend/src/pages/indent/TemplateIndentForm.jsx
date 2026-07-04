@@ -49,7 +49,7 @@ const TemplateIndentForm = ({ templateType, title }) => {
     const uid = user?.id;
     try {
       const [whRes, projRes, vehRes] = await Promise.allSettled([
-        api.get('/masters/warehouses', { params: { page_size: 200, user_id: uid } }),
+        api.get('/masters/warehouses', { params: { page_size: 200, user_id: uid, exclude_virtual: true } }),
         api.get('/masters/projects', { params: { page_size: 200, user_id: uid } }),
         api.get('/masters/vehicles', { params: { is_active: true } }),
       ]);
@@ -58,8 +58,12 @@ const TemplateIndentForm = ({ templateType, title }) => {
         const w = whRes.value.data;
         const whList = (w.items || w.data || w || []).map((i) => ({ label: i.name || i.warehouse_name, value: i.id }));
         setWarehouses(whList);
-        if (isNew && whList.length === 1) {
-          form.setFieldValue('warehouse_id', whList[0].value);
+        if (isNew) {
+          if (whList.length === 1) {
+            form.setFieldValue('warehouse_id', whList[0].value);
+          } else if (uid && user?.warehouse_id) {
+            form.setFieldValue('warehouse_id', user.warehouse_id);
+          }
         }
       }
 
@@ -373,7 +377,7 @@ const TemplateIndentForm = ({ templateType, title }) => {
             </Col>
             <Col xs={24} sm={12} md={8}>
               <Form.Item name="warehouse_id" label="Warehouse" rules={[{ required: true, message: 'Warehouse is required' }]}>
-                <Select options={warehouses} placeholder="Select warehouse" allowClear optionFilterProp="label" />
+                  <Select options={warehouses} placeholder="Select warehouse" allowClear showSearch optionFilterProp="label" />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={8}>

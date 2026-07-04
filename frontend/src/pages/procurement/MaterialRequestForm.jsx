@@ -20,6 +20,7 @@ import {
 } from '../../utils/helpers';
 import { DATE_FORMAT } from '../../utils/constants';
 import AttachmentUploader, { uploadStagedAttachments } from '../../components/AttachmentUploader';
+import useAuthStore from '../../store/authStore';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -95,7 +96,7 @@ const MaterialRequestForm = () => {
     try {
       const [deptRes, whRes, projRes, uomRes] = await Promise.allSettled([
         api.get('/masters/departments', { params: { page_size: 200 } }),
-        api.get('/masters/warehouses', { params: { page_size: 200 } }),
+        api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } }),
         api.get('/masters/projects', { params: { page_size: 200 } }),
         api.get('/masters/uom', { params: { page_size: 200 } }),
       ]);
@@ -128,10 +129,12 @@ const MaterialRequestForm = () => {
     if (!isNew) {
       fetchMR();
     } else {
+      const user = useAuthStore.getState().user;
       form.setFieldsValue({
         request_type: 'purchase',
         priority: 'medium',
         required_date: dayjs().add(7, 'day'),
+        warehouse_id: user?.warehouse_id || undefined,
       });
     }
   }, [id]);

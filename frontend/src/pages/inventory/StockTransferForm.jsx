@@ -21,6 +21,7 @@ import {
   formatDateForAPI
 } from '../../utils/helpers';
 import { DATE_FORMAT } from '../../utils/constants';
+import useAuthStore from '../../store/authStore';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -58,6 +59,7 @@ const StockTransferForm = () => {
   const isNew = !id || id === 'new';
 
   const [form] = Form.useForm();
+  const user = useAuthStore((s) => s.user);
   const [loading, setLoading] = useState(!isNew);
   const [submitting, setSubmitting] = useState(false);
   const [recordData, setRecordData] = useState(null);
@@ -107,7 +109,7 @@ const StockTransferForm = () => {
   const loadLookups = useCallback(async () => {
     try {
       const [whRes, uomRes] = await Promise.allSettled([
-        api.get('/masters/warehouses', { params: { page_size: 200 } }),
+        api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } }),
         api.get('/masters/uom', { params: { page_size: 200 } }),
       ]);
       if (whRes.status === 'fulfilled') {
@@ -186,6 +188,7 @@ const StockTransferForm = () => {
       form.setFieldsValue({
         transfer_date: dayjs(),
         transfer_type: 'warehouse_to_warehouse',
+        source_warehouse_id: user?.warehouse_id || undefined,
       });
       setTransferItems([createEmptyItem()]);
     }

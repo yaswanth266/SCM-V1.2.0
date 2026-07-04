@@ -296,6 +296,10 @@ class MaterialIssueItemCreate(BaseModel):
     patient_name: Optional[str] = None
     patient_id_text: Optional[str] = None
     serial_numbers: Optional[List[str]] = None
+    # Non-central WH traceability — free-text, no ledger validation
+    batch_number_text: Optional[str] = None
+    bin_code_text: Optional[str] = None
+
 
     @field_validator("qty")
     @classmethod
@@ -393,6 +397,9 @@ class MaterialIssueItemResponse(BaseModel):
     item_type: Optional[str] = None
     packed_qty: Decimal = Decimal("0")
     packed_serials: List[str] = []
+    # Non-central WH traceability text fields
+    batch_number_text: Optional[str] = None
+    bin_code_text: Optional[str] = None
     model_config = {"from_attributes": True}
 
 class MaterialIssueResponse(BaseModel):

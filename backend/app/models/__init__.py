@@ -36,4 +36,18 @@ from app.models.carrier import CarrierUser
 from app.models.vendor_portal import VendorUser
 from app.models.dispatch_custody import DispatchCustodyTransfer
 
-
+# ── Previously missing — Alembic couldn't see these tables ──────────────────
+from app.models.consignment import (  # noqa: F401
+    Consignment,
+    ConsignmentPackage,
+    ConsignmentPackageItem,
+    ConsignmentPackageContainer,
+    ConsignmentPackageAcknowledgement,
+    ConsignmentParentPackage,
+    ConsignmentParentPackageChild,
+)
+from app.models.inventory_master import *   # noqa: F401,F403
+from app.models.procurement_master import * # noqa: F401,F403
+from app.models.settings_master import *    # noqa: F401,F403
+from app.models.project_templates import *  # noqa: F401,F403
+from app.models.vehicles import *           # noqa: F401,F403

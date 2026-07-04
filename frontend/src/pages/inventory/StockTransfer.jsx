@@ -12,6 +12,7 @@ import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
 import StatusTag from '../../components/StatusTag';
 import api from '../../config/api';
+import useAuthStore from '../../store/authStore';
 import {
   formatDate, getErrorMessage
 } from '../../utils/helpers';
@@ -38,14 +39,15 @@ const StockTransfer = () => {
 
   // Filters
   const [filterStatus, setFilterStatus] = useState(undefined);
-  const [filterWarehouse, setFilterWarehouse] = useState(undefined);
+  const user = useAuthStore((s) => s.user);
+  const [filterWarehouse, setFilterWarehouse] = useState(user?.warehouse_id || undefined);
 
   const [warehouses, setWarehouses] = useState([]);
 
   // Load lookups
   const loadLookups = useCallback(async () => {
     try {
-      const whRes = await api.get('/masters/warehouses', { params: { page_size: 200 } });
+      const whRes = await api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } });
       const d = whRes.data;
       const items = d.items || d.data || d || [];
       setWarehouses(items.map((w) => ({
@@ -227,6 +229,8 @@ const StockTransfer = () => {
         allowClear
         style={{ width: 160 }}
         size="middle"
+        showSearch
+        optionFilterProp="label"
       />
       <Select
         placeholder="Status"

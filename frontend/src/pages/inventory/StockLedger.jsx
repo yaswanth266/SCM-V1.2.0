@@ -11,6 +11,7 @@ import DataTable from '../../components/DataTable';
 import StatusTag from '../../components/StatusTag';
 import ItemSelector from '../../components/ItemSelector';
 import api from '../../config/api';
+import useAuthStore from '../../store/authStore';
 import {
   formatDate, formatDateTime, formatCurrency, formatNumber, getErrorMessage,
   formatDateForAPI, downloadExcel,
@@ -41,7 +42,8 @@ const TRANSACTION_TYPES = [
 const StockLedger = () => {
   // Filters
   const [filterItem, setFilterItem] = useState(undefined);
-  const [filterWarehouse, setFilterWarehouse] = useState(undefined);
+  const user = useAuthStore((s) => s.user);
+  const [filterWarehouse, setFilterWarehouse] = useState(user?.warehouse_id || undefined);
   const [filterTransType, setFilterTransType] = useState('');
   const [filterDateRange, setFilterDateRange] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -53,7 +55,7 @@ const StockLedger = () => {
   useEffect(() => {
     const loadLookups = async () => {
       try {
-        const res = await api.get('/masters/warehouses', { params: { page_size: 200 } });
+        const res = await api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } });
         const d = res.data;
         const items = d.items || d.data || d || [];
         setWarehouses(items.map((w) => ({
@@ -288,6 +290,8 @@ const StockLedger = () => {
         allowClear
         style={{ width: 160 }}
         size="middle"
+        showSearch
+        optionFilterProp="label"
       />
       <Select
         placeholder="Transaction Type"

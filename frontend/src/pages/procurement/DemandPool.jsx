@@ -12,6 +12,7 @@ import {
 import PageHeader from '../../components/PageHeader';
 import api from '../../config/api';
 import { formatNumber, getErrorMessage, formatDate } from '../../utils/helpers';
+import useAuthStore from '../../store/authStore';
 
 const { Text } = Typography;
 
@@ -117,14 +118,15 @@ const DemandPool = () => {
   const [indentCount, setIndentCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [warehouses, setWarehouses] = useState([]);
-  const [filterWh, setFilterWh] = useState(undefined);
+  const user = useAuthStore((s) => s.user);
+  const [filterWh, setFilterWh] = useState(user?.warehouse_id || undefined);
   const [selectedKeys, setSelectedKeys] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
   const loadWarehouses = async () => {
     try {
-      const r = await api.get('/masters/warehouses', { params: { page_size: 200 } });
+      const r = await api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } });
       const items = r.data?.items || r.data?.data || r.data || [];
       setWarehouses(items.map((w) => ({ label: w.name, value: w.id })));
     } catch { /* silent */ }

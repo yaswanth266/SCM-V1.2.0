@@ -23,6 +23,7 @@ import {
   formatDate, formatDateTime, getErrorMessage, formatDateForAPI,
 } from '../../utils/helpers';
 import { DATE_FORMAT, DATETIME_FORMAT } from '../../utils/constants';
+import useAuthStore from '../../store/authStore';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -64,7 +65,7 @@ const GateEntry = () => {
   const loadLookups = useCallback(async () => {
     try {
       const [whRes] = await Promise.allSettled([
-        api.get('/masters/warehouses', { params: { page_size: 200 } }),
+        api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } }),
       ]);
       if (whRes.status === 'fulfilled') {
         const w = whRes.value.data;

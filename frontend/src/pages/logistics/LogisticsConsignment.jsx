@@ -575,17 +575,50 @@ export default function LogisticsConsignment() {
   };
 
   const handleAddPackage = () => {
+    // Pre-populate new package with items that still have remaining qty to pack
+    const remainingItems = selectedIssueItems
+      .map(miItem => {
+        const totalPacked = packages.reduce((sum, p) => {
+          const pItem = p.items.find(i => i.material_issue_item_id === miItem.id);
+          return sum + parseFloat(pItem?.quantity_packed || 0);
+        }, 0);
+        const remaining = Math.max(0, parseFloat(miItem.qty || miItem.quantity || 0) - totalPacked);
+        if (remaining <= 0) return null;
+
+        const allSerials = miItem.serial_numbers || [];
+        const usedInOthers = packages.reduce((acc, p) => {
+          const item = p.items.find(i => i.material_issue_item_id === miItem.id);
+          if (item?.serial_numbers) item.serial_numbers.forEach(sn => acc.add(sn));
+          return acc;
+        }, new Set());
+        const availableSerials = allSerials.filter(sn => !usedInOthers.has(sn));
+
+        return {
+          material_issue_item_id: miItem.id,
+          material_id: miItem.item_id || miItem.material_id,
+          quantity_packed: miItem.serial_numbers?.length > 0 ? availableSerials.length : remaining,
+          uom_code: miItem.uom_name || miItem.uom_code || 'NOS',
+          batch_id: miItem.batch_id || undefined,
+          source_bin_id: miItem.bin_id || undefined,
+          serial_numbers: availableSerials,
+          unit_price: miItem.rate || 0,
+          _material_name: miItem.item_name || miItem.item?.name || 'Material',
+          _material_code: miItem.item_code || miItem.item?.item_code || '',
+        };
+      })
+      .filter(Boolean);
+
     setPackages(prev => [...prev, {
       key: Date.now(),
       package_type: 'BOX',
       package_description: `Package ${prev.length + 1}`,
-      gross_weight_kg: 0,
+      gross_weight_kg: remainingItems.reduce((s, i) => s + parseFloat(i.quantity_packed || 0) * 0.5, 0),
       length_cm: 30,
       width_cm: 20,
       height_cm: 15,
       seal_number: '',
       parent_package_group: null,
-      items: [],
+      items: remainingItems,
       locked: false,
     }]);
   };

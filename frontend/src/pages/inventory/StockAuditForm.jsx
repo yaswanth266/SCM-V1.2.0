@@ -19,6 +19,7 @@ import {
   formatDateForAPI
 } from '../../utils/helpers';
 import { DATE_FORMAT } from '../../utils/constants';
+import useAuthStore from '../../store/authStore';
 
 const { TextArea } = Input;
 const { Text } = Typography;
@@ -46,6 +47,7 @@ const StockAuditForm = () => {
   const isNew = !id || id === 'new';
 
   const [form] = Form.useForm();
+  const user = useAuthStore((s) => s.user);
   const [loading, setLoading] = useState(!isNew);
   const [submitting, setSubmitting] = useState(false);
   const [recordData, setRecordData] = useState(null);
@@ -60,7 +62,7 @@ const StockAuditForm = () => {
   useEffect(() => {
     const loadLookups = async () => {
       try {
-        const res = await api.get('/masters/warehouses', { params: { page_size: 200 } });
+        const res = await api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } });
         const d = res.data;
         const items = d.items || d.data || d || [];
         setWarehouses(items.map((w) => ({
@@ -126,8 +128,10 @@ const StockAuditForm = () => {
       form.setFieldsValue({
         audit_date: dayjs(),
         audit_type: 'full',
+        warehouse_id: user?.warehouse_id || undefined,
       });
       setAuditItems([]);
+      if (user?.warehouse_id) populateWarehouseItems(user.warehouse_id);
     }
   }, [id, isNew, fetchRecord, form]);
 

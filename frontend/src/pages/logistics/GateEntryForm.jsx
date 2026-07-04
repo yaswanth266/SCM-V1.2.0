@@ -13,6 +13,7 @@ import dayjs from 'dayjs';
 import PageHeader from '../../components/PageHeader';
 import StatusTag from '../../components/StatusTag';
 import api from '../../config/api';
+import useAuthStore from '../../store/authStore';
 import { formatDateTime, getErrorMessage } from '../../utils/helpers';
 
 const { TextArea } = Input;
@@ -23,6 +24,7 @@ const GateEntryForm = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [form] = Form.useForm();
+  const user = useAuthStore((s) => s.user);
   const isNew = !id || id === 'new';
   const modulePrefix = location.pathname.startsWith('/warehouse') ? '/warehouse' : '/logistics';
 
@@ -51,11 +53,19 @@ const GateEntryForm = () => {
       const res = await api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } });
       const data = res.data;
       const items = data.items || data.data || data || [];
-      setWarehouses(items.map((w) => ({ label: w.name || w.warehouse_name, value: w.id })));
+      const whList = items.map((w) => ({ label: w.name || w.warehouse_name, value: w.id }));
+      setWarehouses(whList);
+      if (isNew) {
+        if (whList.length === 1) {
+          form.setFieldValue('warehouse_id', whList[0].value);
+        } else if (user?.warehouse_id) {
+          form.setFieldValue('warehouse_id', user.warehouse_id);
+        }
+      }
     } catch {
       // silent
     }
-  }, []);
+  }, [isNew, user, form]);
 
   const loadServiceOrderOptions = useCallback(async (search = '') => {
     try {

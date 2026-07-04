@@ -58,6 +58,8 @@ const MaterialIssueForm = () => {
   // item_id -> { batches: [{id, batch_number, expiry_date, rate}], bins: [{id, code}] }
   // Populated when an item is selected to allow batch/bin dropdown selection
   const [itemStockDetails, setItemStockDetails] = useState({});
+  // Whether the source warehouse is a central warehouse (determines batch/bin UX)
+  const [isCentralWarehouse, setIsCentralWarehouse] = useState(true);
 
   // --- Tree Modal State for Asset/Consumable Codes ---
   const [treeModalOpen, setTreeModalOpen] = useState(false);
@@ -80,6 +82,8 @@ const MaterialIssueForm = () => {
     has_batch: false,
     has_serial: false,
     serial_numbers: [],
+    batch_number_text: '',  // non-central WH traceability
+    bin_code_text: '',      // non-central WH traceability
   });
 
   const recalcItem = (item) => {
@@ -499,12 +503,25 @@ const MaterialIssueForm = () => {
         has_batch: !!item.has_batch,
         has_serial: !!item.has_serial,
         serial_numbers: item.serial_numbers || [],
+        batch_number_text: item.batch_number_text || '',
+        bin_code_text: item.bin_code_text || '',
       }));
 
       setIssueItems(items.length > 0 ? items : [createEmptyItem()]);
 
       const warehouseId = data.warehouse_id;
       if (warehouseId) {
+        // Detect whether source warehouse is central to control batch/bin UI
+        try {
+          const whRes = await api.get(`/masters/warehouses/${warehouseId}`);
+          const whData = whRes.data;
+          setIsCentralWarehouse(
+            !!(whData?.is_central ?? (whData?.parent_id === null || whData?.parent_id === undefined))
+          );
+        } catch {
+          setIsCentralWarehouse(true); // safe default: show full dropdowns
+        }
+
         const itemIds = items.map((it) => it.item_id).filter(Boolean);
         await refreshStockForItems(warehouseId, itemIds);
         // Fetch stock details for each item, then restore saved batch/bin selections
@@ -795,10 +812,12 @@ const MaterialIssueForm = () => {
         return;
       }
 
-      const itemsWithoutBatch = validItems.filter((i) => {
-        const selectedBatches = i.batch_ids || (i.batch_id ? [i.batch_id] : []);
-        return i.has_batch && selectedBatches.length === 0;
-      });
+      const itemsWithoutBatch = isCentralWarehouse
+        ? validItems.filter((i) => {
+            const selectedBatches = i.batch_ids || (i.batch_id ? [i.batch_id] : []);
+            return i.has_batch && selectedBatches.length === 0;
+          })
+        : []; // non-central WH: batch is optional text, never block submission
       if (itemsWithoutBatch.length > 0) {
         message.error('Batch selection is required for items flagged with batch tracking');
         return;
@@ -845,10 +864,12 @@ const MaterialIssueForm = () => {
             item_id: item.item_id,
             qty: item.qty,
             uom_id: item.uom_id,
-            batch_id: selectedBatches[0] || null,
-            bin_id: selectedBins[0] || null,
+            batch_id: isCentralWarehouse ? (selectedBatches[0] || null) : null,
+            bin_id: isCentralWarehouse ? (selectedBins[0] || null) : null,
             rate: item.rate,
             serial_numbers: (item.has_serial || item.item_type === 'asset' || item.item_type === 'consumable') ? item.serial_numbers : null,
+            batch_number_text: !isCentralWarehouse ? (item.batch_number_text || null) : null,
+            bin_code_text: !isCentralWarehouse ? (item.bin_code_text || null) : null,
           });
           continue;
         }
@@ -862,10 +883,12 @@ const MaterialIssueForm = () => {
             item_id: item.item_id,
             qty: take,
             uom_id: item.uom_id,
-            batch_id: row.batch_id || null,
-            bin_id: row.bin_id || null,
+            batch_id: isCentralWarehouse ? (row.batch_id || null) : null,
+            bin_id: isCentralWarehouse ? (row.bin_id || null) : null,
             rate: Number(row.valuation_rate) || item.rate || 0,
             serial_numbers: (item.has_serial || item.item_type === 'asset' || item.item_type === 'consumable') ? item.serial_numbers : null,
+            batch_number_text: !isCentralWarehouse ? (item.batch_number_text || null) : null,
+            bin_code_text: !isCentralWarehouse ? (item.bin_code_text || null) : null,
           });
           remainingQty -= take;
         }
@@ -878,10 +901,12 @@ const MaterialIssueForm = () => {
               item_id: item.item_id,
               qty: remainingQty,
               uom_id: item.uom_id,
-              batch_id: selectedBatches[0] || null,
-              bin_id: selectedBins[0] || null,
+              batch_id: isCentralWarehouse ? (selectedBatches[0] || null) : null,
+              bin_id: isCentralWarehouse ? (selectedBins[0] || null) : null,
               rate: item.rate,
               serial_numbers: (item.has_serial || item.item_type === 'asset' || item.item_type === 'consumable') ? item.serial_numbers : null,
+              batch_number_text: !isCentralWarehouse ? (item.batch_number_text || null) : null,
+              bin_code_text: !isCentralWarehouse ? (item.bin_code_text || null) : null,
             });
           }
         }
@@ -987,8 +1012,8 @@ const MaterialIssueForm = () => {
       { title: 'Item', dataIndex: 'item_name', width: 200, ellipsis: true, render: (v, r) => v || r.item_code || '-' },
       { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: (v) => formatNumber(v) },
       { title: 'UOM', dataIndex: 'uom_name', width: 80, render: (v) => v || '-' },
-      { title: 'Batch', dataIndex: 'batch_id', width: 120, render: (v) => v || '-' },
-      { title: 'Bin', dataIndex: 'bin_id', width: 120, render: (v) => v || '-' },
+      { title: 'Batch', dataIndex: 'batch_id', width: 120, render: (v, r) => r.batch_number || r.batch_number_text || v || '-' },
+      { title: 'Bin', dataIndex: 'bin_id', width: 120, render: (v, r) => r.bin_code || r.bin_code_text || v || '-' },
       {
         title: 'Serial Numbers',
         dataIndex: 'serial_numbers',
@@ -1243,15 +1268,19 @@ const MaterialIssueForm = () => {
         }
 
         // Non-central warehouse: breakdown returns batch_id=null for all rows.
-        // Batch selection is meaningless (backend clears it on issue anyway).
-        // Show saved batch_number as read-only info if one was previously saved.
+        // Show an optional text input for source batch traceability (no ledger validation).
         const allBatchIdsNull = details.batches.length > 0 && details.batches.every(b => b.id === null);
-        if (allBatchIdsNull) {
-          const savedBatchLabel = record.batch_number || (record.batch_id ? `Batch #${record.batch_id}` : null);
-          return savedBatchLabel ? (
-            <Tag color="blue" style={{ margin: 0 }}>{savedBatchLabel}</Tag>
-          ) : (
-            <Select disabled placeholder="Not required" size="small" style={{ width: '100%' }} />
+        if (allBatchIdsNull || !isCentralWarehouse) {
+          // Non-central: always show free-text input
+          return (
+            <Input
+              value={record.batch_number_text || ''}
+              onChange={(e) => updateIssueItem(record.key, 'batch_number_text', e.target.value)}
+              placeholder="Source batch # (optional)"
+              size="small"
+              style={{ width: '100%' }}
+              allowClear
+            />
           );
         }
 
@@ -1390,6 +1419,19 @@ const MaterialIssueForm = () => {
         }
 
         if (binOptions.length === 0) {
+          // Non-central: show optional text input for bin/location traceability
+          if (!isCentralWarehouse) {
+            return (
+              <Input
+                value={record.bin_code_text || ''}
+                onChange={(e) => updateIssueItem(record.key, 'bin_code_text', e.target.value)}
+                placeholder="Source location (optional)"
+                size="small"
+                style={{ width: '100%' }}
+                allowClear
+              />
+            );
+          }
           return (
             <Select
               value={val}

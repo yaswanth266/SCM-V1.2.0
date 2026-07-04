@@ -2853,6 +2853,8 @@ async def list_material_issues(
                 "has_batch": bool(item.item.has_batch) if item.item else False,
                 "has_serial": bool(item.item.has_serial) if item.item else False,
                 "serial_numbers": item.serial_numbers,
+                "batch_number_text": item.batch_number_text,
+                "bin_code_text": item.bin_code_text,
             })
         items_list.append(mi_dict)
     return build_paginated_response(items_list, total, page, page_size)
@@ -3235,6 +3237,8 @@ async def create_material_issue(
                     rate=item.rate,
                     amount=amount,
                     serial_numbers=cleaned_sns,
+                    batch_number_text=getattr(item, "batch_number_text", None),
+                    bin_code_text=getattr(item, "bin_code_text", None),
                 )
                 db.add(mi_item)
 
@@ -3584,6 +3588,8 @@ async def bulk_create_material_issues(
                         patient_name=getattr(item, "patient_name", None),
                         patient_id_text=getattr(item, "patient_id_text", None),
                         serial_numbers=cleaned_sns,
+                        batch_number_text=getattr(item, "batch_number_text", None),
+                        bin_code_text=getattr(item, "bin_code_text", None),
                     )
                     db.add(mi_item)
 
@@ -3759,6 +3765,8 @@ async def get_material_issue(
         response["items"][i]["serial_numbers"] = item.serial_numbers
         response["items"][i]["has_serial"] = bool(item.item.has_serial) if item.item else False
         response["items"][i]["has_batch"] = bool(item.item.has_batch) if item.item else False
+        response["items"][i]["batch_number_text"] = item.batch_number_text
+        response["items"][i]["bin_code_text"] = item.bin_code_text
         
         # Calculate packed quantity and packed serials for this MaterialIssueItem
         from app.models.consignment import ConsignmentPackageItem, ConsignmentPackage, Consignment
@@ -3899,6 +3907,8 @@ async def update_material_issue(
                 patient_name=getattr(item, "patient_name", None),
                 patient_id_text=getattr(item, "patient_id_text", None),
                 serial_numbers=cleaned_sns,
+                batch_number_text=getattr(item, "batch_number_text", None),
+                bin_code_text=getattr(item, "bin_code_text", None),
             )
             db.add(mi_item)
 

@@ -16,6 +16,7 @@ import api from '../../config/api';
 import {
   formatCurrency, getErrorMessage, formatDateForAPI
 } from '../../utils/helpers';
+import useAuthStore from '../../store/authStore';
 import { DATE_FORMAT } from '../../utils/constants';
 
 const { TextArea } = Input;
@@ -27,6 +28,7 @@ const PurchaseOrderForm = () => {
   const isNew = !id || id === 'new';
 
   const [form] = Form.useForm();
+  const user = useAuthStore((s) => s.user);
   const [loading, setLoading] = useState(!isNew);
   const [submitting, setSubmitting] = useState(false);
   const [editingPO, setEditingPO] = useState(null);
@@ -70,7 +72,7 @@ const PurchaseOrderForm = () => {
     try {
       const [vendorRes, whRes, projRes] = await Promise.allSettled([
         api.get('/masters/vendors', { params: { page_size: 200, status: 'active' } }),
-        api.get('/masters/warehouses', { params: { page_size: 200 } }),
+        api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } }),
         api.get('/masters/projects', { params: { page_size: 200 } }),
       ]);
       if (vendorRes.status === 'fulfilled') {
@@ -359,6 +361,7 @@ const PurchaseOrderForm = () => {
       form.setFieldsValue({
         po_date: dayjs(),
         expected_delivery_date: dayjs().add(14, 'day'),
+        warehouse_id: user?.warehouse_id || undefined,
       });
       setPoItems([createEmptyItem()]);
     }
@@ -683,7 +686,7 @@ const PurchaseOrderForm = () => {
             </Col>
             <Col span={8}>
               <Form.Item name="warehouse_id" label="Target Warehouse" rules={[{ required: true, message: 'Required' }]}>
-                <Select options={warehouses} placeholder="Select warehouse" optionFilterProp="label" />
+                <Select options={warehouses} placeholder="Select warehouse" allowClear showSearch optionFilterProp="label" />
               </Form.Item>
             </Col>
           </Row>

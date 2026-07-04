@@ -563,14 +563,16 @@ const AcknowledgeDelivery = () => {
                     pagination={false}
                     size="small"
                     bordered
+                    scroll={{ x: 1400 }}
                     columns={[
-                      { title: 'Material Name', dataIndex: 'material_name', key: 'name' },
-                      { title: 'Material Code', dataIndex: 'material_code', key: 'code', render: t => <span style={{ fontFamily: 'monospace' }}>{t}</span> },
-                      { title: 'Batch', dataIndex: 'batch_number', key: 'batch', render: t => t || '—' },
-                      { title: 'Packed Qty', dataIndex: 'quantity_packed', key: 'packed_qty', render: v => <span style={{ fontWeight: 700 }}>{v}</span> },
+                      { title: 'Material Name', dataIndex: 'material_name', key: 'name', width: 200 },
+                      { title: 'Material Code', dataIndex: 'material_code', key: 'code', width: 130, render: t => <span style={{ fontFamily: 'monospace' }}>{t}</span> },
+                      { title: 'Batch', dataIndex: 'batch_number', key: 'batch', width: 90, render: t => t || '—' },
+                      { title: 'Packed Qty', dataIndex: 'quantity_packed', key: 'packed_qty', width: 90, render: v => <span style={{ fontWeight: 700 }}>{v}</span> },
                       {
                         title: 'Received Qty',
                         key: 'qty_received',
+                        width: 100,
                         render: (_, r) => (
                           <Form.Item name={`qty_rec_${r.id}`} initialValue={r.quantity_packed} style={{ marginBottom: 0 }}>
                             <InputNumber
@@ -599,6 +601,7 @@ const AcknowledgeDelivery = () => {
                       {
                         title: 'Accepted Qty',
                         key: 'qty_accepted',
+                        width: 100,
                         render: (_, r) => (
                           <Form.Item noStyle dependencies={[`qty_rec_${r.id}`]}>
                             {() => {
@@ -633,6 +636,7 @@ const AcknowledgeDelivery = () => {
                       {
                         title: 'Condition',
                         key: 'condition',
+                        width: 130,
                         render: (_, r) => (
                           <Form.Item name={`condition_${r.id}`} initialValue="GOOD" style={{ marginBottom: 0 }}>
                             <Select size="small" style={{ width: '120px' }}>
@@ -648,7 +652,7 @@ const AcknowledgeDelivery = () => {
                       {
                         title: 'Serial / Asset Codes',
                         key: 'serials',
-                        width: 250,
+                        width: 180,
                         render: (_, r) => {
                           if (!r.serial_numbers || r.serial_numbers.length === 0) return <span style={{ color: '#94a3b8' }}>—</span>;
                           const isAsset = r.material_type === 'asset';
@@ -688,6 +692,7 @@ const AcknowledgeDelivery = () => {
                       {
                         title: 'Asset/Consumable Codes',
                         key: 'asset_codes',
+                        width: 320,
                         render: (_, r) => {
                           const isAsset = r.material_type === 'asset';
                           const isConsumable = r.material_type === 'consumable';

@@ -47,7 +47,7 @@ const StockBalance = () => {
   const isAdmin = user?.roles?.some((r) => ['super_admin', 'admin', 'warehouse_manager'].includes(r.code || r.name));
 
   // Filters
-  const [filterWarehouse, setFilterWarehouse] = useState(undefined);
+  const [filterWarehouse, setFilterWarehouse] = useState(user?.warehouse_id || undefined);
   const [filterItem, setFilterItem] = useState('');
   const [filterCategory, setFilterCategory] = useState(undefined);
   const [filterBatch, setFilterBatch] = useState('');
@@ -73,7 +73,7 @@ const StockBalance = () => {
   const [addStockItemMeta, setAddStockItemMeta] = useState(null);
   const [addStockQty, setAddStockQty] = useState(0);
   const [addStockRate, setAddStockRate] = useState(0);
-  const [addStockWarehouse, setAddStockWarehouse] = useState(undefined);
+  const [addStockWarehouse, setAddStockWarehouse] = useState(user?.warehouse_id || undefined);
   const [addStockType, setAddStockType] = useState('opening');
   const [addStockUomId, setAddStockUomId] = useState(null);
   // BUG-INV-135: batch fields for Add Stock
@@ -205,7 +205,7 @@ const StockBalance = () => {
     const loadLookups = async () => {
       try {
         const [whRes, statsRes] = await Promise.allSettled([
-          api.get('/masters/warehouses', { params: { page_size: 200 } }),
+          api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } }),
           api.get('/inventory/stock-balance/summary'),
         ]);
         if (whRes.status === 'fulfilled') {
@@ -773,6 +773,8 @@ const StockBalance = () => {
         allowClear
         style={{ width: 160 }}
         size="middle"
+        showSearch
+        optionFilterProp="label"
       />
       <Select
         placeholder="Category"

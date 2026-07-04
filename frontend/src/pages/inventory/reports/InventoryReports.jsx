@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect } from 'react';
 import {
   Select, DatePicker, Button, Space, Card, Row, Col, Tag, message,
 } from 'antd';
+import useAuthStore from '../../../store/authStore';
 import {
   DownloadOutlined, PrinterOutlined, FilterOutlined, ReloadOutlined,
 } from '@ant-design/icons';
@@ -35,8 +36,9 @@ const REPORT_TYPES = [
 ];
 
 const InventoryReports = () => {
+  const user = useAuthStore((s) => s.user);
   const [reportType, setReportType] = useState('stock_summary');
-  const [warehouse, setWarehouse] = useState(undefined);
+  const [warehouse, setWarehouse] = useState(user?.warehouse_id || undefined);
   const [category, setCategory] = useState(undefined);
   const [dateRange, setDateRange] = useState(null);
   const [item, setItem] = useState(undefined);
@@ -54,7 +56,7 @@ const InventoryReports = () => {
   const fetchLookups = async () => {
     try {
       const [wRes, cRes, iRes] = await Promise.allSettled([
-        api.get('/masters/warehouses', { params: { page_size: 500 } }),
+        api.get('/masters/warehouses', { params: { page_size: 500, exclude_virtual: true } }),
         api.get('/masters/categories', { params: { page_size: 500 } }),
         api.get('/masters/items', { params: { page_size: 500 } }),
       ]);

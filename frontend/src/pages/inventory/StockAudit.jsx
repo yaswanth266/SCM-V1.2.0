@@ -11,6 +11,7 @@ import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
 import StatusTag from '../../components/StatusTag';
 import api from '../../config/api';
+import useAuthStore from '../../store/authStore';
 import {
   formatDate, formatCurrency, formatNumber, getErrorMessage
 } from '../../utils/helpers';
@@ -38,7 +39,8 @@ const StockAudit = () => {
 
   // Filters
   const [filterStatus, setFilterStatus] = useState(undefined);
-  const [filterWarehouse, setFilterWarehouse] = useState(undefined);
+  const user = useAuthStore((s) => s.user);
+  const [filterWarehouse, setFilterWarehouse] = useState(user?.warehouse_id || undefined);
   const [filterAuditType, setFilterAuditType] = useState(undefined);
 
   const [warehouses, setWarehouses] = useState([]);
@@ -47,7 +49,7 @@ const StockAudit = () => {
   useEffect(() => {
     const loadLookups = async () => {
       try {
-        const res = await api.get('/masters/warehouses', { params: { page_size: 200 } });
+        const res = await api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } });
         const d = res.data;
         const items = d.items || d.data || d || [];
         setWarehouses(items.map((w) => ({
@@ -236,6 +238,8 @@ const StockAudit = () => {
         allowClear
         style={{ width: 160 }}
         size="middle"
+        showSearch
+        optionFilterProp="label"
       />
       <Select
         placeholder="Audit Type"

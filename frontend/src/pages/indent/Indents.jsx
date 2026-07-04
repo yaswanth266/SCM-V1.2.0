@@ -50,7 +50,7 @@ const Indents = () => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [filterStatus, setFilterStatus] = useState(undefined);
   const [filterType, setFilterType] = useState(undefined);
-  const [filterWarehouse, setFilterWarehouse] = useState(undefined);
+  const [filterWarehouse, setFilterWarehouse] = useState(currentUser?.warehouse_id || undefined);
   const [filterProject, setFilterProject] = useState(undefined);
   const [warehouses, setWarehouses] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -64,7 +64,7 @@ const Indents = () => {
   const loadLookups = useCallback(async () => {
     try {
       const [whRes, projRes] = await Promise.allSettled([
-        api.get('/masters/warehouses', { params: { page_size: 200 } }),
+        api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } }),
         api.get('/masters/projects', { params: { page_size: 200 } }),
       ]);
       if (whRes.status === 'fulfilled') {
@@ -262,7 +262,7 @@ const Indents = () => {
           onChange={(v) => { setFilterWarehouse(v); setRefreshKey((k) => k + 1); }}
           options={warehouses}
           showSearch
-          filterOption={(input, option) => (option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+          optionFilterProp="label"
           onFocus={loadLookups}
         />
       )}

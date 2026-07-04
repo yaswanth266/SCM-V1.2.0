@@ -78,7 +78,7 @@ const IndentForm = () => {
 
       const [deptRes, whRes, projRes, uomRes, bomRes] = await Promise.allSettled([
         api.get('/masters/departments', { params: { page_size: 200 } }),
-        api.get('/masters/warehouses', { params: { page_size: 200, user_id: uid } }),
+        api.get('/masters/warehouses', { params: { page_size: 200, user_id: uid, exclude_virtual: true } }),
         api.get('/masters/projects', { params: { page_size: 200, user_id: uid } }),
         api.get('/masters/uom', { params: { page_size: 200 } }),
         api.get('/masters/boms', { params: bomParams }),
@@ -746,7 +746,7 @@ const IndentForm = () => {
             {warehouses.length > 1 && (
               <Col xs={24} sm={12} md={8}>
                 <Form.Item name="warehouse_id" label="Warehouse" rules={[{ required: true, message: 'Warehouse is required' }]}>
-                  <Select options={warehouses} placeholder="Select warehouse" allowClear optionFilterProp="label" />
+                  <Select options={warehouses} placeholder="Select warehouse" allowClear showSearch optionFilterProp="label" />
                 </Form.Item>
               </Col>
             )}

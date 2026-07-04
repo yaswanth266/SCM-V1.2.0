@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Row, Col, Select, DatePicker, Button, Table, Tag, Space, Spin, Empty } from 'antd';
+import { Card, Row, Col, Select, DatePicker, Button, Table, Tag, Space, Spin, Empty, Typography } from 'antd';
 import { DownloadOutlined, FilterOutlined } from '@ant-design/icons';
 import {
   ResponsiveContainer,
@@ -12,32 +12,35 @@ import {
   Tooltip,
   Legend,
   CartesianGrid,
-  Cell,
-  PieChart,
-  Pie,
 } from 'recharts';
 import api from '../../config/api';
 import PageHeader from '../../components/PageHeader';
-import { downloadExcel } from '../../utils/helpers';
+import { downloadExcel, formatNumber, formatCurrency } from '../../utils/helpers';
+import useAuthStore from '../../store/authStore';
 
 const { RangePicker } = DatePicker;
+const { Text } = Typography;
 
 const REPORT_TYPES = [
-  { label: 'Putaway Turnaround Logs', value: 'putaway_efficiency' },
-  { label: 'Pick Rate & SLA Violations', value: 'pick_sla' },
-  { label: 'QA Pass/Fail & Vendor Rejection Log', value: 'qa_log' },
-  { label: 'Gate Entry & Inwarding Logistics Log', value: 'gate_log' },
+  { label: 'Material Issues Transaction Log', value: 'material_issues_log' },
+  { label: 'Goods Receipt Notes (GRN) Log', value: 'grn_log' },
+  { label: 'Putaway Transaction Log', value: 'putaway_log' },
+  { label: 'Material Inwards Transaction Log', value: 'material_inwards_log' },
+  { label: 'Putaway Turnaround Logs (SLA)', value: 'putaway_efficiency' },
+  { label: 'Pick Rate & SLA Violations (SLA)', value: 'pick_sla' },
+  { label: 'QA Pass/Fail & Vendor Rejection Log (SLA)', value: 'qa_log' },
+  { label: 'Gate Entry & Inwarding Logistics Log (SLA)', value: 'gate_log' },
 ];
 
-const COLORS = ['#F09000', '#52c41a', '#fa8c16', '#fa541c', '#1890ff'];
-
 const WarehouseReports = () => {
-  const [reportType, setReportType] = useState('putaway_efficiency');
+  const user = useAuthStore((s) => s.user);
+  const [reportType, setReportType] = useState('material_issues_log');
   const [dateRange, setDateRange] = useState(null);
-  const [warehouse, setWarehouse] = useState(undefined);
+  const [warehouse, setWarehouse] = useState(user?.warehouse_id || undefined);
   const [warehouses, setWarehouses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
+  const [chartData, setChartData] = useState([]);
 
   useEffect(() => {
     fetchWarehouses();
@@ -46,7 +49,7 @@ const WarehouseReports = () => {
 
   const fetchWarehouses = async () => {
     try {
-      const res = await api.get('/warehouse/warehouses', { params: { page_size: 100 } });
+      const res = await api.get('/warehouse/warehouses', { params: { page_size: 100, exclude_virtual: true } });
       const items = res.data?.items || res.data || [];
       setWarehouses(items.map(w => ({ label: w.name, value: w.id })));
     } catch {
@@ -57,18 +60,37 @@ const WarehouseReports = () => {
   const loadReportData = async () => {
     setLoading(true);
     try {
+      const params = { page_size: 100 };
+      if (warehouse && reportType !== 'qa_log' && reportType !== 'gate_log') {
+        params.warehouse_id = warehouse;
+      }
+
       if (reportType === 'putaway_efficiency') {
-        const res = await api.get('/warehouse/putaways', { params: { page_size: 200 } });
+        const res = await api.get('/warehouse/putaways', { params });
         const putaways = res.data?.items || res.data || [];
-        if (putaways.length === 0) {
+        
+        let filtered = putaways;
+        if (dateRange && dateRange[0] && dateRange[1]) {
+          const start = dateRange[0].startOf('day').toDate();
+          const end = dateRange[1].endOf('day').toDate();
+          filtered = putaways.filter(p => {
+            const dateVal = p.completed_at || p.started_at || p.created_at;
+            if (!dateVal) return false;
+            const d = new Date(dateVal);
+            return d >= start && d <= end;
+          });
+        }
+
+        if (filtered.length === 0) {
           setData([]);
+          setChartData([]);
           setLoading(false);
           return;
         }
         
         // Group by month of completed_at
         const monthMap = {};
-        putaways.forEach(p => {
+        filtered.forEach(p => {
           if (p.status !== 'completed' || !p.completed_at || !p.started_at) return;
           const date = new Date(p.completed_at);
           const monthStr = date.toLocaleString('default', { month: 'short', year: 'numeric' });
@@ -89,17 +111,32 @@ const WarehouseReports = () => {
           itemsPutaway: m.itemsPutaway
         }));
         setData(list);
+        setChartData(list);
       } else if (reportType === 'pick_sla') {
-        const res = await api.get('/outbound/picking-orders', { params: { page_size: 200 } });
+        const res = await api.get('/outbound/picking-orders', { params });
         const picks = res.data?.items || res.data || [];
-        if (picks.length === 0) {
+        
+        let filtered = picks;
+        if (dateRange && dateRange[0] && dateRange[1]) {
+          const start = dateRange[0].startOf('day').toDate();
+          const end = dateRange[1].endOf('day').toDate();
+          filtered = picks.filter(p => {
+            const dateVal = p.completed_at || p.assigned_at || p.created_at;
+            if (!dateVal) return false;
+            const d = new Date(dateVal);
+            return d >= start && d <= end;
+          });
+        }
+
+        if (filtered.length === 0) {
           setData([]);
+          setChartData([]);
           setLoading(false);
           return;
         }
 
         const zoneMap = {};
-        picks.forEach(p => {
+        filtered.forEach(p => {
           const zone = p.warehouse_name || 'Main Zone';
           if (!zoneMap[zone]) {
             zoneMap[zone] = { zone, totalPicks: 0, breachedPicks: 0 };
@@ -124,17 +161,35 @@ const WarehouseReports = () => {
           compliance: parseFloat(((z.totalPicks - z.breachedPicks) / z.totalPicks * 100).toFixed(1))
         }));
         setData(list);
+        setChartData(list);
       } else if (reportType === 'qa_log') {
-        const res = await api.get('/warehouse/quality-inspections', { params: { page_size: 200 } });
+        const res = await api.get('/warehouse/quality-inspections', { params });
         const inspections = res.data?.items || res.data || [];
-        if (inspections.length === 0) {
+        
+        let filtered = inspections;
+        if (warehouse) {
+          filtered = inspections.filter(qi => Number(qi.warehouse_id || qi.grn?.warehouse_id) === Number(warehouse));
+        }
+        if (dateRange && dateRange[0] && dateRange[1]) {
+          const start = dateRange[0].startOf('day').toDate();
+          const end = dateRange[1].endOf('day').toDate();
+          filtered = filtered.filter(qi => {
+            const dateVal = qi.created_at;
+            if (!dateVal) return false;
+            const d = new Date(dateVal);
+            return d >= start && d <= end;
+          });
+        }
+
+        if (filtered.length === 0) {
           setData([]);
+          setChartData([]);
           setLoading(false);
           return;
         }
 
         const vendorMap = {};
-        inspections.forEach(qi => {
+        filtered.forEach(qi => {
           const vendor = qi.vendor_name || qi.grn?.vendor_name || 'Vendor';
           if (!vendorMap[vendor]) {
             vendorMap[vendor] = { vendor, passed: 0, failed: 0, totalInspected: 0 };
@@ -148,18 +203,37 @@ const WarehouseReports = () => {
             vendorMap[vendor].passed += 1;
           }
         });
-        setData(Object.values(vendorMap));
-      } else {
-        const res = await api.get('/warehouse/gate-entries', { params: { page_size: 200 } });
+        const list = Object.values(vendorMap);
+        setData(list);
+        setChartData(list);
+      } else if (reportType === 'gate_log') {
+        const res = await api.get('/warehouse/gate-entries', { params });
         const entries = res.data?.items || res.data || [];
-        if (entries.length === 0) {
+        
+        let filtered = entries;
+        if (warehouse) {
+          filtered = entries.filter(e => Number(e.warehouse_id) === Number(warehouse));
+        }
+        if (dateRange && dateRange[0] && dateRange[1]) {
+          const start = dateRange[0].startOf('day').toDate();
+          const end = dateRange[1].endOf('day').toDate();
+          filtered = filtered.filter(e => {
+            const dateVal = e.created_at;
+            if (!dateVal) return false;
+            const d = new Date(dateVal);
+            return d >= start && d <= end;
+          });
+        }
+
+        if (filtered.length === 0) {
           setData([]);
+          setChartData([]);
           setLoading(false);
           return;
         }
 
         const dateMap = {};
-        entries.forEach(e => {
+        filtered.forEach(e => {
           if (!e.created_at) return;
           const dateStr = new Date(e.created_at).toISOString().split('T')[0];
           if (!dateMap[dateStr]) {
@@ -184,10 +258,175 @@ const WarehouseReports = () => {
           maxWaitMins: Math.round(d.maxWait)
         }));
         setData(list);
+        setChartData(list);
+      }
+
+      
+      // --- NEW TRANSACTION LOG REPORTS ---
+      else if (reportType === 'material_issues_log') {
+        const res = await api.get('/warehouse/material-issues', { params });
+        const issues = res.data?.items || res.data || [];
+        
+        let filtered = issues;
+        if (dateRange && dateRange[0] && dateRange[1]) {
+          const start = dateRange[0].startOf('day').toDate();
+          const end = dateRange[1].endOf('day').toDate();
+          filtered = issues.filter(mi => {
+            const dateVal = mi.issue_date || mi.created_at;
+            if (!dateVal) return false;
+            const d = new Date(dateVal);
+            return d >= start && d <= end;
+          });
+        }
+
+        if (filtered.length === 0) {
+          setData([]);
+          setChartData([]);
+          setLoading(false);
+          return;
+        }
+
+        const monthMap = {};
+        filtered.forEach(mi => {
+          const dateVal = mi.issue_date || mi.created_at;
+          if (!dateVal) return;
+          const date = new Date(dateVal);
+          const monthStr = date.toLocaleString('default', { month: 'short', year: 'numeric' });
+          if (!monthMap[monthStr]) {
+            monthMap[monthStr] = { name: monthStr, count: 0, totalQty: 0 };
+          }
+          monthMap[monthStr].count += 1;
+          const items = mi.items || [];
+          const qty = items.reduce((sum, it) => sum + (parseFloat(it.qty) || 0), 0);
+          monthMap[monthStr].totalQty += qty;
+        });
+
+        const chartList = Object.values(monthMap).sort((a, b) => new Date(a.name) - new Date(b.name));
+        setChartData(chartList);
+        setData(filtered);
+      } else if (reportType === 'grn_log') {
+        const res = await api.get('/warehouse/grn', { params });
+        const grns = res.data?.items || res.data || [];
+        
+        let filtered = grns;
+        if (dateRange && dateRange[0] && dateRange[1]) {
+          const start = dateRange[0].startOf('day').toDate();
+          const end = dateRange[1].endOf('day').toDate();
+          filtered = grns.filter(g => {
+            const dateVal = g.grn_date || g.created_at;
+            if (!dateVal) return false;
+            const d = new Date(dateVal);
+            return d >= start && d <= end;
+          });
+        }
+
+        if (filtered.length === 0) {
+          setData([]);
+          setChartData([]);
+          setLoading(false);
+          return;
+        }
+
+        const monthMap = {};
+        filtered.forEach(g => {
+          const dateVal = g.grn_date || g.created_at;
+          if (!dateVal) return;
+          const date = new Date(dateVal);
+          const monthStr = date.toLocaleString('default', { month: 'short', year: 'numeric' });
+          if (!monthMap[monthStr]) {
+            monthMap[monthStr] = { name: monthStr, count: 0, acceptedQty: 0, rejectedQty: 0 };
+          }
+          monthMap[monthStr].count += 1;
+          monthMap[monthStr].acceptedQty += parseFloat(g.accepted_qty || 0);
+          monthMap[monthStr].rejectedQty += parseFloat(g.rejected_qty || 0);
+        });
+
+        const chartList = Object.values(monthMap).sort((a, b) => new Date(a.name) - new Date(b.name));
+        setChartData(chartList);
+        setData(filtered);
+      } else if (reportType === 'putaway_log') {
+        const res = await api.get('/warehouse/putaways', { params });
+        const putaways = res.data?.items || res.data || [];
+        
+        let filtered = putaways;
+        if (dateRange && dateRange[0] && dateRange[1]) {
+          const start = dateRange[0].startOf('day').toDate();
+          const end = dateRange[1].endOf('day').toDate();
+          filtered = putaways.filter(p => {
+            const dateVal = p.completed_at || p.started_at || p.created_at;
+            if (!dateVal) return false;
+            const d = new Date(dateVal);
+            return d >= start && d <= end;
+          });
+        }
+
+        if (filtered.length === 0) {
+          setData([]);
+          setChartData([]);
+          setLoading(false);
+          return;
+        }
+
+        const monthMap = {};
+        filtered.forEach(p => {
+          const dateVal = p.completed_at || p.started_at || p.created_at;
+          if (!dateVal) return;
+          const date = new Date(dateVal);
+          const monthStr = date.toLocaleString('default', { month: 'short', year: 'numeric' });
+          if (!monthMap[monthStr]) {
+            monthMap[monthStr] = { name: monthStr, count: 0, completedItems: 0 };
+          }
+          monthMap[monthStr].count += 1;
+          monthMap[monthStr].completedItems += parseFloat(p.completed_items || 0);
+        });
+
+        const chartList = Object.values(monthMap).sort((a, b) => new Date(a.name) - new Date(b.name));
+        setChartData(chartList);
+        setData(filtered);
+      } else if (reportType === 'material_inwards_log') {
+        const res = await api.get('/warehouse/inwards', { params });
+        const inwards = res.data?.items || res.data || [];
+        
+        let filtered = inwards;
+        if (dateRange && dateRange[0] && dateRange[1]) {
+          const start = dateRange[0].startOf('day').toDate();
+          const end = dateRange[1].endOf('day').toDate();
+          filtered = inwards.filter(inw => {
+            const dateVal = inw.received_date || inw.created_at;
+            if (!dateVal) return false;
+            const d = new Date(dateVal);
+            return d >= start && d <= end;
+          });
+        }
+
+        if (filtered.length === 0) {
+          setData([]);
+          setChartData([]);
+          setLoading(false);
+          return;
+        }
+
+        const monthMap = {};
+        filtered.forEach(inw => {
+          const dateVal = inw.received_date || inw.created_at;
+          if (!dateVal) return;
+          const date = new Date(dateVal);
+          const monthStr = date.toLocaleString('default', { month: 'short', year: 'numeric' });
+          if (!monthMap[monthStr]) {
+            monthMap[monthStr] = { name: monthStr, count: 0, itemsCount: 0 };
+          }
+          monthMap[monthStr].count += 1;
+          monthMap[monthStr].itemsCount += (inw.items || []).length;
+        });
+
+        const chartList = Object.values(monthMap).sort((a, b) => new Date(a.name) - new Date(b.name));
+        setChartData(chartList);
+        setData(filtered);
       }
     } catch (err) {
       console.error('Failed to load warehouse report data:', err);
       setData([]);
+      setChartData([]);
     } finally {
       setLoading(false);
     }
@@ -195,7 +434,30 @@ const WarehouseReports = () => {
 
   const handleExport = () => {
     const title = REPORT_TYPES.find(r => r.value === reportType)?.label || 'Report';
-    downloadExcel(data, `warehouse_${reportType}`, title);
+    
+    // Structure export data to match UI columns for better readability
+    const cols = getColumns();
+    const exportData = data.map((row) => {
+      const exp = {};
+      cols.forEach((c) => {
+        if (c.dataIndex && c.title) {
+          exp[c.title] = row[c.dataIndex];
+        } else if (c.key && c.title) {
+          if (c.key === 'items_count' && row.items) {
+            exp[c.title] = row.items.length;
+          } else if (c.key === 'total_qty' && row.items) {
+            exp[c.title] = row.items.reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0);
+          } else if (c.key === 'progress') {
+            exp[c.title] = `${row.completed_items || 0} / ${row.total_items || 0}`;
+          } else {
+            exp[c.title] = row[c.key];
+          }
+        }
+      });
+      return exp;
+    });
+
+    downloadExcel(exportData.length ? exportData : data, `warehouse_${reportType}`, title);
   };
 
   const getColumns = () => {
@@ -235,7 +497,7 @@ const WarehouseReports = () => {
           }
         },
       ];
-    } else {
+    } else if (reportType === 'gate_log') {
       return [
         { title: 'Date', dataIndex: 'date', key: 'date' },
         { title: 'Total Vehicles Registered', dataIndex: 'entries', key: 'entries', align: 'right' },
@@ -243,12 +505,64 @@ const WarehouseReports = () => {
         { title: 'Max Yard Wait Time', dataIndex: 'maxWaitMins', key: 'maxWaitMins', align: 'right', render: (v) => `${v} mins` },
       ];
     }
+    
+    // --- NEW TRANSACTION COLUMNS ---
+    else if (reportType === 'material_issues_log') {
+      return [
+        { title: 'Issue Number', dataIndex: 'issue_number', key: 'issue_number' },
+        { title: 'Source Warehouse', dataIndex: 'warehouse_name', key: 'warehouse' },
+        { title: 'Destination Warehouse', dataIndex: 'destination_warehouse_name', key: 'destination_warehouse' },
+        { title: 'Department', dataIndex: 'department', key: 'department' },
+        { title: 'Issue Date', dataIndex: 'issue_date', key: 'issue_date', render: (v) => v ? new Date(v).toLocaleDateString() : '-' },
+        { title: 'Issued To', dataIndex: 'issued_to_name', key: 'issued_to' },
+        { title: 'Line Items', key: 'items_count', align: 'right', render: (_, r) => (r.items || []).length },
+        { title: 'Total Qty', key: 'total_qty', align: 'right', render: (_, r) => (r.items || []).reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0) },
+        { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <Tag color={s === 'completed' || s === 'issued' ? 'green' : s === 'cancelled' ? 'red' : 'blue'}>{(s || '').toUpperCase()}</Tag> }
+      ];
+    } else if (reportType === 'grn_log') {
+      return [
+        { title: 'GRN Number', dataIndex: 'grn_number', key: 'grn_number' },
+        { title: 'Vendor', dataIndex: 'vendor_name', key: 'vendor', render: (v, r) => v || r.vendor || '-' },
+        { title: 'PO Ref', dataIndex: 'po_number', key: 'po_number' },
+        { title: 'Inward Ref', dataIndex: 'inward_number', key: 'inward_number' },
+        { title: 'Warehouse', dataIndex: 'warehouse_name', key: 'warehouse' },
+        { title: 'GRN Date', dataIndex: 'grn_date', key: 'grn_date', render: (v) => v ? new Date(v).toLocaleDateString() : '-' },
+        { title: 'Supplier Invoice', dataIndex: 'supplier_invoice', key: 'supplier_invoice' },
+        { title: 'Total Qty', dataIndex: 'total_qty', key: 'total_qty', align: 'right', render: (v) => formatNumber(v) },
+        { title: 'Accepted Qty', dataIndex: 'accepted_qty', key: 'accepted_qty', align: 'right', render: (v) => <span style={{ color: '#52c41a' }}>{formatNumber(v)}</span> },
+        { title: 'Rejected Qty', dataIndex: 'rejected_qty', key: 'rejected_qty', align: 'right', render: (v) => <span style={{ color: v > 0 ? '#f5222d' : 'inherit' }}>{formatNumber(v)}</span> },
+        { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <Tag color={s === 'completed' ? 'green' : s === 'cancelled' ? 'red' : 'blue'}>{(s || '').toUpperCase()}</Tag> }
+      ];
+    } else if (reportType === 'putaway_log') {
+      return [
+        { title: 'Putaway Number', dataIndex: 'putaway_number', key: 'putaway_number' },
+        { title: 'GRN Reference', dataIndex: 'grn_number', key: 'grn_number' },
+        { title: 'Warehouse', dataIndex: 'warehouse_name', key: 'warehouse' },
+        { title: 'Putaway Type', dataIndex: 'putaway_type', key: 'putaway_type', render: (v) => v === 'system_directed' ? 'System Directed' : 'Manual' },
+        { title: 'Assigned To', dataIndex: 'assigned_to_name', key: 'assigned_to', render: (v, r) => v || r.assigned_to || '-' },
+        { title: 'Progress', key: 'progress', align: 'right', render: (_, r) => `${r.completed_items || 0} / ${r.total_items || 0}` },
+        { title: 'Started At', dataIndex: 'started_at', key: 'started_at', render: (v) => v ? new Date(v).toLocaleString() : '-' },
+        { title: 'Completed At', dataIndex: 'completed_at', key: 'completed_at', render: (v) => v ? new Date(v).toLocaleString() : '-' },
+        { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <Tag color={s === 'completed' ? 'green' : s === 'cancelled' ? 'red' : 'blue'}>{(s || '').toUpperCase()}</Tag> }
+      ];
+    } else if (reportType === 'material_inwards_log') {
+      return [
+        { title: 'Inward Number', dataIndex: 'inward_number', key: 'inward_number' },
+        { title: 'PO Number', dataIndex: 'po_number', key: 'po_number' },
+        { title: 'Vendor', key: 'vendor', render: (_, r) => r.vendor_name || r.vendor_name_manual || '-' },
+        { title: 'Warehouse', dataIndex: 'warehouse_name', key: 'warehouse' },
+        { title: 'Received Date', dataIndex: 'received_date', key: 'received_date', render: (v) => v ? new Date(v).toLocaleDateString() : '-' },
+        { title: 'Vehicle Number', dataIndex: 'vehicle_number', key: 'vehicle_number' },
+        { title: 'Items Count', key: 'items_count', align: 'right', render: (_, r) => (r.items || []).length },
+        { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <Tag color={s === 'received' || s === 'grn_created' ? 'green' : s === 'cancelled' ? 'red' : 'blue'}>{(s || '').toUpperCase()}</Tag> }
+      ];
+    }
   };
 
   return (
     <div style={{ padding: '24px' }}>
       <PageHeader
-        title="Warehouse Logistics & SLA Reports"
+        title="Warehouse Logistics & Transaction Reports"
         subtitle={REPORT_TYPES.find((r) => r.value === reportType)?.label || 'Select a report'}
       >
         <Button icon={<DownloadOutlined />} onClick={handleExport} style={{ borderRadius: '6px' }}>
@@ -271,6 +585,8 @@ const WarehouseReports = () => {
             <Select
               placeholder="Filter Warehouse"
               allowClear
+              showSearch
+              optionFilterProp="label"
               style={{ width: '100%' }}
               value={warehouse}
               onChange={setWarehouse}
@@ -307,10 +623,10 @@ const WarehouseReports = () => {
           {/* Graphical Analysis */}
           <Card style={{ marginBottom: 24, borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
            <div style={{ height: '350px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-             {data.length > 0 ? (
+             {chartData.length > 0 ? (
                <ResponsiveContainer width="100%" height="100%">
                  {reportType === 'putaway_efficiency' ? (
-                   <LineChart data={data}>
+                   <LineChart data={chartData}>
                      <CartesianGrid strokeDasharray="3 3" />
                      <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
                      <YAxis label={{ value: 'Hours', angle: -90, position: 'insideLeft' }} stroke="#6C757D" tickLine={false} />
@@ -320,7 +636,7 @@ const WarehouseReports = () => {
                      <Line type="monotone" dataKey="targetHours" name="SLA SLA Limit (Hrs)" stroke="#f5222d" strokeDasharray="5 5" strokeWidth={1.5} />
                    </LineChart>
                  ) : reportType === 'pick_sla' ? (
-                   <BarChart data={data}>
+                   <BarChart data={chartData}>
                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
                      <XAxis dataKey="zone" stroke="#6C757D" tickLine={false} />
                      <YAxis stroke="#6C757D" tickLine={false} />
@@ -330,7 +646,7 @@ const WarehouseReports = () => {
                      <Bar dataKey="breachedPicks" name="SLA Breaches" fill="#fa541c" radius={[4, 4, 0, 0]} />
                    </BarChart>
                  ) : reportType === 'qa_log' ? (
-                   <BarChart data={data}>
+                   <BarChart data={chartData}>
                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
                      <XAxis dataKey="vendor" stroke="#6C757D" tickLine={false} />
                      <YAxis stroke="#6C757D" tickLine={false} />
@@ -339,8 +655,8 @@ const WarehouseReports = () => {
                      <Bar dataKey="passed" name="Accepted Batches" fill="#52c41a" stackId="a" />
                      <Bar dataKey="failed" name="Rejected Batches" fill="#f5222d" stackId="a" />
                    </BarChart>
-                 ) : (
-                   <LineChart data={data}>
+                 ) : reportType === 'gate_log' ? (
+                   <LineChart data={chartData}>
                      <CartesianGrid strokeDasharray="3 3" />
                      <XAxis dataKey="date" stroke="#6C757D" tickLine={false} />
                      <YAxis label={{ value: 'Minutes', angle: -90, position: 'insideLeft' }} stroke="#6C757D" tickLine={false} />
@@ -349,6 +665,47 @@ const WarehouseReports = () => {
                      <Line type="monotone" dataKey="avgWaitMins" name="Avg Wait (Mins)" stroke="#F09000" strokeWidth={2} />
                      <Line type="monotone" dataKey="maxWaitMins" name="Max Wait (Mins)" stroke="#fa541c" strokeWidth={2} />
                    </LineChart>
+                 ) : reportType === 'material_issues_log' ? (
+                   <BarChart data={chartData}>
+                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                     <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
+                     <YAxis stroke="#6C757D" tickLine={false} />
+                     <Tooltip />
+                     <Legend />
+                     <Bar dataKey="count" name="Issues Count" fill="#F09000" radius={[4, 4, 0, 0]} />
+                     <Bar dataKey="totalQty" name="Total Qty Issued" fill="#1890ff" radius={[4, 4, 0, 0]} />
+                   </BarChart>
+                 ) : reportType === 'grn_log' ? (
+                   <BarChart data={chartData}>
+                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                     <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
+                     <YAxis stroke="#6C757D" tickLine={false} />
+                     <Tooltip />
+                     <Legend />
+                     <Bar dataKey="count" name="GRN Count" fill="#F09000" radius={[4, 4, 0, 0]} />
+                     <Bar dataKey="acceptedQty" name="Accepted Qty" fill="#52c41a" radius={[4, 4, 0, 0]} />
+                     <Bar dataKey="rejectedQty" name="Rejected Qty" fill="#f5222d" radius={[4, 4, 0, 0]} />
+                   </BarChart>
+                 ) : reportType === 'putaway_log' ? (
+                   <BarChart data={chartData}>
+                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                     <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
+                     <YAxis stroke="#6C757D" tickLine={false} />
+                     <Tooltip />
+                     <Legend />
+                     <Bar dataKey="count" name="Putaway Orders" fill="#F09000" radius={[4, 4, 0, 0]} />
+                     <Bar dataKey="completedItems" name="Completed Items" fill="#52c41a" radius={[4, 4, 0, 0]} />
+                   </BarChart>
+                 ) : (
+                   <BarChart data={chartData}>
+                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                     <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
+                     <YAxis stroke="#6C757D" tickLine={false} />
+                     <Tooltip />
+                     <Legend />
+                     <Bar dataKey="count" name="Inward Receipts" fill="#F09000" radius={[4, 4, 0, 0]} />
+                     <Bar dataKey="itemsCount" name="Total Inwarded Items" fill="#1890ff" radius={[4, 4, 0, 0]} />
+                   </BarChart>
                  )}
                </ResponsiveContainer>
              ) : (
@@ -362,8 +719,9 @@ const WarehouseReports = () => {
             <Table
               dataSource={data.map((item, index) => ({ ...item, key: index }))}
               columns={getColumns()}
-              pagination={false}
+              pagination={data.length > 10 ? { pageSize: 10 } : false}
               size="middle"
+              scroll={{ x: 1000 }}
             />
           </Card>
         </>
