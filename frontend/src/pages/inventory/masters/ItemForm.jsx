@@ -82,6 +82,7 @@ const ItemForm = () => {
   const [specialTransport, setSpecialTransport] = useState(false);
   const [warehouses, setWarehouses] = useState([]);
   const [selectedItemType, setSelectedItemType] = useState(undefined);
+  const [allSubClasses, setAllSubClasses] = useState([]);
 
   const watchedItemCode = Form.useWatch('item_code', form);
   const autoAsset = Form.useWatch('asset_code_auto', form);
@@ -106,13 +107,14 @@ const ItemForm = () => {
   const fetchLookups = useCallback(async () => {
     setLoading(true);
     try {
-      const [catRes, uomCatRes, uomRes, brandRes, typeRes, whRes] = await Promise.all([
+      const [catRes, uomCatRes, uomRes, brandRes, typeRes, whRes, subClassRes] = await Promise.all([
         api.get('/masters/categories', { params: { page_size: 500 } }),
         api.get('/masters/uom-categories', { params: { page_size: 100 } }),
         api.get('/masters/uom', { params: { page_size: 500 } }),
         api.get('/masters/brands', { params: { page_size: 500 } }),
         api.get('/masters/item-types', { params: { page_size: 100 } }),
         api.get('/masters/warehouses', { params: { page_size: 500, is_active: true } }),
+        api.get('/masters/item-sub-classes', { params: { page_size: 1000 } }),
       ]);
 
       const catData = catRes.data?.items || catRes.data?.data || catRes.data || [];
@@ -153,6 +155,9 @@ const ItemForm = () => {
         label: w.name,
         value: w.id,
       })));
+
+      const subClassesData = subClassRes.data?.items || subClassRes.data?.data || subClassRes.data || [];
+      setAllSubClasses(subClassesData);
 
       if (!isNew) {
         await fetchItemData(catData);
@@ -356,6 +361,7 @@ const ItemForm = () => {
     }
     if ('item_type' in changed) {
       setSelectedItemType(changed.item_type);
+      form.setFieldsValue({ item_sub_class_id: undefined });
     }
   };
 
@@ -918,7 +924,7 @@ const ItemForm = () => {
                     </Form.Item>
 
                     <Row gutter={16}>
-                      <Col span={8}>
+                      <Col span={6}>
                         <Form.Item name="brand" label="Brand">
                           <Select
                             showSearch
@@ -929,7 +935,7 @@ const ItemForm = () => {
                           />
                         </Form.Item>
                       </Col>
-                      <Col span={8}>
+                      <Col span={6}>
                         <Form.Item
                           name="item_type"
                           label="Item Class"
@@ -938,9 +944,28 @@ const ItemForm = () => {
                           <Select placeholder="Select class" options={itemTypeOptions} />
                         </Form.Item>
                       </Col>
-                      <Col span={8}>
+                      <Col span={6}>
+                        <Form.Item
+                          name="item_sub_class_id"
+                          label="Item Sub Class"
+                        >
+                          <Select
+                            placeholder="Select sub class"
+                            allowClear
+                            disabled={!selectedItemType}
+                            options={allSubClasses
+                              .filter((sc) => sc.item_type_name?.toLowerCase() === selectedItemType?.toLowerCase() && sc.is_active)
+                              .map((sc) => ({
+                                label: `${sc.name} (${sc.code})`,
+                                value: sc.id,
+                              }))
+                            }
+                          />
+                        </Form.Item>
+                      </Col>
+                      <Col span={6}>
                         <Form.Item name="is_kit" valuePropName="checked" label=" ">
-                          <Checkbox>Has Components / Kit</Checkbox>
+                          <Checkbox style={{ paddingTop: '24px' }}>Has Components / Kit</Checkbox>
                         </Form.Item>
                       </Col>
                     </Row>

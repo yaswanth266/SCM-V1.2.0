@@ -301,6 +301,7 @@ const ItemDetail = () => {
               <Descriptions.Item label="Readable Code">{item.readable_code || '-'}</Descriptions.Item>
               <Descriptions.Item label="Name">{item.name}</Descriptions.Item>
               <Descriptions.Item label="Class">{itemTypeName}</Descriptions.Item>
+              <Descriptions.Item label="Sub Class">{item.item_sub_class_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Has Components / Kit">{item.is_kit ? 'Yes' : 'No'}</Descriptions.Item>
               <Descriptions.Item label="Category">{item.category?.name || item.category_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Brand">{item.brand || '-'}</Descriptions.Item>

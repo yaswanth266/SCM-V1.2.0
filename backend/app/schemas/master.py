@@ -282,6 +282,53 @@ class ItemTypeResponse(BaseModel):
         return self
 
 
+# ===================== ITEM SUB CLASS =====================
+
+class ItemSubClassCreate(BaseModel):
+    item_type_id: int
+    name: str = Field(..., min_length=1, max_length=255)
+    code: str = Field(..., min_length=1, max_length=50)
+    description: Optional[str] = None
+    inventory: Optional[str] = None
+    depreciation: Optional[str] = None
+    example: Optional[str] = None
+    is_active: bool = True
+
+    @field_validator("name")
+    @classmethod
+    def val_name(cls, v):
+        return _require_non_empty(v, "Subclass name")[:255]
+
+    @field_validator("code")
+    @classmethod
+    def val_code(cls, v):
+        return _require_non_empty(v, "Subclass code")[:50]
+
+
+class ItemSubClassResponse(BaseModel):
+    id: int
+    item_type_id: int
+    item_type_name: Optional[str] = None
+    name: str
+    code: str
+    description: Optional[str] = None
+    inventory: Optional[str] = None
+    depreciation: Optional[str] = None
+    example: Optional[str] = None
+    is_active: bool
+    status: Optional[str] = None
+    model_config = {"from_attributes": True}
+
+    @model_validator(mode="after")
+    def compute_status(self):
+        self.status = "active" if self.is_active else "inactive"
+        item_type = getattr(self, "item_type", None)
+        if item_type and not self.item_type_name:
+            self.item_type_name = item_type.name
+        return self
+
+
+
 # ===================== FEATURE =====================
 
 class FeatureCreate(BaseModel):
@@ -433,6 +480,7 @@ class ItemCreate(BaseModel):
     initial_batch_expiry: Optional[date] = None
     asset_code: Optional[str] = None
     consumable_code: Optional[str] = None
+    item_sub_class_id: Optional[int] = None
 
     @field_validator("item_code")
     @classmethod
@@ -537,6 +585,7 @@ class ItemUpdate(BaseModel):
     valuation_method: Optional[str] = None
     asset_code: Optional[str] = None
     consumable_code: Optional[str] = None
+    item_sub_class_id: Optional[int] = None
     # Bug fix D-006 — compliance flags editable
     drug_schedule: Optional[str] = None
     is_schedule_h1: Optional[bool] = None
@@ -607,13 +656,13 @@ class ItemResponse(BaseModel):
     has_batch: bool
     has_serial: bool
     has_expiry: bool
-    shelf_life_days: int
-    safety_stock: Decimal
-    reorder_level: Decimal
-    reorder_qty: Decimal
-    purchase_price: Decimal
-    selling_price: Decimal
-    mrp: Decimal
+    shelf_life_days: int = 0
+    safety_stock: Optional[Decimal] = Decimal("0")
+    reorder_level: Optional[Decimal] = Decimal("0")
+    reorder_qty: Optional[Decimal] = Decimal("0")
+    purchase_price: Optional[Decimal] = Decimal("0")
+    selling_price: Optional[Decimal] = Decimal("0")
+    mrp: Optional[Decimal] = Decimal("0")
     # Bug fix BUG_0085/0086/0088 — expose tax fields so PO/Quotation/PR forms
     # can auto-fill them when an item is picked.
     tax_rate: Decimal = Decimal("0")
@@ -629,6 +678,10 @@ class ItemResponse(BaseModel):
     valuation_method: Optional[str] = None
     asset_code: Optional[str] = None
     consumable_code: Optional[str] = None
+    item_sub_class_id: Optional[int] = None
+    item_sub_class_name: Optional[str] = None
+    item_sub_class_code: Optional[str] = None
+    sub_class: Optional[ItemSubClassResponse] = None
     # Bug fix D-006 — compliance flags exposed (Wave 7 columns)
     drug_schedule: Optional[str] = None
     is_schedule_h1: Optional[bool] = None
@@ -659,6 +712,10 @@ class ItemResponse(BaseModel):
     @model_validator(mode="after")
     def compute_status(self):
         self.status = "active" if self.is_active else "inactive"
+        sub_class = getattr(self, "sub_class", None)
+        if sub_class:
+            self.item_sub_class_name = sub_class.name
+            self.item_sub_class_code = sub_class.code
         return self
 
 

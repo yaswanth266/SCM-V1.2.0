@@ -833,6 +833,7 @@ async def masters_redirect_alias(path: str, request: Request):
           path_lower.startswith("price-lists") or 
           path_lower.startswith("boms") or 
           path_lower.startswith("item-types") or 
+          path_lower.startswith("item-sub-classes") or 
           path_lower.startswith("features") or 
           path_lower.startswith("brands") or 
           path_lower.startswith("item-attributes") or 

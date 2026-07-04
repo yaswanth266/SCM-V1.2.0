@@ -88,6 +88,7 @@ const PriceListForm = lazy(() => import('./pages/inventory/masters/PriceListForm
 const Brands = lazy(() => import('./pages/inventory/masters/Brands'));
 const Features = lazy(() => import('./pages/inventory/masters/Features'));
 const ItemTypes = lazy(() => import('./pages/inventory/masters/ItemTypes'));
+const ItemSubClasses = lazy(() => import('./pages/inventory/masters/ItemSubClasses'));
 const ItemAttributes = lazy(() => import('./pages/inventory/masters/ItemAttributes'));
 const CategoryAttributeMapping = lazy(() => import('./pages/inventory/masters/CategoryAttributeMapping'));
 const Specs = lazy(() => import('./pages/inventory/masters/Specs'));
@@ -576,6 +577,7 @@ const App = () => {
             <Route path="/inventory/masters/brands" element={<KeyRoute requiredKey="inventory-masters-brands"><Brands /></KeyRoute>} />
             <Route path="/inventory/masters/features" element={<KeyRoute requiredKey="inventory-masters-features"><Features /></KeyRoute>} />
             <Route path="/inventory/masters/item-types" element={<KeyRoute requiredKey="inventory-masters-item-types"><ItemTypes /></KeyRoute>} />
+            <Route path="/inventory/masters/item-sub-classes" element={<KeyRoute requiredKey="inventory-masters-item-types"><ItemSubClasses /></KeyRoute>} />
             <Route path="/inventory/masters/item-attributes" element={<KeyRoute requiredKey="inventory-masters-item-attributes"><ItemAttributes /></KeyRoute>} />
             <Route path="/inventory/masters/category-attribute-mapping" element={<KeyRoute requiredKey="inventory-masters-category-attribute-mapping"><CategoryAttributeMapping /></KeyRoute>} />
             <Route path="/inventory/masters/specs" element={<KeyRoute requiredKey="inventory-masters-specs"><Specs /></KeyRoute>} />

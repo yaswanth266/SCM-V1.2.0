@@ -3164,6 +3164,7 @@ async def list_items(
             selectinload(Item.primary_uom),
             selectinload(Item.category),
             selectinload(Item.feature),
+            selectinload(Item.sub_class),
             selectinload(Item.kit_components).selectinload(MasterItemKitComponent.uom),
         )
         .offset(offset).limit(limit).order_by(Item.id.desc())
@@ -3213,6 +3214,7 @@ async def get_item(
         select(Item)
         .options(
             selectinload(Item.primary_uom),
+            selectinload(Item.sub_class),
             selectinload(Item.kit_components).selectinload(MasterItemKitComponent.uom),
         )
         .where(Item.id == item_id)
@@ -4264,7 +4266,7 @@ async def _ensure_item_types_table(db: AsyncSession) -> None:
 @router.get("/item-types")
 async def list_item_types(
     search: Optional[str] = None,
-    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=500),
+    page: int = Query(1, ge=1), page_size: int = Query(50, ge=1, le=10000),
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     try:
@@ -4369,6 +4371,155 @@ async def delete_item_type(
     it.is_active = False
     await db.flush()
     return {"success": True, "message": "Item type deactivated"}
+
+
+# --- Item Sub Classes CRUD ---
+
+from app.models.inventory_master import ItemSubClass
+from app.schemas.master import ItemSubClassCreate, ItemSubClassResponse
+from sqlalchemy import or_
+
+@router.get("/item-sub-classes")
+async def list_item_sub_classes(
+    search: Optional[str] = None,
+    item_type_id: Optional[int] = None,
+    is_active: Optional[bool] = None,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=10000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    q = select(ItemSubClass).options(selectinload(ItemSubClass.item_type)).order_by(ItemSubClass.name)
+    if item_type_id is not None:
+        q = q.where(ItemSubClass.item_type_id == item_type_id)
+    if is_active is not None:
+        q = q.where(ItemSubClass.is_active == is_active)
+    if search:
+        like = f"%{search}%"
+        q = q.where(
+            or_(
+                ItemSubClass.name.ilike(like),
+                ItemSubClass.code.ilike(like),
+                ItemSubClass.description.ilike(like),
+            )
+        )
+    count_q = q.order_by(None).with_only_columns(func.count(ItemSubClass.id))
+    total = await db.scalar(count_q)
+    offset, limit = paginate_params(page, page_size)
+    rows = (await db.execute(q.offset(offset).limit(limit))).scalars().all()
+    
+    items = []
+    for sc in rows:
+        items.append({
+            "id": sc.id,
+            "item_type_id": sc.item_type_id,
+            "item_type_name": sc.item_type.name if sc.item_type else None,
+            "name": sc.name,
+            "code": sc.code,
+            "description": sc.description,
+            "inventory": sc.inventory,
+            "depreciation": sc.depreciation,
+            "example": sc.example,
+            "is_active": sc.is_active,
+            "status": "active" if sc.is_active else "inactive",
+        })
+    return build_paginated_response(items, total or 0, page, page_size)
+
+
+@router.post("/item-sub-classes", status_code=201)
+async def create_item_sub_class(
+    payload: ItemSubClassCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    parent = await db.get(ItemType, payload.item_type_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent Item Class not found")
+        
+    existing = await db.execute(
+        select(ItemSubClass).where(
+            ItemSubClass.item_type_id == payload.item_type_id,
+            func.lower(ItemSubClass.code) == payload.code.strip().lower()
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Sub class with code '{payload.code}' already exists under this parent class")
+
+    sc = ItemSubClass(
+        item_type_id=payload.item_type_id,
+        name=payload.name.strip(),
+        code=payload.code.strip().upper(),
+        description=payload.description,
+        inventory=payload.inventory,
+        depreciation=payload.depreciation,
+        example=payload.example,
+        is_active=payload.is_active
+    )
+    db.add(sc)
+    await db.flush()
+    return {"id": sc.id, "message": "Item sub class created"}
+
+
+@router.put("/item-sub-classes/{sub_class_id}")
+async def update_item_sub_class(
+    sub_class_id: int,
+    payload: ItemSubClassCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    sc = await db.get(ItemSubClass, sub_class_id)
+    if not sc:
+        raise HTTPException(status_code=404, detail="Item sub class not found")
+        
+    parent = await db.get(ItemType, payload.item_type_id)
+    if not parent:
+        raise HTTPException(status_code=404, detail="Parent Item Class not found")
+
+    dup = await db.execute(
+        select(ItemSubClass).where(
+            ItemSubClass.item_type_id == payload.item_type_id,
+            func.lower(ItemSubClass.code) == payload.code.strip().lower(),
+            ItemSubClass.id != sub_class_id
+        )
+    )
+    if dup.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail=f"Sub class with code '{payload.code}' already exists under this parent class")
+
+    sc.item_type_id = payload.item_type_id
+    sc.name = payload.name.strip()
+    sc.code = payload.code.strip().upper()
+    sc.description = payload.description
+    sc.inventory = payload.inventory
+    sc.depreciation = payload.depreciation
+    sc.example = payload.example
+    sc.is_active = payload.is_active
+
+    await db.flush()
+    return {"success": True, "message": "Item sub class updated"}
+
+
+@router.delete("/item-sub-classes/{sub_class_id}")
+async def delete_item_sub_class(
+    sub_class_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    sc = await db.get(ItemSubClass, sub_class_id)
+    if not sc:
+        raise HTTPException(status_code=404, detail="Item sub class not found")
+
+    item_count = (await db.execute(
+        select(func.count(Item.id)).where(Item.item_sub_class_id == sub_class_id)
+    )).scalar() or 0
+    if item_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot delete item sub class referenced by {item_count} item(s). Move items first.",
+        )
+        
+    sc.is_active = False
+    await db.flush()
+    return {"success": True, "message": "Item sub class deactivated"}
 
 @router.get("/features")
 async def list_features(

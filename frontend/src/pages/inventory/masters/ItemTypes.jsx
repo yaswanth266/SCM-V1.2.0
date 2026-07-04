@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import {
   Button, Modal, Form, Input, Space, Popconfirm, Switch, message,
 } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { useNavigate } from 'react-router-dom';
+import { PlusOutlined, EditOutlined, DeleteOutlined, UnorderedListOutlined } from '@ant-design/icons';
 import PageHeader from '../../../components/PageHeader';
 import DataTable from '../../../components/DataTable';
 import StatusTag from '../../../components/StatusTag';
@@ -10,6 +11,7 @@ import api from '../../../config/api';
 import { getErrorMessage } from '../../../utils/helpers';
 
 const ItemTypes = () => {
+  const navigate = useNavigate();
   const [modalOpen, setModalOpen] = useState(false);
   const [editingRow, setEditingRow] = useState(null);
   const [form] = Form.useForm();
@@ -72,9 +74,10 @@ const ItemTypes = () => {
     { title: 'Active', dataIndex: 'is_active', width: 100, render: (v) => <StatusTag status={v ? 'active' : 'inactive'} /> },
     {
       title: 'Actions',
-      width: 120,
+      width: 160,
       render: (_, r) => (
         <Space>
+          <Button size="small" icon={<UnorderedListOutlined />} title="View Sub Classes" onClick={() => navigate(`/inventory/masters/item-sub-classes?item_type_id=${r.id}`)} />
           <Button size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
           <Popconfirm title="Deactivate this item class?" onConfirm={() => handleDelete(r.id)}>
             <Button size="small" danger icon={<DeleteOutlined />} />

@@ -1470,3 +1470,94 @@ async def ensure_asset_consumable_code_schema(session: AsyncSession) -> None:
             await conn.execute(text("ALTER TABLE serial_numbers ADD COLUMN consumable_code VARCHAR(100) NULL"))
         except Exception:
             pass
+
+
+async def ensure_item_sub_classes_schema(session: AsyncSession) -> None:
+    if not _should_sync("item_sub_classes_schema"):
+        return
+    conn = await session.connection()
+    from app.models.inventory_master import ItemSubClass
+    await conn.run_sync(ItemSubClass.__table__.create, checkfirst=True)
+
+    items_cols = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'items'
+        """))).all()
+    }
+    if "item_sub_class_id" not in items_cols:
+        try:
+            await conn.execute(text("ALTER TABLE items ADD COLUMN item_sub_class_id BIGINT NULL"))
+            await conn.execute(text("ALTER TABLE items ADD CONSTRAINT fk_items_item_sub_class_id FOREIGN KEY (item_sub_class_id) REFERENCES item_sub_classes (id) ON DELETE SET NULL"))
+        except Exception as exc:
+            print(f"Failed to add column item_sub_class_id to items: {exc}")
+
+    for type_name in ("license", "service"):
+        await conn.execute(
+            text("""
+                INSERT INTO item_types (name, is_active, created_at)
+                SELECT :name, 1, CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (SELECT 1 FROM item_types WHERE name = :name)
+            """),
+            {"name": type_name}
+        )
+
+    result = await conn.execute(text("SELECT id, name FROM item_types"))
+    type_map = {row[1].lower(): row[0] for row in result.all()}
+
+    subclass_seeds = [
+        {"class_name": "asset", "name": "Asset", "code": "AST", "desc": "Capital items having unique identity", "inv": "Yes", "dep": "Yes", "ex": "Ambulance, Laptop, ECG Machine"},
+        {"class_name": "asset", "name": "Accessory", "code": "ACC", "desc": "Supports another asset; may be replaceable", "inv": "Yes", "dep": "Usually No", "ex": "ECG Lead Cable, Printer Tray, Probe Cover"},
+        {"class_name": "asset", "name": "Tool", "code": "TOL", "desc": "Maintenance or operational tools", "inv": "Yes", "dep": "Sometimes", "ex": "Screwdriver, Torque Wrench, Multimeter"},
+        {"class_name": "asset", "name": "Returnable Item", "code": "RET", "desc": "Issued and expected to be returned", "inv": "Yes", "dep": "No", "ex": "Oxygen Cylinder, Crate, Instrument Box"},
+        
+        {"class_name": "consumable", "name": "Consumable", "code": "CON", "desc": "Used up during operations", "inv": "Yes", "dep": "No", "ex": "Gloves, Syringes, Reagents"},
+        
+        {"class_name": "asset", "name": "Spare Part", "code": "SPL", "desc": "Replacement parts used during maintenance", "inv": "Yes", "dep": "No", "ex": "Brake Pad, Tyre, Battery, Engine Belt"},
+        {"class_name": "consumable", "name": "Spare Part", "code": "SPL", "desc": "Replacement parts used during maintenance", "inv": "Yes", "dep": "No", "ex": "Brake Pad, Tyre, Battery, Engine Belt"},
+        
+        {"class_name": "asset", "name": "Kit / Assembly", "code": "KIT", "desc": "Collection of multiple materials issued together", "inv": "Yes", "dep": "Depends", "ex": "First Aid Kit, Sample Collection Kit"},
+        {"class_name": "consumable", "name": "Kit / Assembly", "code": "KIT", "desc": "Collection of multiple materials issued together", "inv": "Yes", "dep": "Depends", "ex": "First Aid Kit, Sample Collection Kit"},
+        
+        {"class_name": "asset", "name": "Packing Material", "code": "PKG", "desc": "Packaging and transportation materials", "inv": "Yes", "dep": "No", "ex": "Cartons, Bubble Wrap, Ice Box"},
+        {"class_name": "consumable", "name": "Packing Material", "code": "PKG", "desc": "Packaging and transportation materials", "inv": "Yes", "dep": "No", "ex": "Cartons, Bubble Wrap, Ice Box"},
+        
+        {"class_name": "asset", "name": "Stationery", "code": "STA", "desc": "Office supplies", "inv": "Yes", "dep": "No", "ex": "Pens, Registers, Printer Paper"},
+        {"class_name": "consumable", "name": "Stationery", "code": "STA", "desc": "Office supplies", "inv": "Yes", "dep": "No", "ex": "Pens, Registers, Printer Paper"},
+        
+        {"class_name": "asset", "name": "Personal Protective Equipment", "code": "PPE", "desc": "Safety equipment issued to employees", "inv": "Yes", "dep": "Usually No", "ex": "Lab Coat, Helmet, Safety Shoes"},
+        {"class_name": "consumable", "name": "Personal Protective Equipment", "code": "PPE", "desc": "Safety equipment issued to employees", "inv": "Yes", "dep": "Usually No", "ex": "Lab Coat, Helmet, Safety Shoes"},
+        
+        {"class_name": "license", "name": "Software / License", "code": "LIC", "desc": "Digital assets", "inv": "Optional", "dep": "Yes/Amortized", "ex": "Windows License, Antivirus"},
+        
+        {"class_name": "service", "name": "Service (Long-Term)", "code": "SER (Long-Term)", "desc": "Non-stock service item", "inv": "No", "dep": "No", "ex": "Calibration Service, AMC, Courier Charges"},
+        {"class_name": "service", "name": "Service (Short-Term)", "code": "SER (Short-Term)", "desc": "Non-stock service item", "inv": "No", "dep": "No", "ex": "Hamali Charges, Transportation"}
+    ]
+
+    for seed in subclass_seeds:
+        type_id = type_map.get(seed["class_name"])
+        if not type_id:
+            continue
+        await conn.execute(
+            text("""
+                INSERT INTO item_sub_classes (item_type_id, name, code, description, inventory, depreciation, example, is_active, created_at)
+                SELECT :type_id, :name, :code, :desc, :inv, :dep, :ex, 1, CURRENT_TIMESTAMP
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM item_sub_classes 
+                    WHERE item_type_id = :type_id AND code = :code
+                )
+            """),
+            {
+                "type_id": type_id,
+                "name": seed["name"],
+                "code": seed["code"],
+                "desc": seed["desc"],
+                "inv": seed["inv"],
+                "dep": seed["dep"],
+                "ex": seed["ex"]
+            }
+        )
+

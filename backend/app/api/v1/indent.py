@@ -227,6 +227,7 @@ async def list_indents(
                     )
                     user_pos_ids = list(pos_q.scalars().all())
 
+    actual_user_pos_ids = list(user_pos_ids)
     desc_pos_ids = []
     if user_pos_ids:
         # Find all positions with the same name to bridge template/instance duplicate records
@@ -289,9 +290,9 @@ async def list_indents(
             query = query.where(Indent.raised_by != current_user.id)
             count_query = count_query.where(Indent.raised_by != current_user.id)
 
-    if has_multiple_positions and user_pos_ids:
+    if has_multiple_positions and actual_user_pos_ids:
         from sqlalchemy import or_
-        active_position_id = user_pos_ids[0]
+        active_position_id = actual_user_pos_ids[0]
         position_filter = or_(
             Indent.raised_by != current_user.id,
             Indent.position_id == active_position_id,
@@ -523,13 +524,6 @@ async def get_indent(
         pos_count = pos_count_res.scalar() or 0
         has_multiple_positions = (pos_count > 1)
 
-    if is_originator and has_multiple_positions and user_pos_ids:
-        active_position_id = user_pos_ids[0]
-        if indent.position_id is not None and indent.position_id != active_position_id:
-            raise HTTPException(
-                status_code=403,
-                detail="Not authorized to view this indent under your current position"
-            )
 
     if not is_originator:
         from app.utils.dependencies import get_user_role_codes

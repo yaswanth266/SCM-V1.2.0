@@ -39,6 +39,7 @@ from app.utils.schema_sync import (
     ensure_consignment_schema,
     ensure_search_indexes,
     ensure_asset_consumable_code_schema,
+    ensure_item_sub_classes_schema,
 )
 from fastapi.exceptions import RequestValidationError
 
@@ -101,6 +102,7 @@ async def lifespan(app: FastAPI):
             await ensure_consignment_schema(session)
             await ensure_search_indexes(session)
             await ensure_asset_consumable_code_schema(session)
+            await ensure_item_sub_classes_schema(session)
             await session.commit()
     except Exception as exc:
         logger.warning("vendor type schema bootstrap failed at startup: %s", exc)

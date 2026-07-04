@@ -117,6 +117,7 @@ const Items = () => {
         'Name': it.name,
         'Category': it.category?.name || it.category_name || '',
         'Type': it.item_type || '',
+        'Sub Class': it.item_sub_class_name || '',
         'UOM': it.primary_uom?.name || it.primary_uom_name || '',
         'Safety Stock': it.safety_stock || 0,
         'Reorder Level': it.reorder_level || 0,
@@ -175,6 +176,13 @@ const Items = () => {
         const found = itemTypeOptions.find((t) => t.value === val);
         return found ? found.label : (val || '-');
       },
+    },
+    {
+      title: 'Item Sub Class',
+      dataIndex: 'item_sub_class_name',
+      key: 'item_sub_class',
+      width: 150,
+      render: (val) => val || '-',
     },
     {
       title: 'Primary UOM',

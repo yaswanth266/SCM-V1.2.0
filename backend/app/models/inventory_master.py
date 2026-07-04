@@ -106,6 +106,27 @@ class ItemType(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class ItemSubClass(Base):
+    __tablename__ = "item_sub_classes"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    item_type_id = Column(BigInteger, ForeignKey("item_types.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    code = Column(String(50), nullable=False)
+    description = Column(Text)
+    inventory = Column(String(50))
+    depreciation = Column(String(50))
+    example = Column(Text)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    item_type = relationship("ItemType", foreign_keys=[item_type_id])
+
+    __table_args__ = (
+        UniqueConstraint("item_type_id", "code", name="uq_item_type_subclass_code"),
+    )
+
+
 class Feature(Base):
     __tablename__ = "features"
 
@@ -160,6 +181,7 @@ class Item(Base):
     distributor = Column(String(255))
 
     feature_id = Column(BigInteger, ForeignKey("features.id"), nullable=True)
+    item_sub_class_id = Column(BigInteger, ForeignKey("item_sub_classes.id"), nullable=True)
     asset_code = Column(String(100), nullable=True)
     consumable_code = Column(String(100), nullable=True)
     ownership = Column(Enum("IT", "HR", "OP", "ADM", "FA", "FL", name="item_ownership"), nullable=True)
@@ -200,6 +222,7 @@ class Item(Base):
     brand_obj = relationship("Brand", foreign_keys=[brand])
     item_type_obj = relationship("ItemType", foreign_keys=[item_type])
     feature = relationship("Feature", foreign_keys=[feature_id])
+    sub_class = relationship("ItemSubClass", foreign_keys=[item_sub_class_id])
     packagings = relationship("ItemPackaging", back_populates="item", cascade="all, delete-orphan")
     kit_components = relationship("MasterItemKitComponent", back_populates="item", cascade="all, delete-orphan")
 
