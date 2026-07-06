@@ -267,8 +267,46 @@ async def allowed_keys_for_role(db: AsyncSession, role: Role) -> List[str]:
             ])
         elif key == "inventory-masters":
             mapped_keys.extend([
+                "inventory-masters-items",
+                "inventory-masters-packaging",
+                "inventory-masters-categories",
+                "inventory-masters-features",
+                "inventory-masters-user-material-mapping",
+                "inventory-masters-uom",
+                "inventory-masters-brands",
+                "inventory-masters-item-types",
+                "inventory-masters-item-sub-classes",
+                "inventory-masters-item-attributes",
+                "inventory-masters-category-attribute-mapping",
+                "inventory-masters-specs",
+                "inventory-masters-boms",
+                "inventory-masters-price-lists",
                 "inventory-masters-ap104-consumables",
                 "inventory-masters-ap104-install",
+                "inventory-masters-vehicles",
+            ])
+        elif key == "warehouse-masters":
+            mapped_keys.extend([
+                "warehouse-masters-warehouses",
+                "warehouse-masters-floor-plan",
+                "warehouse-masters-floor-plan-3d",
+            ])
+        elif key == "procurement-masters":
+            mapped_keys.extend([
+                "procurement-masters-vendors",
+                "procurement-masters-vendor-material-mapping",
+            ])
+        elif key == "masters-users":
+            mapped_keys.extend([
+                "settings-masters-users",
+            ])
+        elif key == "masters-user-groups":
+            mapped_keys.extend([
+                "settings-masters-user-groups",
+            ])
+        elif key == "masters-organization-structure":
+            mapped_keys.extend([
+                "settings-masters-organization-structure",
             ])
         elif key == "inventory-transactions":
             mapped_keys.extend([
