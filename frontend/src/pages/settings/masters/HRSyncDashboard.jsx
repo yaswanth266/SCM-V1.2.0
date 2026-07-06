@@ -96,40 +96,79 @@ const HRSyncDashboard = () => {
 
     try {
       const res = await api.post('/masters/employees/sync-api', null, { timeout: 300000 });
-      const data = res.data || {};
-      setLastSyncResult({
-        success: true,
-        fetched: data.fetched || 0,
-        apiTotal: data.api_total || data.fetched || 0,
-        created: data.created || 0,
-        updated: data.updated || 0,
-        linkedUsers: data.linked_users || 0,
-        roleLinks: data.role_links_applied || 0,
-        timestamp: new Date().toISOString(),
-      });
-
-      // Update source counts from response
-      if (data.api_total) {
-        setSourceCounts(prev => ({ ...prev, employees: data.api_total }));
-      }
-      if (data.positions_total) {
-        setSourceCounts(prev => ({ ...prev, positions: data.positions_total }));
+      const task_id = res.data?.task_id;
+      if (!task_id) {
+        throw new Error('No sync task started from the server');
       }
 
-      message.success(
-        `HR sync completed. Fetched ${data.fetched || 0} of ${data.api_total || data.fetched || 0}. ` +
-        `Created ${data.created || 0}, updated ${data.updated || 0}.`
-      );
+      // Start polling
+      const pollInterval = 3000; // 3 seconds
+      const maxAttempts = 100; // 5 minutes total
+      let attempts = 0;
 
-      // Refresh DB counts
-      await fetchDBCounts();
-      await fetchSyncHistory();
+      const runPoll = async () => {
+        try {
+          attempts++;
+          if (attempts > maxAttempts) {
+            throw new Error('Sync tracking timed out on client. The sync may still be running on the server.');
+          }
+
+          const statusRes = await api.get(`/masters/employees/sync-status/${task_id}`);
+          const taskData = statusRes.data || {};
+
+          if (taskData.status === 'completed') {
+            const data = taskData.result || {};
+            setLastSyncResult({
+              success: true,
+              fetched: data.fetched || 0,
+              apiTotal: data.api_total || data.fetched || 0,
+              created: data.created || 0,
+              updated: data.updated || 0,
+              linkedUsers: data.linked_users || 0,
+              roleLinks: data.role_links_applied || 0,
+              timestamp: new Date().toISOString(),
+            });
+
+            // Update source counts from response
+            if (data.api_total) {
+              setSourceCounts(prev => ({ ...prev, employees: data.api_total }));
+            }
+            if (data.positions_total) {
+              setSourceCounts(prev => ({ ...prev, positions: data.positions_total }));
+            }
+
+            message.success(
+              `HR sync completed. Fetched ${data.fetched || 0} of ${data.api_total || data.fetched || 0}. ` +
+              `Created ${data.created || 0}, updated ${data.updated || 0}.`
+            );
+
+            // Refresh DB counts
+            await fetchDBCounts();
+            await fetchSyncHistory();
+            setSyncing(false);
+          } else if (taskData.status === 'failed') {
+            throw new Error(taskData.error || 'Sync task failed on server');
+          } else {
+            // Still running or starting, schedule next poll
+            setTimeout(runPoll, pollInterval);
+          }
+        } catch (pollErr) {
+          const errMsg = getErrorMessage(pollErr);
+          setSyncError(errMsg);
+          setLastSyncResult({ success: false, error: errMsg, timestamp: new Date().toISOString() });
+          message.error(errMsg);
+          setSyncing(false);
+        }
+      };
+
+      // Kick off the first poll
+      setTimeout(runPoll, pollInterval);
+
     } catch (err) {
       const errMsg = getErrorMessage(err);
       setSyncError(errMsg);
       setLastSyncResult({ success: false, error: errMsg, timestamp: new Date().toISOString() });
       message.error(errMsg);
-    } finally {
       setSyncing(false);
     }
   };

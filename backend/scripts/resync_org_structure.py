@@ -92,10 +92,12 @@ async def drop_and_recreate_tables():
         await conn.commit()
 
     async with engine.begin() as conn:
+        await conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
         await conn.run_sync(Project.__table__.create)
         await conn.run_sync(Office.__table__.create)
         await conn.run_sync(Position.__table__.create)
         await conn.run_sync(Employee.__table__.create)
+        await conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
         print("  Recreated all tables with current model schema")
 
 
@@ -103,26 +105,65 @@ async def drop_and_recreate_tables():
 # Step 2 — Fetch all data from HRMS API
 # ---------------------------------------------------------------------------
 
-async def _fetch_all_paginated(client, headers, base_url, label):
-    all_rows = []
-    page = 1
-    while True:
-        url = f"{base_url}?page_size=200&page={page}"
+async def _fetch_page(client, url, headers, page, label):
+    for attempt in range(3):
         try:
             r = await client.get(url, headers=headers)
             r.raise_for_status()
             payload = r.json()
+            return payload.get("results") or payload.get("items") or []
         except Exception as e:
-            print(f"  Error {label} page {page}: {e}")
-            break
-        items = payload.get("results") or payload.get("items") or []
-        if not items:
-            break
-        all_rows.extend(items)
-        if not payload.get("next"):
-            break
-        page += 1
-        await asyncio.sleep(0.03)
+            if attempt == 2:
+                print(f"  Error fetching {label} page {page} (attempt {attempt+1}): {e}")
+            await asyncio.sleep(0.5 * (attempt + 1))
+    return []
+
+async def _fetch_all_paginated(client, headers, base_url, label):
+    print(f"  Fetching page 1 for {label}...")
+    url = f"{base_url}?page_size=200&page=1"
+    try:
+        r = await client.get(url, headers=headers)
+        r.raise_for_status()
+        payload = r.json()
+    except Exception as e:
+        print(f"  Error fetching {label} page 1: {e}")
+        return []
+
+    first_page_items = payload.get("results") or payload.get("items") or []
+    count = payload.get("count") or len(first_page_items)
+    
+    # Django REST Framework default page size (usually 10 or 20)
+    page_size = len(first_page_items) if first_page_items else 10
+    if page_size == 0:
+        return []
+        
+    import math
+    total_pages = math.ceil(count / page_size)
+    print(f"  {label.capitalize()} total count: {count}, page size: {page_size}, total pages: {total_pages}")
+    
+    all_rows = list(first_page_items)
+    if total_pages <= 1:
+        return all_rows
+
+    # Fetch other pages concurrently in batches of 10
+    batch_size = 10
+    tasks = []
+    for page in range(2, total_pages + 1):
+        url = f"{base_url}?page_size=200&page={page}"
+        tasks.append((page, url))
+
+    for i in range(0, len(tasks), batch_size):
+        batch = tasks[i:i + batch_size]
+        print(f"  Fetching {label} pages {batch[0][0]} to {batch[-1][0]} concurrently...")
+        futures = [
+            _fetch_page(client, url, headers, page, label)
+            for page, url in batch
+        ]
+        results = await asyncio.gather(*futures)
+        for items in results:
+            all_rows.extend(items)
+        await asyncio.sleep(0.05)
+
     return all_rows
 
 
@@ -147,6 +188,7 @@ async def fetch_all(client, headers):
 async def sync_all(db, employee_rows, position_rows, org_id):
     print("[4/5] Syncing projects, offices, positions, employees...")
     stats = {"projects": 0, "offices": 0, "positions": 0, "employees": 0}
+    created_parent_employees = set()
 
     # ---- PROJECTS ----
     project_map = {}
@@ -184,9 +226,9 @@ async def sync_all(db, employee_rows, position_rows, org_id):
             continue
         geo = off.get("geo_location") or {}
         existing = (await db.execute(
-            text("SELECT id FROM offices WHERE LOWER(name) = :name"),
+            text("SELECT id FROM offices WHERE LOWER(name) = :name LIMIT 1"),
             {"name": key}
-        )).scalar_one_or_none()
+        )).scalar()
         if existing:
             office_map[key] = existing
         else:
@@ -227,15 +269,129 @@ async def sync_all(db, employee_rows, position_rows, org_id):
 
         reporting_to = pos.get("reporting_to") or []
         parent_code = None
+        parent_id = None
         if reporting_to and isinstance(reporting_to, list) and len(reporting_to) > 0:
             rt = reporting_to[0]
             if isinstance(rt, dict):
-                parent_code = (_text(rt, "code") or "").upper()
+                import re
+                parent_name = rt.get("position_name") or rt.get("name") or ""
+                parent_code = rt.get("code") or rt.get("position_code")
+                if not parent_code and parent_name:
+                    parent_code = re.sub(r"[^a-zA-Z0-9]+", "-", parent_name).strip("-").upper()
+                else:
+                    parent_code = (parent_code or "").upper()
+                
+                if parent_code:
+                    parent_id = position_map.get(parent_code)
+                    if not parent_id:
+                        parent_id = (await db.execute(
+                            text("SELECT id FROM positions WHERE code = :code"),
+                            {"code": parent_code}
+                        )).scalar_one_or_none()
+                    
+                    if not parent_id:
+                        # Ensure parent office exists
+                        parent_office_id = _int(rt.get("office_id"))
+                        parent_office_name = rt.get("office_name")
+                        if parent_office_id or parent_office_name:
+                            off_exists = None
+                            if parent_office_id:
+                                off_exists = (await db.execute(
+                                    text("SELECT id FROM offices WHERE id = :oid LIMIT 1"),
+                                    {"oid": parent_office_id}
+                                )).scalar()
+                            if not off_exists and parent_office_name:
+                                off_exists = (await db.execute(
+                                    text("SELECT id FROM offices WHERE LOWER(name) = :name LIMIT 1"),
+                                    {"name": parent_office_name.lower().strip()}
+                                )).scalar()
+                            
+                            if not off_exists:
+                                print(f"  Creating parent office: {parent_office_name} (ID: {parent_office_id})")
+                                r_off = await db.execute(
+                                    text("""INSERT INTO offices
+                                            (id, name, level, created_at, updated_at)
+                                            VALUES (:id, :name, :level, NOW(), NOW())"""),
+                                    {"id": parent_office_id, "name": parent_office_name, "level": rt.get("office_level") or "CIRCLE OFFICE"}
+                                )
+                                parent_office_id = parent_office_id or r_off.lastrowid
+                                office_map[parent_office_name.lower().strip()] = parent_office_id
+                            else:
+                                parent_office_id = off_exists
+                        else:
+                            parent_office_id = None
+
+                        role_name = rt.get("role_name")
+                        role_id = None
+                        if role_name:
+                            role_id = (await db.execute(
+                                text("SELECT id FROM roles WHERE LOWER(name) = :name AND is_active = 1 LIMIT 1"),
+                                {"name": role_name.lower()}
+                            )).scalar()
+                        
+                        r_parent = await db.execute(
+                            text("""INSERT INTO positions
+                                    (name, code, role_name, role_id, level_name, level_rank,
+                                     department, section, office_id, status, created_at, updated_at)
+                                    VALUES (:name, :code, :role_name, :role_id, :level_name, :level_rank,
+                                            :department, :section, :office_id, 'active', NOW(), NOW())"""),
+                            {"name": parent_name, "code": parent_code, "role_name": role_name, "role_id": role_id,
+                             "level_name": rt.get("level_name"), "level_rank": _int(rt.get("level_rank")),
+                             "department": rt.get("department"), "section": rt.get("section"), "office_id": parent_office_id}
+                        )
+                        parent_id = r_parent.lastrowid
+                        position_map[parent_code] = parent_id
+                        stats["positions"] += 1
+
+                    # Create parent employee if not exists
+                    parent_emp_id = _int(rt.get("employee_id"))
+                    if parent_emp_id:
+                        if parent_emp_id in created_parent_employees:
+                            emp_exists = True
+                        else:
+                            emp_exists = (await db.execute(
+                                text("SELECT id FROM employees WHERE id = :eid LIMIT 1"),
+                                {"eid": parent_emp_id}
+                            )).scalar()
+                        
+                        if not emp_exists:
+                            created_parent_employees.add(parent_emp_id)
+                            emp_name = rt.get("employee_name") or parent_name
+                            emp_code = f"HR-EMP-{parent_emp_id}"
+                            await db.execute(
+                                text("""INSERT IGNORE INTO employees
+                                        (id, employee_code, name, status, position_id, created_at, updated_at)
+                                        VALUES (:id, :code, :name, 'Active', :pos_id, NOW(), NOW())"""),
+                                {"id": parent_emp_id, "code": emp_code, "name": emp_name, "pos_id": parent_id}
+                            )
+                            # INSERT IGNORE may skip if employee_code already exists on a different id.
+                            # Always look up the actual employee id by code for the UPDATE.
+                            actual_emp_id = (await db.execute(
+                                text("SELECT id FROM employees WHERE employee_code = :code LIMIT 1"),
+                                {"code": emp_code}
+                            )).scalar() or parent_emp_id
+                            # Update position employee_id using resolved id
+                            await db.execute(
+                                text("UPDATE positions SET employee_id = :eid WHERE id = :pid"),
+                                {"eid": actual_emp_id, "pid": parent_id}
+                            )
+                        else:
+                            # emp already exists by id - but resolve actual id by code to be safe
+                            emp_code = f"HR-EMP-{parent_emp_id}"
+                            actual_emp_id = (await db.execute(
+                                text("SELECT id FROM employees WHERE employee_code = :code LIMIT 1"),
+                                {"code": emp_code}
+                            )).scalar() or parent_emp_id
+                            # Update positions employee_id
+                            await db.execute(
+                                text("UPDATE positions SET employee_id = :eid WHERE id = :pid AND employee_id IS NULL"),
+                                {"eid": actual_emp_id, "pid": parent_id}
+                            )
 
         existing = (await db.execute(
-            text("SELECT id FROM positions WHERE code = :code"),
+            text("SELECT id FROM positions WHERE code = :code LIMIT 1"),
             {"code": code}
-        )).scalar_one_or_none()
+        )).scalar()
 
         if existing:
             position_map[code] = existing
@@ -339,21 +495,22 @@ async def sync_all(db, employee_rows, position_rows, org_id):
         position_id = position_map.get(pos_code)
 
         existing = (await db.execute(
-            text("SELECT id FROM employees WHERE employee_code = :code"),
+            text("SELECT id FROM employees WHERE employee_code = :code LIMIT 1"),
             {"code": code}
-        )).scalar_one_or_none()
+        )).scalar()
 
         if not existing:
             try:
+                emp_id = _int(row.get("id")) or _int(row.get("employee_id")) or _int(emp.get("id"))
                 r = await db.execute(
                     text("""INSERT INTO employees
-                        (employee_code, name, photo, status, dob, gender,
+                        (id, employee_code, name, photo, status, dob, gender,
                          pan_number, aadhaar_number, email, phone,
                          hire_date, bank_details, position_id, created_at, updated_at)
-                        VALUES (:code, :name, :photo, :status, :dob, :gender,
+                        VALUES (:id, :code, :name, :photo, :status, :dob, :gender,
                                 :pan, :aadhaar, :email, :phone,
                                 :hired, :bank_details, :pos_id, NOW(), NOW())"""),
-                    {"code": code, "name": name,
+                    {"id": emp_id, "code": code, "name": name,
                      "photo": _text(emp, "photo"),
                      "status": _text(emp, "status") or "Active",
                      "dob": _date(emp.get("dob")),
@@ -366,7 +523,7 @@ async def sync_all(db, employee_rows, position_rows, org_id):
                      "bank_details": row.get("bank_details"),
                      "pos_id": position_id}
                 )
-                emp_id = r.lastrowid
+                emp_id = emp_id or r.lastrowid
                 stats["employees"] += 1
 
                 if position_id and emp_id:
@@ -396,6 +553,23 @@ async def sync_all(db, employee_rows, position_rows, org_id):
 
     await db.commit()
 
+    # Populate employees.position_id for parent employees who were created with NULL position_id
+    try:
+        await db.execute(text("""
+            UPDATE employees e
+            JOIN (
+                SELECT p.employee_id, MIN(p.id) as min_pos_id
+                FROM positions p
+                WHERE p.employee_id IS NOT NULL
+                GROUP BY p.employee_id
+            ) t ON e.id = t.employee_id
+            SET e.position_id = t.min_pos_id
+            WHERE e.position_id IS NULL
+        """))
+        await db.commit()
+    except Exception as e:
+        print(f"  WARN: Could not populate employees.position_id: {e}")
+
     # Step 5 — Assigned employee from positions API
     print("\n[5/5] Applying assigned_employee from positions API...")
     mapped = 0
@@ -422,6 +596,26 @@ async def sync_all(db, employee_rows, position_rows, org_id):
             pass
     await db.commit()
     print(f"  Mapped {mapped} positions via assigned_employee.\n")
+
+    # Sync warehouses and link users (same as background webhook sync does)
+    try:
+        from app.services.office_warehouse_sync import sync_all_offices_to_warehouses
+        from app.services.employee_warehouse_sync import sync_all_position_employees
+        from app.api.v1.users import _link_users_to_employees, _apply_position_roles_to_linked_users
+        
+        print("Syncing offices to SCM warehouses...")
+        await sync_all_offices_to_warehouses(db, organization_id=org_id or 1)
+        print("Syncing employees to SCM warehouses...")
+        await sync_all_position_employees(db)
+        print("Linking users to employees...")
+        linked_users = await _link_users_to_employees(db)
+        print(f"  Linked {linked_users} users.")
+        print("Applying position roles to users...")
+        applied_roles = await _apply_position_roles_to_linked_users(db)
+        print(f"  Applied roles to {applied_roles} users.")
+        await db.commit()
+    except Exception as e:
+        print(f"  WARN: Error during post-sync warehousing/user linkage: {e}")
 
     # Summary
     print("=" * 60)

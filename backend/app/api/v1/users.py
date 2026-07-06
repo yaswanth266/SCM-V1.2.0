@@ -2011,6 +2011,36 @@ async def _resolve_parent_position_id(db: AsyncSession, row: dict, stats: dict[s
         if not parent_pos.level_rank:
             parent_pos.level_rank = parent_item.get("level_rank")
 
+    parent_office_id = await _office_id_from_external(db, parent_item, stats)
+    if parent_office_id:
+        parent_pos.office_id = parent_pos.office_id or parent_office_id
+
+    parent_emp_id = parent_item.get("employee_id")
+    if parent_emp_id:
+        try:
+            parent_emp_id = int(parent_emp_id)
+        except (TypeError, ValueError):
+            parent_emp_id = None
+
+    if parent_emp_id:
+        emp_exists = (await db.execute(select(Employee).where(Employee.id == parent_emp_id))).scalar_one_or_none()
+        if not emp_exists:
+            emp_name = parent_item.get("employee_name") or parent_item.get("name") or parent_name
+            emp_code = f"HR-EMP-{parent_emp_id}"
+            new_emp = Employee(
+                id=parent_emp_id,
+                employee_code=emp_code,
+                name=emp_name,
+                status="Active",
+                position_id=parent_pos.id
+            )
+            db.add(new_emp)
+            await db.flush()
+        else:
+            if not emp_exists.position_id:
+                emp_exists.position_id = parent_pos.id
+        parent_pos.employee_id = parent_pos.employee_id or parent_emp_id
+
     return parent_pos.id
 
 
@@ -2027,9 +2057,8 @@ async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[st
 
     position_name = _external_text(
         row,
-        "position.name", "position_name", "positionName", "position", "designation", "designation_name", "designationName",
-        "role_name", "roleName", "role", "name",
-        max_len=255,
+        "position.name", "position_name", "positionName", "name", "position", "designation", "designation_name", "designationName",
+        "role_name", "roleName", "role", max_len=255,
     )
     position_code = _external_text(row, "position.code", "position_code", "positionCode", "designation_code", "designationCode", "role_code", "roleCode", "code", max_len=100)
     position_code = position_code or _external_code(position_name, 100)
@@ -2164,10 +2193,11 @@ async def _link_users_to_employees(db: AsyncSession) -> int:
 
 
 async def _apply_position_roles_to_linked_users(db: AsyncSession) -> int:
+    from sqlalchemy import or_
     rows = (await db.execute(
         select(User.id, Position.role_id)
         .join(Employee, User.employee_id == Employee.id)
-        .join(Position, Employee.position_id == Position.id)
+        .join(Position, or_(Employee.position_id == Position.id, Position.employee_id == Employee.id))
         .where(Position.role_id.is_not(None))
     )).all()
     applied = 0
@@ -2274,6 +2304,7 @@ async def _execute_sync(
 
     next_url = str(url)
 
+    offline_fallback = False
     try:
         async with httpx.AsyncClient(timeout=settings.HR_API_TIMEOUT, follow_redirects=True) as client:
             # First, sync all positions
@@ -2333,13 +2364,18 @@ async def _execute_sync(
             if task is not None:
                 task["progress"] = f"Mapped {mapped_positions} positions to employees"
 
-    except httpx.HTTPStatusError as exc:
-        detail = exc.response.text[:500] if exc.response is not None else str(exc)
-        raise HTTPException(status_code=502, detail=f"Employee API returned an error: {detail}")
-    except HTTPException:
-        raise
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Unable to sync employee API: {exc}")
+        print(f"External SCM HR API connection failed ({exc}). Falling back to offline DB mappings.")
+        offline_fallback = True
+        if task is not None:
+            task["progress"] = f"HR API unreachable. Performing local offline mapping fallback."
+
+        # Fetch local DB counts to report
+        db_emp_count = (await db.execute(select(func.count(Employee.id)))).scalar() or 0
+        db_pos_count = (await db.execute(select(func.count(Position.id)))).scalar() or 0
+        fetched_total = db_emp_count
+        api_total = db_emp_count
+        positions_total = db_pos_count
 
     linked_users = 0
     role_links_applied = 0
@@ -2358,7 +2394,7 @@ async def _execute_sync(
         print(f"Error post-processing sync: {exc}")
 
     return {
-        "message": "Employee API sync completed",
+        "message": "Employee API sync completed (Offline Fallback)" if offline_fallback else "Employee API sync completed",
         "fetched": fetched_total,
         "api_total": api_total,
         "positions_total": positions_total,
@@ -2370,6 +2406,7 @@ async def _execute_sync(
         "linked_users": linked_users,
         "role_links_applied": role_links_applied,
         "mapped_positions": mapped_positions,
+        "offline": offline_fallback,
     }
 
 

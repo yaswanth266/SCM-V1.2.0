@@ -517,51 +517,6 @@ const AppLauncher = () => {
           );
         })}
       </div>
-
-      <div style={{
-        marginTop: 40,
-        padding: 24,
-        borderRadius: 16,
-        backgroundColor: '#FFFFFF',
-        border: '1px solid #E2E8F0',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: 24,
-        boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -1px rgba(0,0,0,0.03)'
-      }}>
-        <div style={{ flex: '1 1 300px' }}>
-          <h2 style={{ fontSize: 18, color: '#4A1060', marginBottom: 8, fontWeight: '700' }}>Get SCM Mobile App</h2>
-          <p style={{ fontSize: 13, color: '#64748B', lineHeight: '20px', marginBottom: 16 }}>
-            Access SCM features on the go. Perform consignment acknowledgements, warehouse transactions, and stock updates directly from your mobile device.
-          </p>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <Button 
-              type="primary" 
-              icon={<PlayCircleOutlined />} 
-              style={{ backgroundColor: '#481890', borderColor: '#481890', height: 40, borderRadius: 8, fontWeight: '600' }}
-              onClick={() => window.open('/downloads/scm-mobile.apk', '_blank')}
-            >
-              Download Android APK
-            </Button>
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
-          <div style={{ textAlign: 'center' }}>
-            <img 
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=110x110&data=${encodeURIComponent(
-                window.location.origin.includes(':3000') || window.location.origin.includes(':5173')
-                  ? `http://${window.location.hostname}:8000`
-                  : window.location.origin
-              )}`} 
-              alt="Scan to configure" 
-              style={{ width: 110, height: 110, padding: 6, border: '1px solid #E2E8F0', borderRadius: 8, backgroundColor: '#FFFFFF' }}
-            />
-            <div style={{ fontSize: 11, fontWeight: '600', color: '#64748B', marginTop: 6 }}>Scan to Connect</div>
-          </div>
-        </div>
-      </div>
     </div>
 
   );

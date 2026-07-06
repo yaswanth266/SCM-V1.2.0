@@ -52,6 +52,8 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
   const [uomOptions, setUomOptions] = useState([]);
   const [userOptions, setUserOptions] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [vehiclesLoading, setVehiclesLoading] = useState(false);
 
   // item_id -> available qty (in the currently-selected warehouse). Populated
   // when an indent is picked or when the warehouse changes; surfaces inline so
@@ -523,6 +525,42 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
     }
   }, [form, refreshStockForItems, fetchItemStockDetails, message]);
 
+  const loadVehicleOptions = useCallback(async (search = '') => {
+    setVehiclesLoading(true);
+    try {
+      const res = await api.get('/masters/vehicles', {
+        params: { is_active: true, search, limit: 100 },
+      });
+      const data = res.data || [];
+      
+      const currentVal = form.getFieldValue('vehicle_code');
+      if (currentVal) {
+        setVehicles((prev) => {
+          const matched = prev.find((v) => v.vehicle_code === currentVal);
+          if (matched && !data.some((v) => v.vehicle_code === currentVal)) {
+            return [matched, ...data];
+          }
+          return data;
+        });
+      } else {
+        setVehicles(data);
+      }
+    } catch (err) {
+      console.error('Error loading vehicles:', err);
+    } finally {
+      setVehiclesLoading(false);
+    }
+  }, [form]);
+
+  const handleVehicleChange = (val) => {
+    const matched = vehicles.find((v) => v.vehicle_code === val);
+    if (matched) {
+      form.setFieldsValue({ vehicle_number: matched.vehicle_number });
+    } else {
+      form.setFieldsValue({ vehicle_number: '' });
+    }
+  };
+
   // --- Fetch existing record ---
   const fetchRecord = useCallback(async () => {
     setLoading(true);
@@ -545,6 +583,10 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         project_id: data.project_id || undefined,
         template_type: data.template_type || undefined,
       });
+
+      if (data.vehicle_code) {
+        loadVehicleOptions(data.vehicle_code);
+      }
 
       const items = (data.items || []).map((item, idx) => ({
         key: item.id || Date.now() + idx,
@@ -624,13 +666,14 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
     } finally {
       setLoading(false);
     }
-  }, [id, form, location.search, navigate, refreshStockForItems, fetchItemStockDetails, message]);
+  }, [id, form, location.search, navigate, refreshStockForItems, fetchItemStockDetails, message, loadVehicleOptions]);
 
   // Init
   useEffect(() => {
     loadLookups();
     loadIndentOptions();
     loadMROptions();
+    loadVehicleOptions();
     if (!isNew) {
       fetchRecord();
     } else {
@@ -645,7 +688,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         prefillFromIndent(Number(indentId));
       }
     }
-  }, [id, isNew, fetchRecord, loadLookups, loadIndentOptions, loadMROptions, form, location.search, prefillFromIndent]);
+  }, [id, isNew, fetchRecord, loadLookups, loadIndentOptions, loadMROptions, form, location.search, prefillFromIndent, loadVehicleOptions]);
 
   useEffect(() => {
     if (templateType) {
@@ -1851,12 +1894,26 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
           <Row gutter={16}>
             <Col span={8}>
               <Form.Item name="vehicle_code" label="Vehicle Code">
-                <Input placeholder={templateType ? "Enter vehicle code" : "Auto-loaded from Indent"} disabled={!templateType} style={!templateType ? { color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' } : {}} />
+                {templateType ? (
+                  <Select
+                    placeholder="Select vehicle code"
+                    allowClear
+                    showSearch
+                    filterOption={false}
+                    onSearch={loadVehicleOptions}
+                    onFocus={() => loadVehicleOptions()}
+                    onChange={handleVehicleChange}
+                    loading={vehiclesLoading}
+                    options={vehicles.map((v) => ({ label: `${v.vehicle_code} (${v.vehicle_number})`, value: v.vehicle_code }))}
+                  />
+                ) : (
+                  <Input placeholder="Auto-loaded from Indent" disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
+                )}
               </Form.Item>
             </Col>
             <Col span={8}>
               <Form.Item name="vehicle_number" label="Vehicle Number">
-                <Input placeholder={templateType ? "Enter vehicle number" : "Auto-loaded from Indent"} disabled={!templateType} style={!templateType ? { color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' } : {}} />
+                <Input placeholder={templateType ? "Auto-populated from code" : "Auto-loaded from Indent"} disabled={!templateType} style={!templateType ? { color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' } : {}} />
               </Form.Item>
             </Col>
             <Col span={8}>

@@ -219,12 +219,52 @@ const Users = () => {
   };
 
   const handleSyncEmployees = async () => {
+    const hideLoading = message.loading('HR API sync in progress...', 0);
     try {
       const res = await api.post('/masters/employees/sync-api', null, { timeout: 180000 });
-      const data = res.data || {};
-      message.success(`HR sync completed. Fetched ${data.fetched || 0}, created ${data.created || 0}, updated ${data.updated || 0}, role links ${data.role_links_applied || 0}.`);
-      setRefreshKey((k) => k + 1);
+      const task_id = res.data?.task_id;
+      if (!task_id) {
+        hideLoading();
+        throw new Error('No sync task started from the server');
+      }
+
+      // Start polling
+      const pollInterval = 3000;
+      const maxAttempts = 100;
+      let attempts = 0;
+
+      const runPoll = async () => {
+        try {
+          attempts++;
+          if (attempts > maxAttempts) {
+            hideLoading();
+            throw new Error('Sync tracking timed out on client. The sync may still be running on the server.');
+          }
+
+          const statusRes = await api.get(`/masters/employees/sync-status/${task_id}`);
+          const taskData = statusRes.data || {};
+
+          if (taskData.status === 'completed') {
+            hideLoading();
+            const data = taskData.result || {};
+            message.success(`HR sync completed. Fetched ${data.fetched || 0}, created ${data.created || 0}, updated ${data.updated || 0}, role links ${data.role_links_applied || 0}.`);
+            setRefreshKey((k) => k + 1);
+          } else if (taskData.status === 'failed') {
+            hideLoading();
+            throw new Error(taskData.error || 'Sync task failed on server');
+          } else {
+            setTimeout(runPoll, pollInterval);
+          }
+        } catch (pollErr) {
+          hideLoading();
+          message.error(getErrorMessage(pollErr));
+        }
+      };
+
+      setTimeout(runPoll, pollInterval);
+
     } catch (err) {
+      hideLoading();
       message.error(getErrorMessage(err));
     }
   };
