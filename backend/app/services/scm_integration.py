@@ -139,6 +139,15 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
             db.add(ack)
             await db.flush()
 
+            try:
+                from app.services.webhook_service import trigger_acknowledgement_webhook
+                import asyncio
+                asyncio.create_task(trigger_acknowledgement_webhook(ack.id))
+            except Exception as webhook_err:
+                import logging
+                logging.getLogger(__name__).warning("Failed to trigger webhook for auto-acknowledgement: %s", webhook_err)
+
+
             # Create IndentAcknowledgementItem lines and determine parent indent fulfillment status
             from sqlalchemy import func
             all_items_fully_acknowledged = True

@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     HR_API_TIMEOUT: int = 30
     HRMS_WEBHOOK_SECRET: str = ""
 
+    # AIMS Webhook
+    AIMS_WEBHOOK_URL: str = ""
+    AIMS_WEBHOOK_SECRET: str = ""
+
     @property
     def effective_refresh_token_days(self) -> int:
         """Clamp env-driven refresh TTL to the documented upper bound."""

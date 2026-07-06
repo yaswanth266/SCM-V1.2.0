@@ -132,6 +132,7 @@ const PurchaseReturns = lazy(() => import('./pages/warehouse/PurchaseReturns'));
 const PurchaseReturnForm = lazy(() => import('./pages/warehouse/PurchaseReturnForm'));
 const MaterialIssues = lazy(() => import('./pages/warehouse/MaterialIssues'));
 const MaterialIssueForm = lazy(() => import('./pages/warehouse/MaterialIssueForm'));
+const TemplateMaterialIssueList = lazy(() => import('./pages/warehouse/TemplateMaterialIssueList'));
 const Picklist = lazy(() => import('./pages/warehouse/Picklist'));
 const PicklistForm = lazy(() => import('./pages/warehouse/PicklistForm'));
 const OutwardLabelling = lazy(() => import('./pages/warehouse/OutwardLabelling'));
@@ -509,6 +510,12 @@ const App = () => {
             <Route path="/warehouse/material-issues" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssues /></KeyRoute>} />
             <Route path="/warehouse/material-issues/new" element={<PermissionRoute module="warehouse"><MaterialIssueForm /></PermissionRoute>} />
             <Route path="/warehouse/material-issues/:id" element={<PermissionRoute module="warehouse"><MaterialIssueForm /></PermissionRoute>} />
+            <Route path="/warehouse/material-issues/ap104-consumables" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-consumables"><TemplateMaterialIssueList templateType="consumables" title="AP 104 DP / Consumables Issues" /></KeyRoute>} />
+            <Route path="/warehouse/material-issues/ap104-consumables/new" element={<PermissionRoute module="warehouse"><MaterialIssueForm templateType="consumables" title="Create AP 104 DP / Consumables Material Issue" /></PermissionRoute>} />
+            <Route path="/warehouse/material-issues/ap104-consumables/:id" element={<PermissionRoute module="warehouse"><MaterialIssueForm templateType="consumables" title="AP 104 DP / Consumables Material Issue" /></PermissionRoute>} />
+            <Route path="/warehouse/material-issues/ap104-install" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-install"><TemplateMaterialIssueList templateType="install" title="AP 104 DP Install Issues" /></KeyRoute>} />
+            <Route path="/warehouse/material-issues/ap104-install/new" element={<PermissionRoute module="warehouse"><MaterialIssueForm templateType="install" title="Create AP 104 DP Install Material Issue" /></PermissionRoute>} />
+            <Route path="/warehouse/material-issues/ap104-install/:id" element={<PermissionRoute module="warehouse"><MaterialIssueForm templateType="install" title="AP 104 DP Install Material Issue" /></PermissionRoute>} />
             <Route path="/warehouse/picklist" element={<KeyRoute requiredKey="warehouse-picklist"><Picklist /></KeyRoute>} />
             <Route path="/warehouse/picklist/new" element={<KeyRoute requiredKey="warehouse-picklist"><PicklistForm /></KeyRoute>} />
             <Route path="/warehouse/qc-outward" element={<KeyRoute requiredKey="warehouse-qc-outward"><QCOutward /></KeyRoute>} />
@@ -584,12 +591,12 @@ const App = () => {
             <Route path="/inventory/masters/boms" element={<KeyRoute requiredKey="inventory-masters-boms"><BOMs /></KeyRoute>} />
             <Route path="/inventory/masters/boms/new" element={<KeyRoute requiredKey="inventory-masters-boms"><BOMForm /></KeyRoute>} />
             <Route path="/inventory/masters/boms/:id/edit" element={<KeyRoute requiredKey="inventory-masters-boms"><BOMForm /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-consumables" element={<KeyRoute requiredKey="inventory-masters-ap104-consumables"><ProjectIndentTemplateList templateType="consumables" title="AP 104 DP / Consumables - Indent Master" /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-consumables/new" element={<KeyRoute requiredKey="inventory-masters-ap104-consumables"><ProjectIndentTemplateForm templateType="consumables" title="AP 104 DP / Consumables - Indent Master" /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-consumables/edit/:projectId" element={<KeyRoute requiredKey="inventory-masters-ap104-consumables"><ProjectIndentTemplateForm templateType="consumables" title="AP 104 DP / Consumables - Indent Master" /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-install" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateList templateType="install" title="AP 104 DP Install - Indent Master" /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-install/new" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateForm templateType="install" title="AP 104 DP Install - Indent Master" /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-install/edit/:projectId" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateForm templateType="install" title="AP 104 DP Install - Indent Master" /></KeyRoute>} />
+            <Route path="/inventory/masters/ap104-consumables" element={<KeyRoute requiredKey="inventory-masters-ap104-consumables"><ProjectIndentTemplateList templateType="consumables" title="AP 104 DP / Consumables Master" /></KeyRoute>} />
+            <Route path="/inventory/masters/ap104-consumables/new" element={<KeyRoute requiredKey="inventory-masters-ap104-consumables"><ProjectIndentTemplateForm templateType="consumables" title="AP 104 DP / Consumables Master" /></KeyRoute>} />
+            <Route path="/inventory/masters/ap104-consumables/edit/:projectId" element={<KeyRoute requiredKey="inventory-masters-ap104-consumables"><ProjectIndentTemplateForm templateType="consumables" title="AP 104 DP / Consumables Master" /></KeyRoute>} />
+            <Route path="/inventory/masters/ap104-install" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateList templateType="install" title="AP 104 DP Install Master" /></KeyRoute>} />
+            <Route path="/inventory/masters/ap104-install/new" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateForm templateType="install" title="AP 104 DP Install Master" /></KeyRoute>} />
+            <Route path="/inventory/masters/ap104-install/edit/:projectId" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateForm templateType="install" title="AP 104 DP Install Master" /></KeyRoute>} />
             <Route path="/inventory/masters/vehicles" element={<KeyRoute requiredKey="inventory-masters-items"><Vehicles /></KeyRoute>} />
             <Route path="/inventory/masters/price-lists" element={<KeyRoute requiredKey="inventory-masters-price-lists"><PriceLists /></KeyRoute>} />
 

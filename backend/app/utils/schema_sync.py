@@ -1208,6 +1208,14 @@ async def ensure_material_issue_schema(session: AsyncSession) -> None:
         await conn.execute(text("ALTER TABLE material_issues ADD COLUMN vehicle_number VARCHAR(50) NULL"))
     if "service_code" not in columns:
         await conn.execute(text("ALTER TABLE material_issues ADD COLUMN service_code VARCHAR(50) NULL"))
+    if "template_type" not in columns:
+        await conn.execute(text("ALTER TABLE material_issues ADD COLUMN template_type VARCHAR(50) NULL"))
+    if "project_id" not in columns:
+        await conn.execute(text("ALTER TABLE material_issues ADD COLUMN project_id BIGINT NULL"))
+        try:
+            await conn.execute(text("ALTER TABLE material_issues ADD CONSTRAINT fk_material_issues_project_id FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE SET NULL"))
+        except Exception:
+            pass
 
     try:
         await conn.execute(text("""

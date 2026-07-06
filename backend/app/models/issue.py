@@ -23,12 +23,15 @@ class MaterialIssue(Base):
     vehicle_code = Column(String(50), nullable=True)
     vehicle_number = Column(String(50), nullable=True)
     service_code = Column(String(50), nullable=True)
+    template_type = Column(String(50), nullable=True)
+    project_id = Column(BigInteger, ForeignKey("projects.id"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     # Wave 5 — needed for ordering / "last edited" UX (BUG-ISS-014).
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     material_request = relationship("MaterialRequest")
     indent = relationship("Indent")
+    project = relationship("Project")
     warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
     destination_warehouse = relationship("Warehouse", foreign_keys=[destination_warehouse_id])
     issued_to_user = relationship("User", foreign_keys=[issued_to])

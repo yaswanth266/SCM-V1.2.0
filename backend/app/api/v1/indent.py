@@ -2266,4 +2266,13 @@ async def _create_acknowledgement(
         import logging
         logging.getLogger(__name__).warning("Failed to create notification for _create_acknowledgement: %s", notif_err)
 
+    try:
+        from app.services.webhook_service import trigger_acknowledgement_webhook
+        import asyncio
+        asyncio.create_task(trigger_acknowledgement_webhook(ack.id))
+    except Exception as webhook_err:
+        import logging
+        logging.getLogger(__name__).warning("Failed to trigger webhook for acknowledgement: %s", webhook_err)
+
     return {"id": ack.id, "status": ack_status, "message": "Acknowledgement recorded successfully"}
+

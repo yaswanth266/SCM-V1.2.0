@@ -24,6 +24,8 @@ export const MODULE_NAVS = {
           { label: 'Quality Inspection', path: '/warehouse/quality-inspection' },
           { label: 'Putaway', path: '/warehouse/putaway' },
           { label: 'Material Issues', path: '/warehouse/material-issues' },
+          { label: 'AP 104 DP / Consumables', path: '/warehouse/material-issues/ap104-consumables' },
+          { label: 'AP 104 DP Install', path: '/warehouse/material-issues/ap104-install' },
           { label: 'Purchase Returns', path: '/warehouse/purchase-returns' }
         ]
       },
@@ -54,8 +56,8 @@ export const MODULE_NAVS = {
           { label: 'Specs', path: '/inventory/masters/specs' },
           { label: 'BOM', path: '/inventory/masters/boms' },
           { label: 'Price Lists', path: '/inventory/masters/price-lists' },
-          { label: 'AP 104 DP / Consumables - Indent', path: '/inventory/masters/ap104-consumables' },
-          { label: 'AP 104 DP Install - Indent', path: '/inventory/masters/ap104-install' },
+          { label: 'AP 104 DP / Consumables', path: '/inventory/masters/ap104-consumables' },
+          { label: 'AP 104 DP Install', path: '/inventory/masters/ap104-install' },
           { label: 'Vehicles', path: '/inventory/masters/vehicles' }
         ]
 

@@ -2628,6 +2628,7 @@ async def list_material_issues(
     status: str = Query(None),
     warehouse_id: int = Query(None),
     department: str = Query(None),
+    template_type: str = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2740,6 +2741,9 @@ async def list_material_issues(
     if department:
         query = query.where(MaterialIssue.department == department)
         count_query = count_query.where(MaterialIssue.department == department)
+    if template_type:
+        query = query.where(MaterialIssue.template_type == template_type)
+        count_query = count_query.where(MaterialIssue.template_type == template_type)
 
     query = apply_search_filter(query, MaterialIssue, search, ["issue_number", "department"])
     count_query = apply_search_filter(count_query, MaterialIssue, search, ["issue_number", "department"])
@@ -2754,9 +2758,11 @@ async def list_material_issues(
         selectinload(MaterialIssue.warehouse),
         selectinload(MaterialIssue.destination_warehouse),
         selectinload(MaterialIssue.issued_to_user),
+        selectinload(MaterialIssue.project),
     )
     result = await db.execute(query.offset(offset).limit(limit).order_by(MaterialIssue.id.desc()))
     issues = result.scalars().all()
+
 
     # Bulk-load all batches referenced across all MIs to avoid N+1
     all_batch_ids = [
@@ -2830,6 +2836,9 @@ async def list_material_issues(
             "vehicle_code": mi.vehicle_code,
             "vehicle_number": mi.vehicle_number,
             "service_code": mi.service_code,
+            "template_type": mi.template_type,
+            "project_id": mi.project_id,
+            "project_name": mi.project.name if mi.project else None,
             "items": [],
         }
         for item in mi.items:
@@ -3220,6 +3229,8 @@ async def create_material_issue(
                 vehicle_code=v_code,
                 vehicle_number=v_num,
                 service_code=s_code,
+                template_type=payload.template_type,
+                project_id=payload.project_id,
             )
             db.add(mi)
             await db.flush()
@@ -3631,6 +3642,7 @@ async def get_material_issue(
             selectinload(MaterialIssue.warehouse),
             selectinload(MaterialIssue.destination_warehouse),
             selectinload(MaterialIssue.issued_to_user),
+            selectinload(MaterialIssue.project),
         )
         .where(MaterialIssue.id == issue_id)
     )
@@ -3735,6 +3747,9 @@ async def get_material_issue(
     response = MaterialIssueResponse.model_validate(mi).model_dump()
     response["warehouse_name"] = mi.warehouse.name if mi.warehouse else None
     response["destination_warehouse_name"] = mi.destination_warehouse.name if mi.destination_warehouse else None
+    response["template_type"] = mi.template_type
+    response["project_id"] = mi.project_id
+    response["project_name"] = mi.project.name if mi.project else None
     response["issued_to_name"] = (
         f"{mi.issued_to_user.first_name} {mi.issued_to_user.last_name or ''}".strip()
         or mi.issued_to_user.username
@@ -3833,6 +3848,10 @@ async def update_material_issue(
         mi.vehicle_number = payload.vehicle_number
     if payload.service_code is not None:
         mi.service_code = payload.service_code
+    if payload.template_type is not None:
+        mi.template_type = payload.template_type
+    if payload.project_id is not None:
+        mi.project_id = payload.project_id
 
     # Resolve central warehouse
     from app.models.warehouse import Warehouse as _Wh, WarehouseConfig
@@ -6428,4 +6447,38 @@ async def get_warehouse_structure(
         tree.append(loc_data)
 
     return {"warehouse_id": warehouse_id, "locations": tree}
+
+
+class SerialNumberAssetCodePayload(BaseModel):
+    asset_code: str
+
+@router.post("/serial-numbers/{serial_id}/assign-asset-code")
+async def assign_serial_asset_code(
+    serial_id: int,
+    payload: SerialNumberAssetCodePayload,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Assign or update the asset_code of a SerialNumber, and trigger the AIMS webhook."""
+    stmt = select(SerialNumber).where(SerialNumber.id == serial_id)
+    result = await db.execute(stmt)
+    sn = result.scalar_one_or_none()
+    if not sn:
+        raise HTTPException(status_code=404, detail="SerialNumber record not found")
+
+    sn.asset_code = payload.asset_code
+    db.add(sn)
+    await db.flush()
+
+    # Trigger webhook
+    try:
+        from app.services.webhook_service import trigger_serial_asset_code_assigned_webhook
+        import asyncio
+        asyncio.create_task(trigger_serial_asset_code_assigned_webhook(sn.id, payload.asset_code))
+    except Exception as webhook_err:
+        import logging
+        logging.getLogger(__name__).warning("Failed to trigger webhook for asset_code assignment: %s", webhook_err)
+
+    return {"success": True, "message": "Asset code assigned successfully", "serial_id": sn.id, "asset_code": payload.asset_code}
+
 

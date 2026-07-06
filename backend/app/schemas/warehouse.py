@@ -327,6 +327,8 @@ class MaterialIssueCreate(BaseModel):
     vehicle_code: Optional[str] = None
     vehicle_number: Optional[str] = None
     service_code: Optional[str] = None
+    template_type: Optional[str] = None
+    project_id: Optional[int] = None
     items: List[MaterialIssueItemCreate]
 
     @field_validator("items")
@@ -360,6 +362,8 @@ class MaterialIssueUpdate(BaseModel):
     vehicle_code: Optional[str] = None
     vehicle_number: Optional[str] = None
     service_code: Optional[str] = None
+    template_type: Optional[str] = None
+    project_id: Optional[int] = None
     items: Optional[List[MaterialIssueItemCreate]] = None
 
     @field_validator("issue_date")
@@ -422,6 +426,9 @@ class MaterialIssueResponse(BaseModel):
     vehicle_number: Optional[str] = None
     service_code: Optional[str] = None
     position_code: Optional[str] = None
+    template_type: Optional[str] = None
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
     created_at: Optional[datetime] = None
     items: List[MaterialIssueItemResponse] = []
     model_config = {"from_attributes": True}

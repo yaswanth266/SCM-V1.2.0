@@ -233,6 +233,8 @@ export const MENU_CONFIG = [
       { key: 'warehouse-putaway', label: 'Putaway', path: '/warehouse/putaway' },
       { key: 'warehouse-purchase-returns', label: 'Purchase Returns', path: '/warehouse/purchase-returns' },
       { key: 'warehouse-material-issues', label: 'Material Issues', path: '/warehouse/material-issues' },
+      { key: 'warehouse-material-issues-ap104-consumables', label: 'AP 104 DP / Consumables', path: '/warehouse/material-issues/ap104-consumables' },
+      { key: 'warehouse-material-issues-ap104-install', label: 'AP 104 DP Install', path: '/warehouse/material-issues/ap104-install' },
     ],
   },
   {
@@ -258,8 +260,8 @@ export const MENU_CONFIG = [
       { key: 'inventory-stock-transfer', label: 'Stock Transfer', path: '/inventory/stock-transfer' },
       { key: 'inventory-stock-audit', label: 'Stock Audit', path: '/inventory/stock-audit' },
       { key: 'inventory-replenishment', label: 'Replenishment', path: '/inventory/replenishment' },
-      { key: 'inventory-masters-ap104-consumables', label: 'AP 104 DP / Consumables - Indent Master', path: '/inventory/masters/ap104-consumables' },
-      { key: 'inventory-masters-ap104-install', label: 'AP 104 DP Install - Indent Master', path: '/inventory/masters/ap104-install' },
+      { key: 'inventory-masters-ap104-consumables', label: 'AP 104 DP / Consumables Master', path: '/inventory/masters/ap104-consumables' },
+      { key: 'inventory-masters-ap104-install', label: 'AP 104 DP Install Master', path: '/inventory/masters/ap104-install' },
     ],
   },
   {

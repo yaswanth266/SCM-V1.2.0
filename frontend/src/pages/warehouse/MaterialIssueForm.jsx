@@ -26,13 +26,16 @@ import { DATE_FORMAT } from '../../utils/constants';
 const { TextArea } = Input;
 const { Text } = Typography;
 
-const MaterialIssueForm = () => {
+const MaterialIssueForm = ({ templateType, title: propTitle }) => {
   const { message } = App.useApp();
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const isNew = !id || id === 'new';
   const user = useAuthStore((s) => s.user);
+  const backPath = templateType 
+    ? `/warehouse/material-issues/ap104-${templateType}`
+    : '/warehouse/material-issues';
 
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(!isNew);
@@ -48,6 +51,7 @@ const MaterialIssueForm = () => {
   const [mrOptions, setMrOptions] = useState([]);
   const [uomOptions, setUomOptions] = useState([]);
   const [userOptions, setUserOptions] = useState([]);
+  const [projects, setProjects] = useState([]);
 
   // item_id -> available qty (in the currently-selected warehouse). Populated
   // when an indent is picked or when the warehouse changes; surfaces inline so
@@ -462,6 +466,63 @@ const MaterialIssueForm = () => {
     }
   }, [form, refreshStockForItems, fetchItemStockDetails, message]);
 
+  const loadProjects = useCallback(async () => {
+    try {
+      const projRes = await api.get('/masters/projects', { params: { page_size: 200 } });
+      const data = projRes.data?.items || projRes.data?.data || projRes.data || [];
+      setProjects(data.map((p) => ({ label: p.name || p.project_name, value: p.id })));
+    } catch { /* silent */ }
+  }, []);
+
+  const prefillFromTemplate = useCallback(async (projectId, tempType) => {
+    if (!projectId) {
+      setIssueItems([createEmptyItem()]);
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await api.get('/masters/project-indent-templates', {
+        params: { project_id: projectId, template_type: tempType }
+      });
+      const data = res.data;
+      if (data && data.items && data.items.length > 0) {
+        const lines = data.items.map((it) => ({
+          key: `${it.id}-${Date.now()}-${Math.random()}`,
+          item_id: it.item_id,
+          item_name: it.item_name || '',
+          item_code: it.item_code || '',
+          item_type: it.item_type || '',
+          qty: Number(it.quantity) || 0,
+          uom_id: it.uom_id || null,
+          batch_id: null,
+          bin_id: null,
+          rate: 0,
+          amount: 0,
+          has_batch: !!it.has_batch,
+          has_serial: !!it.has_serial,
+          serial_numbers: [],
+          batch_number_text: '',
+          bin_code_text: '',
+        }));
+        setIssueItems(lines);
+        const sourceWarehouseId = form.getFieldValue('warehouse_id');
+        if (sourceWarehouseId) {
+          const itemIds = lines.map((l) => l.item_id).filter(Boolean);
+          await refreshStockForItems(sourceWarehouseId, itemIds);
+          itemIds.forEach((id) => fetchItemStockDetails(sourceWarehouseId, id));
+        }
+        message.success(`Loaded ${lines.length} items from template`);
+      } else {
+        setIssueItems([createEmptyItem()]);
+        message.warning(`No template configured for this project under type '${tempType}'`);
+      }
+    } catch (err) {
+      message.error(getErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [form, refreshStockForItems, fetchItemStockDetails, message]);
+
   // --- Fetch existing record ---
   const fetchRecord = useCallback(async () => {
     setLoading(true);
@@ -481,6 +542,8 @@ const MaterialIssueForm = () => {
         vehicle_code: data.vehicle_code || undefined,
         vehicle_number: data.vehicle_number || undefined,
         service_code: data.service_code || undefined,
+        project_id: data.project_id || undefined,
+        template_type: data.template_type || undefined,
       });
 
       const items = (data.items || []).map((item, idx) => ({
@@ -557,7 +620,7 @@ const MaterialIssueForm = () => {
       }
     } catch (err) {
       message.error(getErrorMessage(err));
-      navigate('/warehouse/material-issues');
+      navigate(backPath);
     } finally {
       setLoading(false);
     }
@@ -585,8 +648,14 @@ const MaterialIssueForm = () => {
   }, [id, isNew, fetchRecord, loadLookups, loadIndentOptions, loadMROptions, form, location.search, prefillFromIndent]);
 
   useEffect(() => {
+    if (templateType) {
+      loadProjects();
+    }
+  }, [templateType, loadProjects]);
+
+  useEffect(() => {
     if (!isNew || warehouses.length === 0) return;
-    if (form.getFieldValue('warehouse_id') || form.getFieldValue('indent_id')) return;
+    if (form.getFieldValue('warehouse_id') || form.getFieldValue('indent_id') || form.getFieldValue('project_id')) return;
 
     const queryParams = new URLSearchParams(location.search);
     if (queryParams.get('indent_id')) return;
@@ -651,7 +720,7 @@ const MaterialIssueForm = () => {
     try {
       await api.delete(`/warehouse/material-issues/${id}`);
       message.success('Material Issue deleted');
-      navigate('/warehouse/material-issues');
+      navigate(backPath);
     } catch (err) {
       message.error(getErrorMessage(err));
     }
@@ -916,6 +985,7 @@ const MaterialIssueForm = () => {
         ...values,
         issue_date: formatDateForAPI(values.issue_date),
         items: payloadItems,
+        template_type: templateType || undefined,
       };
 
       if (!isNew) {
@@ -928,9 +998,17 @@ const MaterialIssueForm = () => {
         message.success('Material Issue created successfully');
         const newId = res.data?.id;
         if (newId) {
-          navigate(`/warehouse/material-issues/${newId}`);
+          if (templateType) {
+            navigate(`/warehouse/material-issues/ap104-${templateType}/${newId}`);
+          } else {
+            navigate(`/warehouse/material-issues/${newId}`);
+          }
         } else {
-          navigate('/warehouse/material-issues');
+          if (templateType) {
+            navigate(`/warehouse/material-issues/ap104-${templateType}`);
+          } else {
+            navigate('/warehouse/material-issues');
+          }
         }
       }
     } catch (err) {
@@ -1100,7 +1178,7 @@ const MaterialIssueForm = () => {
                 <Button type="primary" icon={<CheckOutlined />}>Acknowledge</Button>
               </Popconfirm>
             )}
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/warehouse/material-issues')}>
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(backPath)}>
               Back
             </Button>
           </Space>
@@ -1562,7 +1640,7 @@ const MaterialIssueForm = () => {
   return (
     <div>
       <PageHeader
-        title={isNew ? 'Create Material Issue' : `Edit Material Issue`}
+        title={propTitle || (isNew ? 'Create Material Issue' : `Edit Material Issue`)}
         subtitle="Manage material issues from warehouse details"
       >
         <Space>
@@ -1577,7 +1655,7 @@ const MaterialIssueForm = () => {
           <Button
             onClick={() => {
               if (isNew) {
-                navigate('/warehouse/material-issues');
+                navigate(backPath);
               } else {
                 setEditMode(false);
               }
@@ -1590,72 +1668,38 @@ const MaterialIssueForm = () => {
 
       <Card style={{ marginBottom: 16 }}>
         <Form form={form} layout="vertical">
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item name="warehouse_id" label="Warehouse" rules={[{ required: true, message: 'Required' }]}>
-                <Select
-                  options={warehouses}
-                  placeholder="Select warehouse"
-                  showSearch
-                  optionFilterProp="label"
-                  onChange={(whId) => {
-                    const itemIds = issueItems.map((l) => l.item_id).filter(Boolean);
-                    refreshStockForItems(whId, itemIds);
-                    itemIds.forEach((id) => fetchItemStockDetails(whId, id));
-                    setIssueItems(issueItems.map(i => ({ ...i, batch_id: null, bin_id: null })));
-                  }}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="department" label="Department">
-                <Input placeholder="Department name" />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="issue_date" label="Issue Date" rules={[{ required: true, message: 'Required' }]}>
-                <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
-              </Form.Item>
-            </Col>
-          </Row>
-
-          <Row gutter={16}>
-            <Col span={8}>
-              <Form.Item
-                name="indent_id"
-                label="Indent (auto-loads items)"
-                tooltip="Pick an approved indent — warehouse + items + remaining qty are filled in for you."
-              >
-                <Select
-                  options={indentOptions}
-                  placeholder="Pick approved indent to issue against"
-                  showSearch
-                  optionFilterProp="label"
-                  allowClear
-                  onFocus={() => loadIndentOptions()}
-                  onSearch={(v) => loadIndentOptions(v)}
-                  onChange={(v) => prefillFromIndent(v)}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="mr_id" label="Material Request">
-                <Select
-                  options={mrOptions}
-                  placeholder="Select MR (optional)"
-                  showSearch
-                  optionFilterProp="label"
-                  allowClear
-                  onSearch={(v) => loadMROptions(v)}
-                />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item
-                noStyle
-                shouldUpdate={(prevValues, currentValues) => prevValues.indent_id !== currentValues.indent_id}
-              >
-                {({ getFieldValue }) => (
+          {templateType ? (
+            <>
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Form.Item name="project_id" label="Project" rules={[{ required: true, message: 'Required' }]}>
+                    <Select
+                      options={projects}
+                      placeholder="Select project"
+                      showSearch
+                      optionFilterProp="label"
+                      disabled={!isNew}
+                      onChange={(val) => prefillFromTemplate(val, templateType)}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="warehouse_id" label="Warehouse" rules={[{ required: true, message: 'Required' }]}>
+                    <Select
+                      options={warehouses}
+                      placeholder="Select warehouse"
+                      showSearch
+                      optionFilterProp="label"
+                      onChange={(whId) => {
+                        const itemIds = issueItems.map((l) => l.item_id).filter(Boolean);
+                        refreshStockForItems(whId, itemIds);
+                        itemIds.forEach((id) => fetchItemStockDetails(whId, id));
+                        setIssueItems(issueItems.map(i => ({ ...i, batch_id: null, bin_id: null })));
+                      }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
                   <Form.Item name="destination_warehouse_id" label="Destination Warehouse">
                     <Select
                       options={allWarehouses}
@@ -1663,50 +1707,165 @@ const MaterialIssueForm = () => {
                       allowClear
                       showSearch
                       optionFilterProp="label"
-                      disabled={!!getFieldValue('indent_id')}
                     />
                   </Form.Item>
-                )}
-              </Form.Item>
-            </Col>
-          </Row>
+                </Col>
+              </Row>
 
-          <Row gutter={16}>
-            <Col span={12}>
-              <Form.Item name="issued_to" label="Issued To">
-                <Select
-                  options={userOptions}
-                  placeholder="Select user"
-                  showSearch
-                  optionFilterProp="label"
-                  allowClear
-                />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="remarks" label="Remarks">
-                <Input placeholder="Any remarks" />
-              </Form.Item>
-            </Col>
-          </Row>
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Form.Item name="department" label="Department">
+                    <Input placeholder="Department name" />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="issued_to" label="Issued To">
+                    <Select
+                      options={userOptions}
+                      placeholder="Select user"
+                      showSearch
+                      optionFilterProp="label"
+                      allowClear
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="issue_date" label="Issue Date" rules={[{ required: true, message: 'Required' }]}>
+                    <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Row gutter={16}>
+                <Col span={24}>
+                  <Form.Item name="remarks" label="Remarks">
+                    <Input placeholder="Any remarks" />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </>
+          ) : (
+            <>
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Form.Item name="warehouse_id" label="Warehouse" rules={[{ required: true, message: 'Required' }]}>
+                    <Select
+                      options={warehouses}
+                      placeholder="Select warehouse"
+                      showSearch
+                      optionFilterProp="label"
+                      onChange={(whId) => {
+                        const itemIds = issueItems.map((l) => l.item_id).filter(Boolean);
+                        refreshStockForItems(whId, itemIds);
+                        itemIds.forEach((id) => fetchItemStockDetails(whId, id));
+                        setIssueItems(issueItems.map(i => ({ ...i, batch_id: null, bin_id: null })));
+                      }}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="department" label="Department">
+                    <Input placeholder="Department name" />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="issue_date" label="Issue Date" rules={[{ required: true, message: 'Required' }]}>
+                    <DatePicker style={{ width: '100%' }} format={DATE_FORMAT} />
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Form.Item
+                    name="indent_id"
+                    label="Indent (auto-loads items)"
+                    tooltip="Pick an approved indent — warehouse + items + remaining qty are filled in for you."
+                  >
+                    <Select
+                      options={indentOptions}
+                      placeholder="Pick approved indent to issue against"
+                      showSearch
+                      optionFilterProp="label"
+                      allowClear
+                      onFocus={() => loadIndentOptions()}
+                      onSearch={(v) => loadIndentOptions(v)}
+                      onChange={(v) => prefillFromIndent(v)}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item name="mr_id" label="Material Request">
+                    <Select
+                      options={mrOptions}
+                      placeholder="Select MR (optional)"
+                      showSearch
+                      optionFilterProp="label"
+                      allowClear
+                      onSearch={(v) => loadMROptions(v)}
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item
+                    noStyle
+                    shouldUpdate={(prevValues, currentValues) => prevValues.indent_id !== currentValues.indent_id}
+                  >
+                    {({ getFieldValue }) => (
+                      <Form.Item name="destination_warehouse_id" label="Destination Warehouse">
+                        <Select
+                          options={allWarehouses}
+                          placeholder="Select destination warehouse"
+                          allowClear
+                          showSearch
+                          optionFilterProp="label"
+                          disabled={!!getFieldValue('indent_id')}
+                        />
+                      </Form.Item>
+                    )}
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Row gutter={16}>
+                <Col span={12}>
+                  <Form.Item name="issued_to" label="Issued To">
+                    <Select
+                      options={userOptions}
+                      placeholder="Select user"
+                      showSearch
+                      optionFilterProp="label"
+                      allowClear
+                    />
+                  </Form.Item>
+                </Col>
+                <Col span={12}>
+                  <Form.Item name="remarks" label="Remarks">
+                    <Input placeholder="Any remarks" />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </>
+          )}
 
           <Row gutter={16}>
             <Col span={8}>
               <Form.Item name="vehicle_code" label="Vehicle Code">
-                <Input placeholder="Auto-loaded from Indent" disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
+                <Input placeholder={templateType ? "Enter vehicle code" : "Auto-loaded from Indent"} disabled={!templateType} style={!templateType ? { color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' } : {}} />
               </Form.Item>
             </Col>
             <Col span={8}>
               <Form.Item name="vehicle_number" label="Vehicle Number">
-                <Input placeholder="Auto-loaded from Indent" disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
+                <Input placeholder={templateType ? "Enter vehicle number" : "Auto-loaded from Indent"} disabled={!templateType} style={!templateType ? { color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' } : {}} />
               </Form.Item>
             </Col>
             <Col span={8}>
               <Form.Item name="service_code" label="Service Code">
-                <Input placeholder="Auto-loaded from Indent" disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
+                <Input placeholder={templateType ? "Enter service code" : "Auto-loaded from Indent"} disabled={!templateType} style={!templateType ? { color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' } : {}} />
               </Form.Item>
             </Col>
           </Row>
+
         </Form>
       </Card>
 
