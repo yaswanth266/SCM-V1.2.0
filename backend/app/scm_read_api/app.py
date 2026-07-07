@@ -31,10 +31,14 @@ try:  # load .env if python-dotenv is installed (SCM team just edits .env)
     from dotenv import load_dotenv
     # Load current folder .env
     load_dotenv()
-    # Also attempt to load parent directory .env (backend/.env) when nested
+    # Try parent directory .env
     parent_env = os.path.join(os.path.dirname(__file__), "..", ".env")
     if os.path.exists(parent_env):
         load_dotenv(parent_env)
+    # Try grandparent directory .env (when nested inside backend/app/scm_read_api)
+    grandparent_env = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+    if os.path.exists(grandparent_env):
+        load_dotenv(grandparent_env)
 except Exception:
     pass
 
