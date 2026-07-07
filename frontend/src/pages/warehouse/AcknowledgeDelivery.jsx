@@ -9,7 +9,6 @@ import {
   SearchOutlined, BarcodeOutlined, GiftOutlined, EnvironmentOutlined,
   PictureOutlined, SafetyCertificateOutlined, AlertOutlined
 } from '@ant-design/icons';
-import Barcode from 'react-barcode';
 import { QRCodeSVG } from 'qrcode.react';
 import api from '../../config/api';
 import PageHeader from '../../components/PageHeader';
@@ -459,15 +458,7 @@ const AcknowledgeDelivery = () => {
                 />
               </Col>
 
-              <Col xs={24} md={8}>
-                <Card title="Consignment Barcode" style={{ borderRadius: '12px', border: '1px solid #cbd5e1', textAlign: 'center' }}>
-                  <Barcode value={consignmentData.parent_package_barcode || consignmentData.parent_package_code} width={1.2} height={50} fontSize={11} />
-                  <div style={{ marginTop: '12px', fontFamily: 'monospace', fontWeight: 700, fontSize: '15px' }}>{consignmentData.parent_package_code}</div>
-                  <Text type="secondary">Consignment Reference: {consignmentData.consignment_number}</Text>
-                </Card>
-              </Col>
-
-              <Col xs={24} md={16}>
+              <Col xs={24} md={24}>
                 <Card title="Consignment Hierarchy & Packages" style={{ borderRadius: '12px', border: '1px solid #cbd5e1' }}>
                   <Collapse 
                     defaultActiveKey={['0']} 
