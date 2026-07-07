@@ -720,9 +720,15 @@ async def refresh_token(request: Request, payload: RefreshTokenRequest, db: Asyn
 
     token_data = {"sub": str(user.id), "username": user.username}
     new_access_token = create_access_token(token_data)
+    # BUG-AUTH-refresh: rotate the refresh token on every use so the frontend
+    # always has a valid token to use on the next 401. Without this the old
+    # refresh token becomes stale after the first rotation and the frontend
+    # gets stuck in a "No refresh token" loop after expiry.
+    new_refresh_token = create_refresh_token(token_data)
 
     return {
         "access_token": new_access_token,
+        "refresh_token": new_refresh_token,
         "token_type": "bearer",
         "expires_in": settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     }
