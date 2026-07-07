@@ -38,19 +38,9 @@ const resultColors = {
   partial: '#fa8c16',
 };
 
-const _canRunQI = (userRoleCodes) => {
-  const codes = new Set(userRoleCodes || []);
-  return codes.has('quality_inspector')
-    || codes.has('super_admin')
-    || codes.has('admin');
-};
-
 const QualityInspection = () => {
-  const user = useAuthStore((s) => s.user);
-  const userRoleCodes = (user?.roles || []).map(
-    (r) => (r?.code || r?.role_code || '').toLowerCase()
-  );
-  const canRunQI = _canRunQI(userRoleCodes);
+  const hasKey = useAuthStore((s) => s.hasKey);
+  const canRunQI = hasKey('warehouse-quality-inspection');
   const navigate = useNavigate();
   const [refreshKey, setRefreshKey] = useState(0);
 
