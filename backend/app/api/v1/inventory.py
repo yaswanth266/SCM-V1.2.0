@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.database import get_db
@@ -11,6 +11,8 @@ from app.models.user import User, Role
 from app.models.stock import StockBalance, StockLedger
 from app.models.transfer import StockTransfer, StockTransferItem
 from app.models.audit import StockAudit, StockAuditItem, BinReplenishmentRule
+from app.models.master import Item
+from app.models.procurement_master import Vendor, VendorItem
 from app.schemas.inventory import (
     StockBalanceResponse, StockLedgerResponse,
     TransferCreate, TransferUpdate, TransferResponse,
