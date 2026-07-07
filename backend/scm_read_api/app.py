@@ -29,7 +29,12 @@ from typing import Optional
 
 try:  # load .env if python-dotenv is installed (SCM team just edits .env)
     from dotenv import load_dotenv
+    # Load current folder .env
     load_dotenv()
+    # Also attempt to load parent directory .env (backend/.env) when nested
+    parent_env = os.path.join(os.path.dirname(__file__), "..", ".env")
+    if os.path.exists(parent_env):
+        load_dotenv(parent_env)
 except Exception:
     pass
 
@@ -38,7 +43,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text, MetaData, Table
 
 # --- config (env) ----------------------------------------------------------
-DB_URL = os.getenv("SCM_DATABASE_URL", "mysql+pymysql://root:@localhost:3306/scm_v1")
+DB_URL = os.getenv("SCM_DATABASE_URL")
+if not DB_URL:
+    db_user = os.getenv("DB_USER", "root")
+    db_pass = os.getenv("DB_PASSWORD", "")
+    db_host = os.getenv("DB_HOST", "localhost")
+    db_port = os.getenv("DB_PORT", "3306")
+    db_name = os.getenv("DB_NAME", "bhspl_scm")
+    DB_URL = f"mysql+pymysql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+
 API_KEY = os.getenv("SCM_API_KEY")  # optional; if set, callers must send X-API-Key
 
 # Clean resource name -> real table name. ONLY these are exposed (read-only).
