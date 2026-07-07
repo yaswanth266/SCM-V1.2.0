@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional
 from sqlalchemy import select, func, and_
@@ -1548,12 +1548,20 @@ async def cancel_indent(
 async def acknowledge_indent_legacy(
     indent_id: int,
     payload: IndentAcknowledgementCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Legacy per-indent acknowledge endpoint."""
     payload.indent_id = indent_id
-    return await _create_acknowledgement(payload, db, current_user)
+    result = await _create_acknowledgement(payload, db, current_user)
+    # db.commit() is called by get_db after this returns; schedule webhook as
+    # a BackgroundTask so it runs after the response (and thus after commit).
+    _ack_id = result.get("id")
+    if _ack_id:
+        from app.services.webhook_service import trigger_acknowledgement_webhook
+        background_tasks.add_task(trigger_acknowledgement_webhook, _ack_id)
+    return result
 
 
 @router.get("/{indent_id}/acknowledgements")
@@ -2008,11 +2016,19 @@ async def get_acknowledgement(
 @ack_router.post("/acknowledgements", status_code=201)
 async def create_acknowledgement_endpoint(
     payload: IndentAcknowledgementCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Create a new indent acknowledgement with items and barcode scans."""
-    return await _create_acknowledgement(payload, db, current_user)
+    result = await _create_acknowledgement(payload, db, current_user)
+    # db.commit() is called by get_db after this returns; schedule webhook as
+    # a BackgroundTask so it runs after the response (and thus after commit).
+    _ack_id = result.get("id")
+    if _ack_id:
+        from app.services.webhook_service import trigger_acknowledgement_webhook
+        background_tasks.add_task(trigger_acknowledgement_webhook, _ack_id)
+    return result
 
 
 # ==================== SHARED HELPER ====================
@@ -2272,10 +2288,11 @@ async def _create_acknowledgement(
     try:
         from app.services.webhook_service import trigger_acknowledgement_webhook
         import asyncio
-        asyncio.create_task(trigger_acknowledgement_webhook(ack.id))
-    except Exception as webhook_err:
-        import logging
-        logging.getLogger(__name__).warning("Failed to trigger webhook for acknowledgement: %s", webhook_err)
+        # NOTE: The webhook is fired by the calling route handler AFTER db.commit()
+        # via BackgroundTasks so that all items are visible to the webhook service.
+        # We store the ack.id in the return dict for the caller to pick up.
+    except Exception:
+        pass
 
     return {"id": ack.id, "status": ack_status, "message": "Acknowledgement recorded successfully"}
 
