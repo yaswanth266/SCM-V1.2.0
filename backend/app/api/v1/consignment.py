@@ -256,7 +256,128 @@ async def _update_mi_status(db: AsyncSession, mi_id: int) -> None:
             )
 
 
-def _pkg_response(pkg: ConsignmentPackage, include_items: bool = True) -> dict:
+async def _fetch_serial_details_for_packages(db: AsyncSession, pkgs: list) -> dict:
+    """Fetch serial number details (warranty, mfg date) for all serial numbers in a list of packages."""
+    all_sns = []
+    for pkg in pkgs:
+        for it in pkg.items or []:
+            if it.serial_numbers:
+                all_sns.extend(it.serial_numbers)
+    if not all_sns:
+        return {}
+        
+    from app.models.warehouse import SerialNumber as _SN
+    from app.models.asset import Asset as _As
+    
+    stmt_sns = select(_SN).options(joinedload(_SN.batch)).where(_SN.serial_number.in_(all_sns))
+    sns_res = await db.execute(stmt_sns)
+    sns_rows = sns_res.scalars().all()
+    sns_map = {s.serial_number: s for s in sns_rows}
+    
+    stmt_assets = select(_As).where(_As.serial_number.in_(all_sns))
+    assets_res = await db.execute(stmt_assets)
+    assets_rows = assets_res.scalars().all()
+    assets_map = {a.serial_number: a for a in assets_rows}
+    
+    details = {}
+    for sn_str in all_sns:
+        sn_obj = sns_map.get(sn_str)
+        asset_obj = assets_map.get(sn_str)
+        
+        w_exp = None
+        m_date = None
+        
+        if asset_obj and asset_obj.warranty_expiry:
+            w_exp = asset_obj.warranty_expiry.strftime("%d-%b-%Y")
+            if asset_obj.purchase_date:
+                m_date = asset_obj.purchase_date.strftime("%d-%b-%Y")
+        if sn_obj and sn_obj.batch:
+            if sn_obj.batch.manufacturing_date:
+                m_date = sn_obj.batch.manufacturing_date.strftime("%d-%b-%Y")
+                
+        details[sn_str] = {
+            "warranty_expiry": w_exp,
+            "mfg_date": m_date,
+        }
+    return details
+
+
+async def _get_scanned_code_details(db: AsyncSession, code: str) -> Optional[dict]:
+    """Fetch scanned item details by looking up code as serial number, asset code, consumable code, or batch number."""
+    if not code:
+        return None
+        
+    from app.models.warehouse import SerialNumber as _SN, Batch as _Batch
+    from app.models.asset import Asset as _Asset
+    
+    # 1. Try finding in SerialNumber
+    stmt = select(_SN).options(joinedload(_SN.item), joinedload(_SN.batch)).where(
+        or_(
+            _SN.serial_number == code,
+            _SN.asset_code == code,
+            _SN.consumable_code == code
+        )
+    )
+    res = await db.execute(stmt)
+    sn = res.scalars().first()
+    
+    # 2. Try finding in Asset
+    stmt_asset = select(_Asset).options(joinedload(_Asset.category)).where(_Asset.asset_code == code)
+    res_asset = await db.execute(stmt_asset)
+    asset_obj = res_asset.scalars().first()
+    
+    if not sn and not asset_obj:
+        # 3. Try finding in Batch as a consumable batch number
+        stmt_batch = select(_Batch).options(joinedload(_Batch.item)).where(_Batch.batch_number == code)
+        res_batch = await db.execute(stmt_batch)
+        bt = res_batch.scalars().first()
+        if bt:
+            return {
+                "code": code,
+                "item_code": bt.item.item_code if bt.item else None,
+                "item_name": bt.item.name if bt.item else None,
+                "item_type": bt.item.item_type if bt.item else None,
+                "mfg_date": bt.manufacturing_date.strftime("%d-%b-%Y") if bt.manufacturing_date else None,
+                "expiry_date": bt.expiry_date.strftime("%d-%b-%Y") if bt.expiry_date else None,
+                "warranty_expiry": None,
+            }
+        return None
+        
+    info = {
+        "code": code,
+        "item_code": None,
+        "item_name": None,
+        "item_type": None,
+        "mfg_date": None,
+        "expiry_date": None,
+        "warranty_expiry": None,
+    }
+    
+    if sn:
+        info["item_code"] = sn.item.item_code if sn.item else None
+        info["item_name"] = sn.item.name if sn.item else None
+        info["item_type"] = sn.item.item_type if sn.item else None
+        if sn.batch:
+            if sn.batch.manufacturing_date:
+                info["mfg_date"] = sn.batch.manufacturing_date.strftime("%d-%b-%Y")
+            if sn.batch.expiry_date:
+                info["expiry_date"] = sn.batch.expiry_date.strftime("%d-%b-%Y")
+                
+    if asset_obj:
+        if not info["item_name"]:
+            info["item_name"] = asset_obj.name
+        if not info["item_code"]:
+            info["item_code"] = asset_obj.asset_code
+        info["item_type"] = "asset"
+        if asset_obj.warranty_expiry:
+            info["warranty_expiry"] = asset_obj.warranty_expiry.strftime("%d-%b-%Y")
+        if asset_obj.purchase_date and not info["mfg_date"]:
+            info["mfg_date"] = asset_obj.purchase_date.strftime("%d-%b-%Y")
+            
+    return info
+
+
+def _pkg_response(pkg: ConsignmentPackage, include_items: bool = True, serial_details: Optional[dict] = None) -> dict:
     d = {
         "id": pkg.id,
         "package_number": pkg.package_number,
@@ -286,7 +407,7 @@ def _pkg_response(pkg: ConsignmentPackage, include_items: bool = True) -> dict:
         "receipt_signature_url": pkg.receipt_signature_url,
     }
     if include_items and pkg.items is not None:
-        d["items"] = [_pkg_item_response(i) for i in pkg.items]
+        d["items"] = [_pkg_item_response(i, serial_details) for i in pkg.items]
     if pkg.container is not None:
         d["container"] = {
             "container_number": pkg.container.container_number,
@@ -305,9 +426,15 @@ def _pkg_response(pkg: ConsignmentPackage, include_items: bool = True) -> dict:
     return d
 
 
-def _pkg_item_response(it: ConsignmentPackageItem) -> dict:
+def _pkg_item_response(it: ConsignmentPackageItem, serial_details: Optional[dict] = None) -> dict:
     mat = it.material
     batch = it.batch or (it.material_issue_item.batch if it.material_issue_item else None)
+    
+    sns_details = {}
+    if it.serial_numbers:
+        for sn in it.serial_numbers:
+            sns_details[sn] = (serial_details or {}).get(sn, {"warranty_expiry": None, "mfg_date": None})
+            
     return {
         "id": it.id,
         "package_id": it.package_id,
@@ -334,6 +461,7 @@ def _pkg_item_response(it: ConsignmentPackageItem) -> dict:
         "rejection_reason": it.rejection_reason,
         "serial_numbers": it.serial_numbers,
         "serial_numbers_received": it.serial_numbers_received,
+        "serial_details": sns_details,
     }
 
 
@@ -680,7 +808,8 @@ async def create_consignment(
         .where(Consignment.id == consignment.id)
     )).unique().scalar_one()
 
-    pkgs_out = [_pkg_response(p) for p in con_full.packages]
+    serial_details = await _fetch_serial_details_for_packages(db, con_full.packages)
+    pkgs_out = [_pkg_response(p, serial_details=serial_details) for p in con_full.packages]
     return _con_response(con_full, pkgs_out)
 
 
@@ -965,7 +1094,8 @@ async def update_consignment(
         .where(Consignment.id == consignment.id)
     )).unique().scalar_one()
 
-    pkgs_out = [_pkg_response(p) for p in con_full.packages]
+    serial_details = await _fetch_serial_details_for_packages(db, con_full.packages)
+    pkgs_out = [_pkg_response(p, serial_details=serial_details) for p in con_full.packages]
     return _con_response(con_full, pkgs_out)
 
 
@@ -1057,6 +1187,10 @@ async def scan_any_barcode(
         con_number = payload.get("consignment", barcode)
     except (json.JSONDecodeError, TypeError):
         pass
+
+    scanned_info = await _get_scanned_code_details(db, con_number)
+    if not scanned_info and barcode != con_number:
+        scanned_info = await _get_scanned_code_details(db, barcode)
 
     con = (await db.execute(
         select(Consignment)
@@ -1161,7 +1295,7 @@ async def scan_any_barcode(
                 for p in con.packages
             ]
         }
-        return {"type": "parent", "data": con_data}
+        return {"type": "parent", "data": con_data, "scanned_item": scanned_info}
 
     # 2. Try loading as a package
     pkg_number = barcode
@@ -1237,7 +1371,8 @@ async def scan_any_barcode(
             )).unique().scalar_one_or_none()
 
     if pkg:
-        return {"type": "child", "data": _pkg_response(pkg)}
+        serial_details = await _fetch_serial_details_for_packages(db, [pkg])
+        return {"type": "child", "data": _pkg_response(pkg, serial_details=serial_details), "scanned_item": scanned_info}
 
     # Neither found
     raise HTTPException(404, f"Barcode '{barcode}' matches neither a consignment nor a package.")
@@ -1397,7 +1532,8 @@ async def get_consignment(consignment_id: int, db: AsyncSession = Depends(get_db
     )).unique().scalar_one_or_none()
     if not con:
         raise HTTPException(404, "Consignment not found")
-    return _con_response(con, [_pkg_response(p) for p in con.packages])
+    serial_details = await _fetch_serial_details_for_packages(db, con.packages)
+    return _con_response(con, [_pkg_response(p, serial_details=serial_details) for p in con.packages])
 
 
 @router.post("/{consignment_id}/pack")
@@ -1735,7 +1871,8 @@ async def scan_package_barcode(
 
     if not pkg:
         raise HTTPException(404, f"Package '{pkg_number}' not found")
-    return _pkg_response(pkg)
+    serial_details = await _fetch_serial_details_for_packages(db, [pkg])
+    return _pkg_response(pkg, serial_details=serial_details)
 
 
 @router.get("/package/{package_id}")
@@ -1754,7 +1891,8 @@ async def get_package(package_id: int, db: AsyncSession = Depends(get_db), curre
     )).unique().scalar_one_or_none()
     if not pkg:
         raise HTTPException(404, "Package not found")
-    return _pkg_response(pkg)
+    serial_details = await _fetch_serial_details_for_packages(db, [pkg])
+    return _pkg_response(pkg, serial_details=serial_details)
 
 
 @router.get("/package/{package_id}/manifest")

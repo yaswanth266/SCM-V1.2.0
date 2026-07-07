@@ -24,6 +24,7 @@ const AssetCodesTreeModal = ({
   targetQty = 0,
   lockedCodes = {},
   autoSelectOnOpen = true,
+  serialDetails = {},
 }) => {
   const [selected, setSelected] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -139,6 +140,62 @@ const AssetCodesTreeModal = ({
     setCurrentPage(1);
   }, [searchQuery, selectedBatchFilter, selectedBinFilter]);
 
+  // Intercept and auto-select multi-line QR scan payloads inside search
+  useEffect(() => {
+    if (searchQuery.includes('\n')) {
+      const query = searchQuery.trim();
+      const lines = query.split('\n');
+      const codeLine = lines.find(l => l.trim().startsWith('Code:'));
+      if (codeLine) {
+        const code = codeLine.replace('Code:', '').trim();
+        const item = allCodesWithMetadata.find(c => c.code.toLowerCase() === code.toLowerCase());
+        if (item) {
+          const isLocked = lockedCodes && !!lockedCodes[item.code];
+          if (!isLocked && !selected.includes(item.code)) {
+            setSelected(prev => [...prev, item.code]);
+          }
+        }
+        setSearchQuery(code);
+      }
+    }
+  }, [searchQuery, allCodesWithMetadata, selected, lockedCodes]);
+
+  const scannedQRPayload = useMemo(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) return null;
+    
+    const matchedCode = allCodesWithMetadata.find(c => c.code.toLowerCase() === trimmed.toLowerCase())?.code;
+    if (matchedCode) {
+      const details = serialDetails && serialDetails[matchedCode];
+      return {
+        code: matchedCode,
+        mfgdate: details?.mfg_date || '-',
+        expiry: details?.expiry_date || '-',
+        warranty: details?.warranty_expiry || '-',
+      };
+    }
+    
+    if (searchQuery.includes('\n')) {
+      const info = {};
+      searchQuery.split('\n').forEach(line => {
+        const parts = line.split(':');
+        if (parts.length >= 2) {
+          const key = parts[0].trim().toLowerCase();
+          const value = parts.slice(1).join(':').trim();
+          info[key] = value;
+        }
+      });
+      return {
+        code: info.code || '-',
+        mfgdate: info.mfgdate || '-',
+        expiry: info.expiry || '-',
+        warranty: info.warranty || '-',
+      };
+    }
+    
+    return null;
+  }, [searchQuery, allCodesWithMetadata, serialDetails]);
+
   // Synchronize on open and perform Auto-Fill if empty
   useEffect(() => {
     if (open) {
@@ -200,8 +257,24 @@ const AssetCodesTreeModal = ({
     const name = itemName || '-';
     const batch = record.batch_number || record.batch_name || '-';
     const wh = record.warehouse_name || '-';
-    const exp = record.expiry_date ? dayjs(record.expiry_date).format('YYYY-MM-DD') : '-';
-    return `Material: ${matCode}\nItem: ${name}\nBatch: ${batch}\nCode: ${code}\nWarehouse: ${wh}\nExpiry: ${exp}`;
+    
+    const details = serialDetails && serialDetails[code];
+    const expRaw = details?.expiry_date || record.expiry_date;
+    const exp = expRaw ? dayjs(expRaw).format('YYYY-MM-DD') : '-';
+    
+    const mfgRaw = details?.mfg_date || record.mfg_date;
+    const mfg = mfgRaw ? dayjs(mfgRaw).format('YYYY-MM-DD') : '-';
+    
+    const warrantyRaw = details?.warranty_expiry || record.warranty_expiry;
+    const warranty = warrantyRaw ? dayjs(warrantyRaw).format('YYYY-MM-DD') : '-';
+    
+    let payload = `Material: ${matCode}\nItem: ${name}\nBatch: ${batch}\nCode: ${code}\nWarehouse: ${wh}\nMfgDate: ${mfg}`;
+    if (isAsset) {
+      payload += `\nWarranty: ${warranty}`;
+    } else {
+      payload += `\nExpiry: ${exp}`;
+    }
+    return payload;
   };
 
   // Single code download handler
@@ -548,6 +621,37 @@ const AssetCodesTreeModal = ({
         </Row>
       </div>
 
+      {scannedQRPayload && (
+        <div style={{ margin: '0 24px 16px', padding: '12px 16px', background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.02)' }}>
+          <Space direction="vertical" style={{ width: '100%' }} size={4}>
+            <div style={{ fontWeight: 700, color: '#0369a1', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <QrcodeOutlined style={{ color: '#0284c7' }} /> Scanned Item Details
+            </div>
+            <Row gutter={[16, 8]} style={{ fontSize: 12, color: '#334155', marginTop: 4 }}>
+              <Col xs={12} sm={8}>
+                <span style={{ color: '#64748b', display: 'block', fontSize: 10, textTransform: 'uppercase', fontWeight: 600 }}>Code</span>
+                <strong style={{ fontFamily: 'monospace', fontSize: 13 }}>{scannedQRPayload.code}</strong>
+              </Col>
+              <Col xs={12} sm={8}>
+                <span style={{ color: '#64748b', display: 'block', fontSize: 10, textTransform: 'uppercase', fontWeight: 600 }}>Manufacture Date</span>
+                <strong>{scannedQRPayload.mfgdate || '-'}</strong>
+              </Col>
+              {isAsset ? (
+                <Col xs={12} sm={8}>
+                  <span style={{ color: '#64748b', display: 'block', fontSize: 10, textTransform: 'uppercase', fontWeight: 600 }}>Warranty Expiry</span>
+                  <Tag color="blue" style={{ fontWeight: 600, margin: 0 }}>{scannedQRPayload.warranty || '-'}</Tag>
+                </Col>
+              ) : (
+                <Col xs={12} sm={8}>
+                  <span style={{ color: '#64748b', display: 'block', fontSize: 10, textTransform: 'uppercase', fontWeight: 600 }}>Expiry Date</span>
+                  <Tag color="volcano" style={{ fontWeight: 600, margin: 0 }}>{scannedQRPayload.expiry || '-'}</Tag>
+                </Col>
+              )}
+            </Row>
+          </Space>
+        </div>
+      )}
+
       {/* Paginated Cards Grid */}
       <div style={{ padding: '24px', minHeight: '340px' }}>
         {filteredCodes.length === 0 ? (
@@ -620,10 +724,21 @@ const AssetCodesTreeModal = ({
                               </Tooltip>
                             )}
                           </div>
-                          <div style={{ fontSize: 11, color: '#64748b', display: 'flex', flexDirection: 'column', gap: 1 }}>
-                            <span>📍 {item.location} (Bin: {item.bin})</span>
-                            <span>📦 Batch: <span style={{ fontWeight: 600 }}>{item.batch}</span></span>
-                          </div>
+                          {(() => {
+                            const details = serialDetails && serialDetails[item.code];
+                            const mfg = details?.mfg_date || item.rowRef.mfg_date;
+                            const exp = details?.expiry_date || item.rowRef.expiry_date;
+                            const warranty = details?.warranty_expiry || item.rowRef.warranty_expiry;
+                            return (
+                              <div style={{ fontSize: 11, color: '#64748b', display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                <span>📍 {item.location} (Bin: {item.bin})</span>
+                                <span>📦 Batch: <span style={{ fontWeight: 600 }}>{item.batch}</span></span>
+                                {mfg && <span>🏭 Mfg: {mfg}</span>}
+                                {isAsset && warranty && <span>🛡️ Warranty: <Tag color="blue" style={{ fontSize: 10, paddingInline: 4, height: 16, lineHeight: '14px', margin: 0 }}>{warranty}</Tag></span>}
+                                {!isAsset && exp && <span>⌛ Expiry: <Tag color="volcano" style={{ fontSize: 10, paddingInline: 4, height: 16, lineHeight: '14px', margin: 0 }}>{exp}</Tag></span>}
+                              </div>
+                            );
+                          })()}
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
                           <div style={{ background: '#ffffff', padding: 4, borderRadius: 6, border: '1px solid #e2e8f0', opacity: isLocked ? 0.5 : 1 }}>

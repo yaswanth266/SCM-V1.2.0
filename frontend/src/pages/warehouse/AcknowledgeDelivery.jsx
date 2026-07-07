@@ -7,7 +7,7 @@ import {
 import {
   ArrowLeftOutlined, CheckCircleOutlined, UploadOutlined,
   SearchOutlined, BarcodeOutlined, GiftOutlined, EnvironmentOutlined,
-  PictureOutlined, SafetyCertificateOutlined, AlertOutlined
+  PictureOutlined, SafetyCertificateOutlined, AlertOutlined, QrcodeOutlined
 } from '@ant-design/icons';
 import { QRCodeSVG } from 'qrcode.react';
 import api from '../../config/api';
@@ -38,6 +38,7 @@ const AcknowledgeDelivery = () => {
   const [activeScanType, setActiveScanType] = useState(null); // 'parent' or 'child'
   const [consignmentData, setConsignmentData] = useState(null);
   const [packageData, setPackageData] = useState(null);
+  const [scannedItemInfo, setScannedItemInfo] = useState(null);
 
   // SCM lookup states
   const [warehouses, setWarehouses] = useState([]);
@@ -55,6 +56,8 @@ const AcknowledgeDelivery = () => {
       location: 'Packed Package',
       bin_name: 'Package Area',
       batch_number: activeRow.batch_number || 'Packed Batch',
+      expiry_date: activeRow.expiry_date,
+      mfg_date: activeRow.mfg_date,
       serial_numbers: pool,
       asset_codes: pool,
       consumable_codes: pool,
@@ -126,6 +129,7 @@ const AcknowledgeDelivery = () => {
     setConsignmentData(null);
     setPackageData(null);
     setActiveScanType(null);
+    setScannedItemInfo(null);
 
     let parsedCode = code.trim();
     if (parsedCode.includes('\n')) {
@@ -144,7 +148,10 @@ const AcknowledgeDelivery = () => {
     try {
       const res = await api.get(`/consignment/scan-any/${encodeURIComponent(parsedCode)}`);
       if (res.data) {
-        const { type, data } = res.data;
+        const { type, data, scanned_item } = res.data;
+        if (scanned_item) {
+          setScannedItemInfo(scanned_item);
+        }
         if (type === 'parent') {
           setConsignmentData(data);
           setActiveScanType('consignment');
@@ -408,6 +415,68 @@ const AcknowledgeDelivery = () => {
             <Spin size="large" tip="Reading scanned barcode details...">
               <div style={{ minHeight: '30px' }} />
             </Spin>
+          </Col>
+        )}
+
+        {/* ── Scanned Item Details Alert ── */}
+        {!loading && scannedItemInfo && (
+          <Col span={24}>
+            <Card
+              size="small"
+              style={{
+                borderRadius: '12px',
+                border: '2px solid #38bdf8',
+                background: 'linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)',
+                boxShadow: '0 4px 12px rgba(56, 189, 248, 0.15)',
+                marginBottom: '16px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                <div style={{
+                  width: 48, height: 48, borderRadius: '10px',
+                  background: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  boxShadow: '0 4px 6px rgba(14, 165, 233, 0.2)'
+                }}>
+                  <QrcodeOutlined style={{ color: '#fff', fontSize: 24 }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '12px', color: '#0369a1', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                    Scanned Asset / Consumable Details
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '24px', marginTop: '4px' }}>
+                    <div>
+                      <Text type="secondary" style={{ fontSize: '11px', display: 'block' }}>Scanned Code</Text>
+                      <Text strong style={{ fontFamily: 'monospace', fontSize: '14px', color: '#0f172a' }}>{scannedItemInfo.code}</Text>
+                    </div>
+                    {scannedItemInfo.item_name && (
+                      <div>
+                        <Text type="secondary" style={{ fontSize: '11px', display: 'block' }}>Item</Text>
+                        <Text strong style={{ fontSize: '13px', color: '#0f172a' }}>{scannedItemInfo.item_name} ({scannedItemInfo.item_code})</Text>
+                      </div>
+                    )}
+                    {scannedItemInfo.mfg_date && (
+                      <div>
+                        <Text type="secondary" style={{ fontSize: '11px', display: 'block' }}>Manufacture Date</Text>
+                        <Text strong style={{ fontSize: '13px', color: '#0f172a' }}>{scannedItemInfo.mfg_date}</Text>
+                      </div>
+                    )}
+                    {scannedItemInfo.warranty_expiry && (
+                      <div>
+                        <Text type="secondary" style={{ fontSize: '11px', display: 'block' }}>Warranty Expiry</Text>
+                        <Tag color="blue" style={{ fontWeight: 700, marginTop: '2px' }}>{scannedItemInfo.warranty_expiry}</Tag>
+                      </div>
+                    )}
+                    {scannedItemInfo.expiry_date && (
+                      <div>
+                        <Text type="secondary" style={{ fontSize: '11px', display: 'block' }}>Expiry Date</Text>
+                        <Tag color="volcano" style={{ fontWeight: 700, marginTop: '2px' }}>{scannedItemInfo.expiry_date}</Tag>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </Card>
           </Col>
         )}
 
@@ -945,6 +1014,7 @@ const AcknowledgeDelivery = () => {
           itemType={activeRow.material_type || 'asset'}
           targetQty={form.getFieldValue(`qty_acc_${activeRow.id}`) ?? activeRow.quantity_packed}
           autoSelectOnOpen={false}
+          serialDetails={activeRow?.serial_details || {}}
         />
       )}
     </div>
