@@ -3979,9 +3979,9 @@ async def acknowledge_mdo(id: int, db: AsyncSession = Depends(get_db), current_u
     from app.api.v1.dispatch import sync_mdos_to_dispatches
     await sync_mdos_to_dispatches(db)
 
-    # Trigger auto acknowledgement merge!
+    # Trigger auto acknowledgement merge — returns the new ack.id (or None)
     from app.services.scm_integration import auto_acknowledge_scm_dispatch
-    await auto_acknowledge_scm_dispatch(db, mdo_id=mdo.id, current_user_id=current_user.id)
+    _aims_ack_id = await auto_acknowledge_scm_dispatch(db, mdo_id=mdo.id, current_user_id=current_user.id)
 
     db.add(ActivityLog(
         user_id=current_user.id,
@@ -3993,4 +3993,16 @@ async def acknowledge_mdo(id: int, db: AsyncSession = Depends(get_db), current_u
     ))
 
     await db.commit()
+
+    # Fire AIMS webhook AFTER commit so that IndentAcknowledgementItems are
+    # fully persisted and readable by the webhook service's fresh DB session.
+    if _aims_ack_id:
+        try:
+            import asyncio as _asyncio
+            from app.services.webhook_service import trigger_acknowledgement_webhook
+            _asyncio.create_task(trigger_acknowledgement_webhook(_aims_ack_id))
+        except Exception as _wh_err:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("Failed to schedule AIMS webhook after commit: %s", _wh_err)
+
     return {"success": True, "message": "Dispatch plan delivery successfully acknowledged and SCM records synced."}

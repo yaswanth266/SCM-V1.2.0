@@ -10,9 +10,10 @@ from app.models.indent import Indent, IndentItem, IndentAcknowledgement, IndentA
 from app.models.system import ActivityLog
 
 
-async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_user_id: int) -> None:
+async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_user_id: int) -> int | None:
     """Automatically merges SCM Logistics status updates with Warehouse and Indent modules.
     Sets the linked Material Issue to 'acknowledged' and creates a completed IndentAcknowledgement.
+    Returns the new IndentAcknowledgement.id so the caller can fire the AIMS webhook AFTER db.commit().
     """
     try:
         # 1. Fetch Logistics Main Dispatch Order
@@ -28,7 +29,7 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
         mdo = res_m.scalar_one_or_none()
         if not mdo:
             print(f"[SCM Integration] MDO {mdo_id} not found.")
-            return
+            return None
 
         print(f"[SCM Integration] Beginning auto-acknowledgement for Dispatch Plan {mdo.mdo_number}")
 
@@ -53,7 +54,7 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
             )
             if res_ack.scalar_one_or_none() is not None:
                 print(f"[SCM Integration] Indent {mdo.indent_id} already has an acknowledgement for MDO {mdo.mdo_number}.")
-                return
+                return None
 
             res_ind = await db.execute(
                 select(Indent)
@@ -63,7 +64,7 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
             indent = res_ind.scalar_one_or_none()
             if not indent:
                 print(f"[SCM Integration] Indent {mdo.indent_id} not found.")
-                return
+                return None
 
             # Extract received quantities to auto-receive (checking DispatchDeliveryAcknowledgement first)
             from app.models.dispatch import DispatchOrder, DispatchDeliveryAcknowledgement
@@ -139,14 +140,8 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
             db.add(ack)
             await db.flush()
 
-            try:
-                from app.services.webhook_service import trigger_acknowledgement_webhook
-                import asyncio
-                asyncio.create_task(trigger_acknowledgement_webhook(ack.id))
-            except Exception as webhook_err:
-                import logging
-                logging.getLogger(__name__).warning("Failed to trigger webhook for auto-acknowledgement: %s", webhook_err)
-
+            # NOTE: The AIMS webhook is fired AFTER db.commit() by the caller (outbound.py)
+            # so that IndentAcknowledgementItems are already committed and visible to the webhook service.
 
             # Create IndentAcknowledgementItem lines and determine parent indent fulfillment status
             from sqlalchemy import func
@@ -154,7 +149,6 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
             
             for ind_item in indent.items:
                 qty_to_ack = received_qtys_to_use.get(ind_item.item_id, 0.0)
-
 
                 # Fetch past acknowledged quantity for this item in database to calculate total acknowledged qty
                 from app.models.indent import IndentAcknowledgementItem as _IAI
@@ -351,7 +345,13 @@ async def auto_acknowledge_scm_dispatch(db: AsyncSession, mdo_id: int, current_u
                 )
             )
 
+            # Return ack.id so the caller can fire the AIMS webhook after db.commit()
+            return ack.id
+
+        return None
+
     except Exception as e:
         # Safe catch to ensure core logistics operations are never blocked by secondary auto-merging
         import logging
         logging.getLogger(__name__).exception("Failed to execute SCM auto-acknowledgement merge.")
+        return None

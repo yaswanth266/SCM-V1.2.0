@@ -1492,13 +1492,26 @@ async def acknowledge_delivery(
                         veh.feedback = payload.discrepancy_description or "Delivered and acknowledged successfully."
                         db.add(veh)
 
-                # Trigger auto acknowledgement merge!
+                # Trigger auto acknowledgement merge — returns the new ack.id (or None)
                 from app.services.scm_integration import auto_acknowledge_scm_dispatch
-                await auto_acknowledge_scm_dispatch(db, mdo_id=mdo.id, current_user_id=current_user.id)
+                _aims_ack_id = await auto_acknowledge_scm_dispatch(db, mdo_id=mdo.id, current_user_id=current_user.id)
         except Exception as e:
             print(f"Error updating MDO status upon acknowledgement: {e}")
+            _aims_ack_id = None
 
     await db.commit()
+
+    # Fire AIMS webhook AFTER commit so that IndentAcknowledgementItems are
+    # fully persisted and readable by the webhook service's fresh DB session.
+    if _aims_ack_id:
+        try:
+            import asyncio as _asyncio
+            from app.services.webhook_service import trigger_acknowledgement_webhook
+            _asyncio.create_task(trigger_acknowledgement_webhook(_aims_ack_id))
+        except Exception as _wh_err:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("Failed to schedule AIMS webhook after commit: %s", _wh_err)
+
     return {
         "success": True, 
         "acknowledgement_number": ack_number, 
