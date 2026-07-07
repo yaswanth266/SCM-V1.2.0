@@ -93,6 +93,9 @@ async def list_indents(
     if template_type:
         query = query.where(Indent.template_type == template_type)
         count_query = count_query.where(Indent.template_type == template_type)
+    else:
+        query = query.where(Indent.template_type.is_(None))
+        count_query = count_query.where(Indent.template_type.is_(None))
 
     # Draft indents must only be visible to the user who raised them
     from sqlalchemy import or_

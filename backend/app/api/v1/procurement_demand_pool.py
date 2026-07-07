@@ -76,6 +76,7 @@ async def list_demand_pool(
             selectinload(Indent.warehouse),
         )
         .where(Indent.status.in_(["approved", "partially_fulfilled"]))
+        .where(Indent.template_type.is_(None))
     )
     if warehouse_id:
         q = q.where(Indent.warehouse_id == warehouse_id)
