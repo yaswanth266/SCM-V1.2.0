@@ -17,9 +17,7 @@ from sqlalchemy import select, func, and_, or_, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.stock import StockLedger, StockBalance
-from app.models.consumption import ConsumptionEntry, ConsumptionItem
 from app.models.procurement import PurchaseOrder, PurchaseOrderItem
-from app.models.accounts import Invoice, InvoiceItem, AccountLedger, ChartOfAccounts
 from app.models.master import Item, Vendor, ItemCategory
 from app.models.warehouse import Warehouse
 
@@ -58,37 +56,7 @@ REPORT_SCHEMA = {
             "category": (ItemCategory, ItemCategory.id == Item.category_id),
         },
     },
-    "consumption": {
-        "label": "Consumption",
-        "join": [
-            (ConsumptionEntry, ConsumptionEntry.id == ConsumptionItem.entry_id),
-            (Item, Item.id == ConsumptionItem.item_id),
-        ],
-        "dimensions": {
-            "item_code": Item.item_code,
-            "item_name": Item.name,
-            "category": ItemCategory.name,
-            "department": ConsumptionEntry.department,
-            "cost_center": ConsumptionEntry.cost_center,
-            "consumption_date": cast(ConsumptionEntry.consumption_date, Date),
-            "consumption_month": func.date_format(ConsumptionEntry.consumption_date, "%Y-%m"),
-            "source": ConsumptionEntry.source,
-        },
-        "measures": {
-            "qty": (func.coalesce(func.sum(ConsumptionItem.qty), 0), "sum"),
-            "amount": (func.coalesce(func.sum(ConsumptionItem.amount), 0), "sum"),
-            "entry_count": (func.count(func.distinct(ConsumptionEntry.id)), "count"),
-            "line_count": (func.count(ConsumptionItem.id), "count"),
-        },
-        "filterable": {
-            "item_id": ConsumptionItem.item_id,
-            "department": ConsumptionEntry.department,
-            "consumption_date": ConsumptionEntry.consumption_date,
-        },
-        "extra_joins_for_dim": {
-            "category": (ItemCategory, ItemCategory.id == Item.category_id),
-        },
-    },
+
     "purchase_orders": {
         "label": "Purchase Orders",
         # BUG-FIN-113: cancelled POs distort summary measures; filtered below
@@ -125,37 +93,7 @@ REPORT_SCHEMA = {
             "category": (ItemCategory, ItemCategory.id == Item.category_id),
         },
     },
-    "invoices": {
-        "label": "Invoices",
-        "join": [
-            (Invoice, Invoice.id == InvoiceItem.invoice_id),
-            (Item, Item.id == InvoiceItem.item_id),
-        ],
-        "dimensions": {
-            "invoice_number": Invoice.invoice_number,
-            "invoice_type": Invoice.invoice_type,
-            "party_type": Invoice.party_type,
-            "item_code": Item.item_code,
-            "item_name": Item.name,
-            "invoice_status": Invoice.status,
-            "invoice_date": cast(Invoice.invoice_date, Date),
-            "invoice_month": func.date_format(Invoice.invoice_date, "%Y-%m"),
-        },
-        "measures": {
-            "qty": (func.coalesce(func.sum(InvoiceItem.qty), 0), "sum"),
-            "amount": (func.coalesce(func.sum(InvoiceItem.amount), 0), "sum"),
-            "tax_amount": (func.coalesce(func.sum(InvoiceItem.tax_amount), 0), "sum"),
-            "invoice_count": (func.count(func.distinct(Invoice.id)), "count"),
-        },
-        "filterable": {
-            "party_id": Invoice.party_id,
-            "party_type": Invoice.party_type,
-            "invoice_status": Invoice.status,
-            "invoice_date": Invoice.invoice_date,
-            "invoice_type": Invoice.invoice_type,
-        },
-        "extra_joins_for_dim": {},
-    },
+
     "stock_balance": {
         "label": "Current Stock Balance",
         "join": [
@@ -320,9 +258,7 @@ async def run_report(
     # we use the global SELECT and let SQLAlchemy figure out joins.
     fact_table_map = {
         "stock_ledger": StockLedger,
-        "consumption": ConsumptionItem,
         "purchase_orders": PurchaseOrderItem,
-        "invoices": InvoiceItem,
         "stock_balance": StockBalance,
     }
     fact = fact_table_map[src]
@@ -359,9 +295,7 @@ async def run_report(
     # BUG-FIN-113: filter out cancelled rows from invoice / PO schemas — they
     # bias all summary measures. Anyone needing visibility into cancellations
     # can add an explicit invoice_status / po_status filter.
-    if src == "invoices":
-        q = q.where(Invoice.status != "cancelled")
-    elif src == "purchase_orders":
+    if src == "purchase_orders":
         q = q.where(PurchaseOrder.status != "cancelled")
 
     # Group by all dimensions

@@ -30,13 +30,10 @@ from app.models.procurement import (
     Quotation, QuotationItem,
     PurchaseOrder, PurchaseOrderItem,
 )
-from app.models.accounts import Invoice, Payment, CreditNote
-from app.models.asset import Asset
 from app.models.approval import ApprovalWorkflow, ApprovalLevel
 from app.models.audit import StockAudit, StockAuditItem, BinReplenishmentRule
 from app.models.transfer import StockTransfer, StockTransferItem
 from app.models.returns import PurchaseReturn
-from app.models.consumption import ConsumptionEntry
 from app.models.stock import StockLedger, StockBalance
 from app.models.grn import PutawayOrder, PutawayItem, GoodsReceiptNote
 from app.models.system import SystemSetting, NumberSeries, FileAttachment
@@ -51,6 +48,10 @@ router = APIRouter()
 
 def _paged(items, total, page, page_size):
     return build_paginated_response(items, total, page, page_size)
+
+
+def generate_asset_code(serial: str, item_code: str) -> str:
+    return f"{item_code}-1-{serial}"
 
 
 async def _require(db, model, pk, name):
@@ -420,17 +421,7 @@ async def delete_warehouse(
     return {"success": True}
 
 
-# ==================== assets DELETE ====================
 
-@router.delete("/assets/{asset_id}")
-async def delete_asset(
-    asset_id: int,
-    db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
-):
-    a = await _require(db, Asset, asset_id, "Asset")
-    a.status = "disposed"
-    await db.flush()
-    return {"success": True, "soft_deleted": True}
 
 
 # ==================== approval workflows ====================
@@ -627,7 +618,6 @@ async def stock_balance_breakdown(
                     raw_serial = raw_serial[len(new_prefix):]
                     
             if s.item:
-                from app.services.asset_service import generate_asset_code
                 if s.item.item_type == "asset" and not act_asset_code:
                     act_asset_code = generate_asset_code(raw_serial, s.item.item_code)
                 elif s.item.item_type == "consumable" and not act_consumable_code:
@@ -653,7 +643,6 @@ async def stock_balance_breakdown(
         if r.item and r.item.item_type in ("asset", "consumable") and not sns and not acs and not ccs:
             qty_int = int(r.total_qty)
             if qty_int > 0:
-                from app.services.asset_service import generate_asset_code
                 from app.models.warehouse import SerialNumber as DB_SerialNumber
                 
                 i = 1

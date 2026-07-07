@@ -36,15 +36,10 @@ const MODULES = [
   { id: 'warehouse',   name: 'Warehouse',       desc: 'GRN, quality, putaway, issues',       icon: <HomeOutlined />,             color: '#F09000', bg: '#FFEAD2', path: '/warehouse/grn' },
   { id: 'inventory',   name: 'Inventory',       desc: 'Stock, transfers, audit, replenish',  icon: <InboxOutlined />,            color: '#900078', bg: '#F7E3F2', path: '/inventory/stock-balance' },
   { id: 'indent',      name: 'Indent',          desc: 'Field indents & acknowledgement',     icon: <FileTextOutlined />,         color: '#481890', bg: '#EEE6F7', path: '/indent/indents' },
-  { id: 'consumption', name: 'Consumption',     desc: 'Issue tracking & reports',            icon: <AuditOutlined />,            color: '#D80048', bg: '#FDE6EC', path: '/consumption/entry' },
   { id: 'approvals',   name: 'Approvals',       desc: 'Pending workflows',                   icon: <CheckSquareOutlined />,      color: '#900078', bg: '#F7E3F2', path: '/approvals/pending', countKey: 'pending_approvals' },
-  { id: 'accounts',    name: 'Accounts',        desc: 'Invoices, payments, ledger',          icon: <DollarOutlined />,           color: '#F09000', bg: '#FFEAD2', path: '/accounts/invoices' },
-  { id: 'assets',      name: 'Assets',          desc: 'Register & movement',                 icon: <SafetyCertificateOutlined />,color: '#2E7D52', bg: '#E6F4EC', path: '/assets/register' },
-  { id: 'healthcare',  name: 'Healthcare SCM',  desc: 'MMU kits, 108 fleet, programs',       icon: <HeartOutlined />,            color: '#D80048', bg: '#FDE6EC', path: '/healthcare' },
   { id: 'logistics',   name: 'Logistics',       desc: 'B2B dispatches, RFQs & Service Orders',icon: <CarOutlined />,              color: '#096dd9', bg: '#E6F7FF', path: '/logistics/dashboard' },
   { id: 'reports',     name: 'Reports',         desc: 'Pivot, graph, exports',               icon: <BarChartOutlined />,         color: '#481890', bg: '#EEE6F7', path: '/reports' },
   { id: 'settings',    name: 'Settings',        desc: 'Users, roles, system',                icon: <SettingOutlined />,          color: '#7A6D66', bg: '#F4EEEA', path: '/settings/profile' },
-  { id: 'lms',         name: 'Learning Center', desc: 'Tutorials for your role',             icon: <PlayCircleOutlined />,       color: '#2E7D52', bg: '#E6F4EC', path: '/lms', alwaysShow: true },
 ];
 
 // Map module id → permission module name used by hasPermission()
@@ -54,18 +49,10 @@ const PERM_MAP = {
   warehouse: 'warehouse',
   inventory: 'inventory',
   indent: 'indent',
-  consumption: 'consumption',
   approvals: 'approvals',
-  accounts: 'accounts',
-  assets: 'assets',
-  healthcare: 'healthcare',
   logistics: 'logistics',
   reports: 'reports',
   settings: 'settings',
-  // BUG-FE-097: keep PERM_MAP exhaustive so a future tweak to `alwaysShow`
-  // still has a sane fall-through. The lms module is open to every signed-in
-  // user — `alwaysShow` flag remains the source of truth.
-  lms: 'lms',
 };
 
 const firstName = (user) => {

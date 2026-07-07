@@ -20,7 +20,6 @@ from app.models.master import Item, Vendor, VendorItem
 from app.models.stock import StockLedger, StockBalance
 from app.models.procurement import PurchaseOrder, PurchaseOrderItem
 from app.models.mrp import MRPRun, MRPRunItem
-from app.models.healthcare import RateContract, RateContractItem
 from app.models.indent import Indent, IndentItem
 from app.services.number_series import generate_number
 
@@ -260,33 +259,10 @@ async def suggest_vendor_for_item(
     """Returns (vendor_id, rate, lead_time_days).
 
     Priority:
-      1. Active rate contract for this item → cheapest effective_rate
-      2. VendorItem with is_preferred=True
-      3. Any VendorItem with the lowest rate
+      1. VendorItem with is_preferred=True
+      2. Any VendorItem with the lowest rate
     """
-    # 1. Rate contract
-    rc_row = await db.execute(
-        select(RateContract, RateContractItem)
-        .join(RateContractItem, RateContractItem.contract_id == RateContract.id)
-        .where(
-            RateContractItem.item_id == item_id,
-            RateContract.status == "active",
-            RateContract.start_date <= date.today(),
-            RateContract.end_date >= date.today(),
-        )
-        .order_by(RateContractItem.effective_rate.asc())
-        .limit(1)
-    )
-    rc = rc_row.first()
-    if rc:
-        contract, ci = rc
-        # Lead time from vendor master
-        lt_row = await db.execute(
-            select(Vendor.payment_terms_days).where(Vendor.id == contract.vendor_id)
-        )
-        return contract.vendor_id, ci.effective_rate or D0, 0
-
-    # 2. Preferred VendorItem
+    # 1. Preferred VendorItem
     pref_row = await db.execute(
         select(VendorItem, Vendor)
         .join(Vendor, Vendor.id == VendorItem.vendor_id)
@@ -299,7 +275,7 @@ async def suggest_vendor_for_item(
         vi, vendor = pref
         return vi.vendor_id, vi.rate or D0, vi.lead_time_days or 0
 
-    # 3. Cheapest VendorItem
+    # 2. Cheapest VendorItem
     any_row = await db.execute(
         select(VendorItem, Vendor)
         .join(Vendor, Vendor.id == VendorItem.vendor_id)

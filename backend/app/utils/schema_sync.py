@@ -1459,26 +1459,6 @@ async def ensure_search_indexes(session: AsyncSession) -> None:
             pass  # Index already exists — safe to ignore
 
 
-async def ensure_asset_consumable_code_schema(session: AsyncSession) -> None:
-    if not _should_sync("asset_consumable_code_schema"):
-        return
-    import sqlalchemy as sa
-    conn = await session.connection()
-    cols = await conn.run_sync(
-        lambda sync_conn: sa.inspect(sync_conn).get_columns("serial_numbers")
-    )
-    col_names = {c["name"] for c in cols}
-    if "asset_code" not in col_names:
-        try:
-            await conn.execute(text("ALTER TABLE serial_numbers ADD COLUMN asset_code VARCHAR(100) NULL"))
-        except Exception:
-            pass
-    if "consumable_code" not in col_names:
-        try:
-            await conn.execute(text("ALTER TABLE serial_numbers ADD COLUMN consumable_code VARCHAR(100) NULL"))
-        except Exception:
-            pass
-
 
 async def ensure_item_sub_classes_schema(session: AsyncSession) -> None:
     if not _should_sync("item_sub_classes_schema"):

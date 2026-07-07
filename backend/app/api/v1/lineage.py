@@ -26,8 +26,6 @@ from app.models.indent import Indent
 from app.models.procurement import MaterialRequest, PurchaseOrder
 from app.models.grn import GoodsReceiptNote, PutawayOrder
 from app.models.issue import MaterialIssue
-from app.models.consumption import ConsumptionEntry
-from app.models.accounts import Invoice, Payment
 from app.models.returns import PurchaseReturn
 from app.models.transfer import StockTransfer
 from app.models.audit import StockAudit
@@ -50,9 +48,6 @@ async def _doc_summary(db, type_: str, id_: int) -> Optional[dict]:
         "goods_receipt_note": (GoodsReceiptNote, GoodsReceiptNote.grn_number, GoodsReceiptNote.status),
         "putaway_order": (PutawayOrder, PutawayOrder.putaway_number, PutawayOrder.status),
         "material_issue": (MaterialIssue, MaterialIssue.issue_number, MaterialIssue.status),
-        "consumption_entry": (ConsumptionEntry, ConsumptionEntry.entry_number, ConsumptionEntry.status),
-        "invoice": (Invoice, Invoice.invoice_number, Invoice.status),
-        "payment": (Payment, Payment.payment_number, Payment.status),
         "purchase_return": (PurchaseReturn, PurchaseReturn.return_number, PurchaseReturn.status),
         # BUG-INV-102: include stock_transfer in lineage map.
         "stock_transfer": (StockTransfer, StockTransfer.transfer_number, StockTransfer.status),
@@ -133,27 +128,6 @@ async def _upstream_for(db, type_: str, id_: int) -> list[dict]:
             if row.mr_id:
                 d = await _doc_summary(db, "material_request", row.mr_id)
                 if d: out.append(d)
-    elif type_ == "consumption_entry":
-        row = (await db.execute(
-            select(ConsumptionEntry.source_issue_id).where(ConsumptionEntry.id == id_)
-        )).first()
-        if row and row.source_issue_id:
-            d = await _doc_summary(db, "material_issue", row.source_issue_id)
-            if d: out.append(d)
-    elif type_ == "invoice":
-        row = (await db.execute(
-            select(Invoice.po_id).where(Invoice.id == id_)
-        )).first()
-        if row and row.po_id:
-            d = await _doc_summary(db, "purchase_order", row.po_id)
-            if d: out.append(d)
-    elif type_ == "payment":
-        row = (await db.execute(
-            select(Payment.invoice_id).where(Payment.id == id_)
-        )).first()
-        if row and row.invoice_id:
-            d = await _doc_summary(db, "invoice", row.invoice_id)
-            if d: out.append(d)
     elif type_ == "purchase_return":
         row = (await db.execute(
             select(PurchaseReturn.grn_id).where(PurchaseReturn.id == id_)
@@ -192,33 +166,6 @@ async def _downstream_for(db, type_: str, id_: int) -> list[dict]:
         for pr_id in await _ids_by(db, PurchaseReturn, PurchaseReturn.grn_id, id_):
             d = await _doc_summary(db, "purchase_return", pr_id)
             if d: out.append(d)
-    elif type_ == "material_issue":
-        for ce_id in await _ids_by(db, ConsumptionEntry, ConsumptionEntry.source_issue_id, id_):
-            d = await _doc_summary(db, "consumption_entry", ce_id)
-            if d: out.append(d)
-    elif type_ == "invoice":
-        for p_id in await _ids_by(db, Payment, Payment.invoice_id, id_):
-            d = await _doc_summary(db, "payment", p_id)
-            if d: out.append(d)
-    elif type_ == "purchase_return":
-        # BUG-INV-103: a purchase_return can be downstream-linked to a debit
-        # note / credit-note invoice when the vendor agrees to refund. Surface
-        # any Invoice rows that reference this PR via reference_type/id so the
-        # lineage chain is bidirectional.
-        try:
-            inv_rows = (await db.execute(
-                select(Invoice.id).where(
-                    Invoice.reference_type == "purchase_return",
-                    Invoice.reference_id == id_,
-                )
-            )).all()
-            for r in inv_rows:
-                d = await _doc_summary(db, "invoice", r[0])
-                if d:
-                    out.append(d)
-        except Exception:
-            # Invoice may not have reference_type/id columns on legacy schemas
-            pass
     return out
 
 
@@ -274,8 +221,8 @@ async def get_lineage(
     """
     SUPPORTED_TYPES = {
         "indent", "material_request", "purchase_order", "goods_receipt_note",
-        "putaway_order", "material_issue", "consumption_entry",
-        "invoice", "payment", "purchase_return", "stock_transfer",
+        "putaway_order", "material_issue",
+        "purchase_return", "stock_transfer",
         "stock_audit",
     }
     if source_type not in SUPPORTED_TYPES:

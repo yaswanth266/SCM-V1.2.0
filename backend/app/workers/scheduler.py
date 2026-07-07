@@ -245,44 +245,6 @@ async def _job_low_stock() -> None:
             logger.exception("scheduler: low_stock failed: %s", exc)
 
 
-async def _job_recall_ack_reminder() -> None:
-    """Daily 09:00. Remind managers of in-progress recalls without traces."""
-    from app.models.healthcare import BatchRecall, BatchRecallTrace
-
-    async with AsyncSessionLocal() as session:
-        try:
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-            # In-progress recalls that haven't completed AND were initiated > 24h ago
-            stmt = (
-                select(BatchRecall.id, BatchRecall.recall_number,
-                       BatchRecall.severity, BatchRecall.initiated_at)
-                .where(BatchRecall.status.in_(["initiated", "in_progress"]))
-                .where(BatchRecall.initiated_at <= cutoff)
-            )
-            recalls = (await session.execute(stmt)).all()
-            if not recalls:
-                logger.info("scheduler: recall_ack — no stale recalls")
-                return
-            sample = ", ".join(f"{r.recall_number} ({r.severity})" for r in recalls[:5])
-            recipients = await _notify_managers(
-                session,
-                title=f"Open batch recalls: {len(recalls)} need acknowledgement",
-                message=(
-                    f"The following recalls have been open >24h: {sample}"
-                    f"{' …' if len(recalls) > 5 else ''}. "
-                    "Confirm acknowledgement and update trace status."
-                ),
-                notification_type="error",
-                module="compliance",
-                reference_type="batch_recall",
-            )
-            await session.commit()
-            logger.info("scheduler: recall_ack — %s recalls, notified %s",
-                        len(recalls), recipients)
-        except Exception as exc:
-            await session.rollback()
-            logger.exception("scheduler: recall_ack failed: %s", exc)
-
 
 async def _job_batch_expire() -> None:
     """Daily 00:30. Flip status='expired' on batches past expiry_date.
@@ -349,10 +311,7 @@ class NotificationScheduler:
         sched.add_job(_job_low_stock, IntervalTrigger(hours=4),
                       id="low_stock", replace_existing=True,
                       misfire_grace_time=1800, coalesce=True)
-        # Daily 09:00 UTC
-        sched.add_job(_job_recall_ack_reminder, CronTrigger(hour=9, minute=0),
-                      id="recall_ack_reminder", replace_existing=True,
-                      misfire_grace_time=3600, coalesce=True)
+
         # Daily 00:30 UTC — flip expired batches
         sched.add_job(_job_batch_expire, CronTrigger(hour=0, minute=30),
                       id="batch_expire", replace_existing=True,

@@ -765,9 +765,7 @@ const MainLayout = () => {
     user?.full_name || user?.username || 'User';
 
   const isLauncher = location.pathname === '/launcher';
-  // Learning Center renders full-bleed like the launcher — no sider, no topbar
-  const isLms = location.pathname.startsWith('/lms');
-  const _rawModule = (isLauncher || isLms) ? null : moduleForPath(location.pathname);
+  const _rawModule = isLauncher ? null : moduleForPath(location.pathname);
   // 2026-05-03: filter topnav tabs by the same server-driven allowedKeys
   // whitelist the sidebar uses, so admin (and every other role) only sees
   // tabs they're authorized to open. Without this, admin's topnav showed
@@ -791,10 +789,10 @@ const MainLayout = () => {
 
   // Hide the legacy left sidebar whenever we have a recognized module —
   // module-aware top nav (or a single-page module like Dashboard) replaces it.
-  const hideSidebar = isLauncher || isLms || inModule;
+  const hideSidebar = isLauncher || inModule;
 
   const layoutClass = [
-    (isLauncher || isLms) ? 'bavya-launcher-mode' : '',
+    isLauncher ? 'bavya-launcher-mode' : '',
     showTopnav ? 'bavya-topnav-mode' : '',
     hideSidebar ? 'bavya-no-sider' : '',
   ]

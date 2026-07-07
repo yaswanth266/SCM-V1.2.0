@@ -140,15 +140,6 @@ export const MODULE_NAVS = {
       { label: 'Consignments', path: '/logistics/consignments' },
     ],
   },
-  consumption: {
-    label: 'Consumption',
-    matchPrefix: '/consumption',
-    color: '#D80048',
-    tabs: [
-      { label: 'Entries', path: '/consumption/entry' },
-      { label: 'Reports', path: '/consumption/reports' },
-    ],
-  },
   approvals: {
     label: 'Approvals',
     matchPrefix: '/approvals',
@@ -173,30 +164,6 @@ export const MODULE_NAVS = {
           'warehouse_manager', 'warehouse_operator', 'store_keeper',
           'purchase_manager', 'purchase_officer']
       },
-    ],
-  },
-  accounts: {
-    label: 'Accounts',
-    matchPrefix: '/accounts',
-    color: '#F09000',
-    tabs: [
-      { label: 'Chart of Accounts', path: '/accounts/coa' },
-      { label: 'Account Mappings', path: '/accounts/mappings' },
-      { label: 'Invoices', path: '/accounts/invoices' },
-      { label: 'Payments', path: '/accounts/payments' },
-      { label: 'Credit Notes', path: '/accounts/credit-notes' },
-      { label: 'Ledger', path: '/accounts/ledger' },
-      { label: 'Financial Reports', path: '/accounts/reports' },
-    ],
-  },
-  assets: {
-    label: 'Assets',
-    matchPrefix: '/assets',
-    color: '#481890',
-    tabs: [
-      { label: 'Asset Register', path: '/assets/register' },
-      { label: 'Asset Movement', path: '/assets/movement' },
-      { label: 'Asset - Spare Mapping', path: '/assets/spare-mapping' },
     ],
   },
   settings: {
@@ -226,14 +193,6 @@ export const MODULE_NAVS = {
           { label: 'System Reports', path: '/settings/reports/system' }
         ]
       }
-    ],
-  },
-  healthcare: {
-    label: 'Healthcare SCM',
-    matchPrefix: '/healthcare',
-    color: '#D80048',
-    tabs: [
-      { label: 'Healthcare Dashboard', path: '/healthcare' },
     ],
   },
   compliance: {

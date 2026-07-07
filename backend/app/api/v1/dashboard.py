@@ -7,7 +7,6 @@ from app.models.stock import StockBalance
 from app.models.procurement import PurchaseOrder, MaterialRequest
 from app.models.grn import GoodsReceiptNote
 from app.models.indent import Indent
-from app.models.accounts import Invoice
 from app.models.approval import ApprovalRequest
 from app.models.master import Item
 from app.services.report_service import dashboard_kpis, low_stock_report, expiry_report

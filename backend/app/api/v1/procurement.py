@@ -1207,112 +1207,12 @@ async def create_purchase_order(
     # references an approved MR, an accepted quotation, or an active rate
     # contract for the vendor (covers the negotiated-rate path).
     if not payload.mr_id and not payload.quotation_id:
-        # Fall back to checking that an active rate contract exists for vendor+items.
-        try:
-            from app.models.healthcare import RateContract, RateContractItem
-            from datetime import date as _date
-            today = _date.today()
-            item_ids_for_rc = [li.item_id for li in payload.items]
-            rc_rows = (await db.execute(
-                select(RateContractItem.item_id)
-                .join(RateContract, RateContract.id == RateContractItem.contract_id)
-                .where(
-                    RateContract.vendor_id == payload.vendor_id,
-                    RateContract.status == "active",
-                    RateContract.start_date <= today,
-                    RateContract.end_date >= today,
-                    RateContractItem.item_id.in_(item_ids_for_rc),
-                )
-            )).all()
-            covered = {r.item_id for r in rc_rows}
-            missing = [iid for iid in item_ids_for_rc if iid not in covered]
-            if missing:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "PO must originate from an approved MR, an accepted quotation, "
-                        "or an active rate contract covering all items. No source found for items: "
-                        f"{missing}"
-                    ),
-                )
-        except HTTPException:
-            raise
-        except Exception:
-            logger.exception("Rate-contract source check failed for PO creation; refusing")
-            raise HTTPException(
-                status_code=400,
-                detail="PO must originate from an approved MR, an accepted quotation, or an active rate contract.",
-            )
+        raise HTTPException(
+            status_code=400,
+            detail="PO must originate from an approved MR or an accepted quotation.",
+        )
 
-    # BUG-PRO-083 / BUG-PRO-084 fix: enforce rate-contract pricing/qty caps when an
-    # active RC covers the line — even if the PO came in via MR / quotation path.
-    rc_min_order_values: dict[int, dict] = {}  # contract_id → {min_order_value, contract_number}
-    try:
-        from app.models.healthcare import RateContract, RateContractItem
-        from datetime import date as _date
-        today = _date.today()
-        item_ids_for_rc = [li.item_id for li in payload.items]
-        rc_rows = (await db.execute(
-            select(RateContractItem, RateContract)
-            .join(RateContract, RateContract.id == RateContractItem.contract_id)
-            .where(
-                RateContract.vendor_id == payload.vendor_id,
-                RateContract.status == "active",
-                RateContract.start_date <= today,
-                RateContract.end_date >= today,
-                RateContractItem.item_id.in_(item_ids_for_rc),
-            )
-        )).all()
-        rc_caps_by_item: dict[int, dict] = {}
-        for rci, rc in rc_rows:
-            rc_caps_by_item[rci.item_id] = {
-                "effective_rate": Decimal(str(rci.effective_rate or 0)),
-                "min_qty": Decimal(str(rci.min_qty or 0)),
-                "max_qty": Decimal(str(rci.max_qty or 0)),
-                "contract_number": rc.contract_number,
-            }
-            # BUG-PRO-085 fix: also capture min_order_value so we can enforce it
-            # against the PO grand_total once it's computed.
-            rc_min_order_values[rc.id] = {
-                "min_order_value": Decimal(str(rc.min_order_value or 0)),
-                "contract_number": rc.contract_number,
-            }
-        for li in payload.items:
-            cap = rc_caps_by_item.get(li.item_id)
-            if not cap:
-                continue
-            li_qty = Decimal(str(li.qty or 0))
-            li_rate = Decimal(str(li.rate or 0))
-            if cap["effective_rate"] > 0 and li_rate > cap["effective_rate"]:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"PO rate {li_rate} exceeds rate-contract "
-                        f"{cap['contract_number']} effective rate {cap['effective_rate']} "
-                        f"for item {li.item_id}"
-                    ),
-                )
-            if cap["min_qty"] > 0 and li_qty < cap["min_qty"]:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"PO qty {li_qty} is below RC {cap['contract_number']} "
-                        f"min_qty {cap['min_qty']} for item {li.item_id}"
-                    ),
-                )
-            if cap["max_qty"] > 0 and li_qty > cap["max_qty"]:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"PO qty {li_qty} exceeds RC {cap['contract_number']} "
-                        f"max_qty {cap['max_qty']} for item {li.item_id}"
-                    ),
-                )
-    except HTTPException:
-        raise
-    except Exception:
-        # RC cap check is advisory; log but do not bypass the rest of the create.
-        logger.exception("Rate-contract cap check failed for PO create vendor_id=%s", payload.vendor_id)
+
 
     # BUG-PRO-014 / BUG-PRO-022 fix: do NOT swallow non-HTTPException failures
     # of the medicine compliance gate. Hard-fail on any unexpected error so we
@@ -1446,24 +1346,7 @@ async def create_purchase_order(
     po.tax_amount = total_tax
     po.grand_total = subtotal + total_tax
 
-    # BUG-PRO-085 fix: enforce RC min_order_value against the freshly computed
-    # PO grand_total. If any of the RCs covering this PO has a positive
-    # min_order_value and the PO falls below it, refuse.
-    try:
-        for _rc_id, _info in (rc_min_order_values or {}).items():
-            mov = _info["min_order_value"]
-            if mov > 0 and Decimal(str(po.grand_total or 0)) < mov:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"PO grand_total {po.grand_total} is below rate-contract "
-                        f"{_info['contract_number']} min_order_value {mov}"
-                    ),
-                )
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception("min_order_value check failed (non-HTTP); continuing")
+
 
     # BUG-PRO-021 fix: refuse zero-value POs ONLY when all rates are provided.
     # If supplier is expected to fill rates during acknowledgment, allow grand_total=0.
@@ -3287,19 +3170,7 @@ async def deactivate_vendor(
             refs.append(f"{po_count} open purchase order(s)")
     except Exception:
         pass
-    # Unpaid invoices
-    try:
-        from app.models.accounts import Invoice  # type: ignore
-        inv_count = (await db.execute(
-            select(func.count(Invoice.id)).where(
-                Invoice.vendor_id == vendor_id,
-                ~Invoice.status.in_(["paid", "cancelled"]),
-            )
-        )).scalar() or 0
-        if inv_count:
-            refs.append(f"{inv_count} unpaid invoice(s)")
-    except Exception:
-        pass
+
 
     if refs and not force:
         raise HTTPException(

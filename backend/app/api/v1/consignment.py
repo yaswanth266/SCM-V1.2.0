@@ -267,17 +267,13 @@ async def _fetch_serial_details_for_packages(db: AsyncSession, pkgs: list) -> di
         return {}
         
     from app.models.warehouse import SerialNumber as _SN
-    from app.models.asset import Asset as _As
     
     stmt_sns = select(_SN).options(joinedload(_SN.batch)).where(_SN.serial_number.in_(all_sns))
     sns_res = await db.execute(stmt_sns)
     sns_rows = sns_res.scalars().all()
     sns_map = {s.serial_number: s for s in sns_rows}
     
-    stmt_assets = select(_As).where(_As.serial_number.in_(all_sns))
-    assets_res = await db.execute(stmt_assets)
-    assets_rows = assets_res.scalars().all()
-    assets_map = {a.serial_number: a for a in assets_rows}
+    assets_map = {}
     
     details = {}
     for sn_str in all_sns:
@@ -308,7 +304,6 @@ async def _get_scanned_code_details(db: AsyncSession, code: str) -> Optional[dic
         return None
         
     from app.models.warehouse import SerialNumber as _SN, Batch as _Batch
-    from app.models.asset import Asset as _Asset
     
     # 1. Try finding in SerialNumber
     stmt = select(_SN).options(joinedload(_SN.item), joinedload(_SN.batch)).where(
@@ -321,10 +316,7 @@ async def _get_scanned_code_details(db: AsyncSession, code: str) -> Optional[dic
     res = await db.execute(stmt)
     sn = res.scalars().first()
     
-    # 2. Try finding in Asset
-    stmt_asset = select(_Asset).options(joinedload(_Asset.category)).where(_Asset.asset_code == code)
-    res_asset = await db.execute(stmt_asset)
-    asset_obj = res_asset.scalars().first()
+    asset_obj = None
     
     if not sn and not asset_obj:
         # 3. Try finding in Batch as a consumable batch number

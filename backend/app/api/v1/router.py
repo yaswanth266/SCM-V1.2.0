@@ -6,10 +6,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.api.v1 import (
     auth, users, procurement, procurement_demand_pool, warehouse,
-    inventory, indent, consumption, approval,
-    accounts, assets, barcode, dashboard, notifications,
-    healthcare, outbound, drift_fixes, rules, compliance, documents, mrp, reports_v2, lineage, alerts,
-    rate_contracts, cycle_count, landed_cost, lms, sidebar, packaging, inward, dispatch, api_keys, external,
+    inventory, indent, approval,
+    barcode, dashboard, notifications,
+    outbound, drift_fixes, rules, compliance, documents, mrp, reports_v2, lineage, alerts,
+    cycle_count, sidebar, packaging, inward, dispatch, api_keys, external,
     logistics, carrier_auth, carrier_portal,
     vendor_auth, vendor_portal,
     consignment, bulk_upload, vehicles, project_templates, hrms_webhook,
@@ -37,29 +37,20 @@ api_router.include_router(indent.router, prefix="/indent/indents", tags=["Indent
 api_router.include_router(indent.ack_router, prefix="/indent", tags=["Indent Acknowledgement"])
 api_router.include_router(vehicles.router, prefix="/masters/vehicles", tags=["Vehicle Master"])
 api_router.include_router(project_templates.router, prefix="/masters/project-indent-templates", tags=["Project Indent Templates"])
-api_router.include_router(consumption.router, prefix="/consumption", tags=["Consumption"])
-
-
 api_router.include_router(approval.router, prefix="/approvals", tags=["Approval Workflow"])
 api_router.include_router(rules.router, prefix="/automation", tags=["Business Rules Engine"])
-api_router.include_router(accounts.router, prefix="/accounts", tags=["Accounts"])
-api_router.include_router(assets.router, prefix="/assets", tags=["Asset Management"])
 api_router.include_router(barcode.router, prefix="/barcode", tags=["Barcode / QR"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 api_router.include_router(notifications.router, prefix="/notifications", tags=["Notifications"])
-api_router.include_router(healthcare.router, prefix="/healthcare", tags=["Healthcare SCM"])
 api_router.include_router(compliance.router, prefix="/compliance", tags=["Healthcare Compliance"])
 api_router.include_router(documents.router, prefix="/documents", tags=["Document Management"])
 api_router.include_router(mrp.router, prefix="/mrp", tags=["Demand Planning / MRP"])
 api_router.include_router(reports_v2.router, prefix="/settings/reports-v2", tags=["Reports v2 (configurable)"])
 api_router.include_router(lineage.router, prefix="/lineage", tags=["Document Lineage"])
 api_router.include_router(alerts.router, prefix="/alerts", tags=["Alerts (Expiry / Reorder / ABC)"])
-api_router.include_router(rate_contracts.router, prefix="/rate-contracts", tags=["Rate Contracts"])
 api_router.include_router(cycle_count.router, prefix="/cycle-count", tags=["Cycle Count"])
-api_router.include_router(landed_cost.router, prefix="/landed-costs", tags=["Landed Cost"])
 api_router.include_router(outbound.router, prefix="/outbound", tags=["Outbound"])
 api_router.include_router(drift_fixes.router, tags=["Drift Fixes"])
-api_router.include_router(lms.router, prefix="/lms", tags=["LMS"])
 api_router.include_router(sidebar.router, tags=["Me / Sidebar"])
 api_router.include_router(logistics.router, prefix="/logistics", tags=["Logistics Management"])
 api_router.include_router(carrier_auth.router, prefix="/carrier-auth", tags=["Carrier Authentication"])
@@ -382,41 +373,6 @@ async def stock_balance_summary_alias(
             "low_stock_alerts": int(low), "expiring_soon": int(expiring)}
 
 
-@alias_router.get("/consumption/reports/summary")
-async def consumption_report_summary_alias(
-    date_from: str = Query(None),
-    date_to: str = Query(None),
-    project_id: int = Query(None),
-    department: str = Query(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Alias: frontend calls /consumption/reports/summary"""
-    from app.services.report_service import consumption_summary_report
-    return await consumption_summary_report(db, date_from, date_to, project_id, department)
-
-
-@alias_router.get("/consumption/reports/trend")
-async def consumption_report_trend_alias(
-    item_id: int = Query(None),
-    months: int = Query(12),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Alias: frontend calls /consumption/reports/trend"""
-    from app.services.report_service import consumption_trend_report
-    return await consumption_trend_report(db, item_id, months)
-
-
-@alias_router.get("/assets/stats")
-async def assets_stats_alias(
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    from app.models.asset import Asset
-    total = (await db.execute(select(func.count(Asset.id)))).scalar() or 0
-    return {"total_assets": total, "active": total, "in_maintenance": 0, "disposed": 0}
-
 
 @alias_router.get("/settings/roles")
 async def settings_roles_list(
@@ -649,60 +605,6 @@ async def settings_role_permissions_update(
     return {"success": True, "message": "Permissions saved successfully"}
 
 
-@alias_router.get("/consumption/reports/department-wise")
-@alias_router.get("/consumption/reports/by-department")
-async def consumption_dept_alias(
-    date_from: str = Query(None), date_to: str = Query(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    from app.api.v1.consumption import rpt_consumption_department
-    return await rpt_consumption_department(date_from=date_from, date_to=date_to, db=db, current_user=current_user)
-
-
-@alias_router.get("/consumption/reports/project-wise")
-@alias_router.get("/consumption/reports/by-project")
-async def consumption_project_alias(
-    date_from: str = Query(None), date_to: str = Query(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    from app.api.v1.consumption import rpt_consumption_project
-    return await rpt_consumption_project(date_from=date_from, date_to=date_to, db=db, current_user=current_user)
-
-
-@alias_router.get("/consumption/reports/top-items")
-async def consumption_top_items_alias(
-    limit: int = Query(10),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return []
-
-
-@alias_router.get("/consumption/reports/detailed")
-async def consumption_detailed_alias(
-    page_size: int = Query(100),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return {"items": [], "total": 0}
-
-
-@alias_router.get("/assets/search")
-async def assets_search_alias(
-    barcode: str = Query(None),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    if not barcode:
-        return []
-    from app.models.asset import Asset
-    result = await db.execute(select(Asset).where(Asset.barcode == barcode).limit(1))
-    asset = result.scalar_one_or_none()
-    if asset:
-        return [{"id": asset.id, "name": asset.name, "asset_code": asset.asset_code}]
-    return []
 
 
 @alias_router.get("/masters/customers")

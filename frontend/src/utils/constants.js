@@ -133,10 +133,7 @@ export const MODULES = {
   WAREHOUSE: 'warehouse',
   INVENTORY: 'inventory',
   INDENT: 'indent',
-  CONSUMPTION: 'consumption',
   APPROVALS: 'approvals',
-  ACCOUNTS: 'accounts',
-  ASSETS: 'assets',
   SETTINGS: 'settings',
 };
 
@@ -276,15 +273,8 @@ export const MENU_CONFIG = [
       { key: 'indent-acknowledgement', label: 'Acknowledgement', path: '/indent/acknowledgement' },
     ],
   },
-  {
-    key: 'consumption',
-    label: 'Consumption',
-    icon: 'PieChartOutlined',
-    children: [
-      { key: 'consumption-entry', label: 'Consumption Entry', path: '/consumption/entry' },
-      { key: 'consumption-reports', label: 'Consumption Reports', path: '/consumption/reports' },
-    ],
-  },
+
+
   {
     key: 'approvals',
     label: 'Approvals',
@@ -294,36 +284,6 @@ export const MENU_CONFIG = [
       { key: 'approvals-workflow-config', label: 'Workflow Config', path: '/approvals/workflow-config' },
     ],
   },
-  {
-    key: 'accounts',
-    label: 'Accounts',
-    icon: 'DollarOutlined',
-    children: [
-      { key: 'accounts-invoices', label: 'Invoices', path: '/accounts/invoices' },
-      { key: 'accounts-payments', label: 'Payments', path: '/accounts/payments' },
-      { key: 'accounts-ledger', label: 'Ledger', path: '/accounts/ledger' },
-      { key: 'accounts-credit-notes', label: 'Credit Notes', path: '/accounts/credit-notes' },
-    ],
-  },
-  {
-    key: 'assets',
-    label: 'Assets',
-    icon: 'ToolOutlined',
-    children: [
-      { key: 'assets-register', label: 'Asset Register', path: '/assets/register' },
-      { key: 'assets-movement', label: 'Asset Movement', path: '/assets/movement' },
-      { key: 'assets-spare-mapping', label: 'Asset - Spare Mapping', path: '/assets/spare-mapping' },
-    ],
-  },
-  {
-    key: 'healthcare',
-    label: 'Healthcare SCM',
-    icon: 'MedicineBoxOutlined',
-    children: [
-      { key: 'healthcare-dashboard', label: 'Healthcare Dashboard', path: '/healthcare' },
-    ],
-  },
-
   {
     key: 'settings',
     label: 'Settings',

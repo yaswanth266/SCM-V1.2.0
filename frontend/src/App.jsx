@@ -101,7 +101,7 @@ const Vehicles = lazy(() => import('./pages/inventory/masters/Vehicles'));
 const ProjectIndentTemplateForm = lazy(() => import('./pages/inventory/masters/ProjectIndentTemplateForm'));
 const ProjectIndentTemplateList = lazy(() => import('./pages/inventory/masters/ProjectIndentTemplateList'));
 
-const Lms = lazy(() => import('./pages/lms/Lms'));
+
 
 /* Procurement */
 const MaterialRequests = lazy(() => import('./pages/procurement/MaterialRequests'));
@@ -144,8 +144,7 @@ const DispatchForm = lazy(() => import('./pages/warehouse/DispatchForm'));
 const AcknowledgeDelivery = lazy(() => import('./pages/warehouse/AcknowledgeDelivery'));
 
 
-/* Healthcare SCM */
-const Healthcare = lazy(() => import('./pages/Healthcare'));
+
 
 /* Inventory */
 const StockBalance = lazy(() => import('./pages/inventory/StockBalance'));
@@ -168,10 +167,7 @@ const TemplateIndentList = lazy(() => import('./pages/indent/TemplateIndentList'
 const TemplateIndentForm = lazy(() => import('./pages/indent/TemplateIndentForm'));
 
 
-/* Consumption */
-const ConsumptionEntry = lazy(() => import('./pages/consumption/ConsumptionEntry'));
-const ConsumptionEntryForm = lazy(() => import('./pages/consumption/ConsumptionEntryForm'));
-const ConsumptionReports = lazy(() => import('./pages/consumption/ConsumptionReports'));
+
 
 /* Approvals */
 const PendingApprovals = lazy(() => import('./pages/approvals/PendingApprovals'));
@@ -180,35 +176,18 @@ const WorkflowConfigForm = lazy(() => import('./pages/approvals/WorkflowConfigFo
 const SlaBreaches = lazy(() => import('./pages/approvals/SlaBreaches'));
 const BusinessRules = lazy(() => import('./pages/automation/BusinessRules'));
 
-/* Accounts */
-const Invoices = lazy(() => import('./pages/accounts/Invoices'));
-const InvoiceForm = lazy(() => import('./pages/accounts/InvoiceForm'));
-const Payments = lazy(() => import('./pages/accounts/Payments'));
-const PaymentForm = lazy(() => import('./pages/accounts/PaymentForm'));
-const Ledger = lazy(() => import('./pages/accounts/Ledger'));
-const CreditNotes = lazy(() => import('./pages/accounts/CreditNotes'));
-const CreditNoteForm = lazy(() => import('./pages/accounts/CreditNoteForm'));
-const ChartOfAccountsPage = lazy(() => import('./pages/accounts/ChartOfAccounts'));
-const AccountMappingsPage = lazy(() => import('./pages/accounts/AccountMappings'));
-const FinancialReportsPage = lazy(() => import('./pages/accounts/FinancialReports'));
 const ComplianceDashboard = lazy(() => import('./pages/compliance/ComplianceDashboard'));
 const DocumentsPage = lazy(() => import('./pages/documents/Documents'));
 const MRPDashboard = lazy(() => import('./pages/mrp/MRPDashboard'));
 const AlertsDashboard = lazy(() => import('./pages/alerts/AlertsDashboard'));
 const ReportBuilder = lazy(() => import('./pages/settings/reports/ReportBuilder'));
 
-/* Assets */
-const AssetRegister = lazy(() => import('./pages/assets/AssetRegister'));
-const AssetForm = lazy(() => import('./pages/assets/AssetForm'));
-const AssetMovement = lazy(() => import('./pages/assets/AssetMovement'));
-const AssetMovementForm = lazy(() => import('./pages/assets/AssetMovementForm'));
-const AssetSpareMapping = lazy(() => import('./pages/assets/AssetSpareMapping'));
+
 
 /* Reports */
 const InventoryReports = lazy(() => import('./pages/inventory/reports/InventoryReports'));
 const ProcurementReports = lazy(() => import('./pages/procurement/reports/ProcurementReports'));
-const ConsumptionReportPage = lazy(() => import('./pages/consumption/reports/ConsumptionReportPage'));
-const AccountsReports = lazy(() => import('./pages/accounts/reports/AccountsReports'));
+
 const SystemReports = lazy(() => import('./pages/settings/reports/SystemReports'));
 
 /* Logistics */
@@ -482,8 +461,6 @@ const App = () => {
           <Route element={<MainLayout />}>
             {/* Launcher (Bavya home) */}
             <Route path="/launcher" element={<AppLauncher />} />
-            {/* LMS — accessible to every authenticated user */}
-            <Route path="/lms" element={<Lms />} />
             <Route path="/warehouse" element={<ModuleIndexRedirect moduleId="warehouse" fallback="/warehouse/dashboard" />} />
             <Route path="/warehouse/dashboard" element={<PermissionRoute module="warehouse"><WarehouseDashboard /></PermissionRoute>} />
             <Route path="/warehouse/masters/warehouses" element={<KeyRoute requiredKey="warehouse-masters-warehouses"><Warehouses /></KeyRoute>} />
@@ -635,12 +612,7 @@ const App = () => {
             <Route path="/indent/reports" element={<PermissionRoute module="indent"><IndentReports /></PermissionRoute>} />
             <Route path="/indent/notifications" element={<PermissionRoute module="indent"><IndentNotifications /></PermissionRoute>} />
 
-            {/* Consumption — guarded by 'consumption' permission */}
-            <Route path="/consumption" element={<ModuleIndexRedirect moduleId="consumption" fallback="/consumption/entry" />} />
-            <Route path="/consumption/entry" element={<KeyRoute requiredKey="consumption-entry"><ConsumptionEntry /></KeyRoute>} />
-            <Route path="/consumption/entry/new" element={<PermissionRoute module="consumption"><ConsumptionEntryForm /></PermissionRoute>} />
-            <Route path="/consumption/entry/:id" element={<PermissionRoute module="consumption"><ConsumptionEntryForm /></PermissionRoute>} />
-            <Route path="/consumption/reports" element={<PermissionRoute module="consumption"><ConsumptionReports /></PermissionRoute>} />
+
 
             {/* Approvals — guarded by 'approvals' permission */}
             <Route path="/approvals" element={<Navigate to="/approvals/pending" replace />} />
@@ -651,37 +623,7 @@ const App = () => {
             <Route path="/approvals/sla-breaches" element={<PermissionRoute module="approvals"><SlaBreaches /></PermissionRoute>} />
             <Route path="/approvals/business-rules" element={<PermissionRoute module="approvals"><BusinessRules /></PermissionRoute>} />
 
-            {/* Accounts — guarded by 'accounts' permission */}
-            <Route path="/accounts" element={<ModuleIndexRedirect moduleId="accounts" fallback="/accounts/coa" />} />
-            <Route path="/accounts/coa" element={<PermissionRoute module="accounts"><ChartOfAccountsPage /></PermissionRoute>} />
-            <Route path="/accounts/mappings" element={<PermissionRoute module="accounts"><AccountMappingsPage /></PermissionRoute>} />
-            <Route path="/accounts/reports" element={<PermissionRoute module="accounts"><AccountsReports /></PermissionRoute>} />
-            <Route path="/accounts/financial-reports" element={<PermissionRoute module="accounts"><FinancialReportsPage /></PermissionRoute>} />
-            <Route path="/accounts/invoices" element={<KeyRoute requiredKey="accounts-invoices"><Invoices /></KeyRoute>} />
-            <Route path="/accounts/invoices/new" element={<PermissionRoute module="accounts"><InvoiceForm /></PermissionRoute>} />
-            <Route path="/accounts/invoices/:id" element={<PermissionRoute module="accounts"><InvoiceForm /></PermissionRoute>} />
-            <Route path="/accounts/payments" element={<KeyRoute requiredKey="accounts-payments"><Payments /></KeyRoute>} />
-            <Route path="/accounts/payments/new" element={<PermissionRoute module="accounts"><PaymentForm /></PermissionRoute>} />
-            <Route path="/accounts/payments/:id" element={<PermissionRoute module="accounts"><PaymentForm /></PermissionRoute>} />
-            <Route path="/accounts/ledger" element={<KeyRoute requiredKey="accounts-ledger"><Ledger /></KeyRoute>} />
-            <Route path="/accounts/credit-notes" element={<KeyRoute requiredKey="accounts-credit-notes"><CreditNotes /></KeyRoute>} />
-            <Route path="/accounts/credit-notes/new" element={<PermissionRoute module="accounts"><CreditNoteForm /></PermissionRoute>} />
-            <Route path="/accounts/credit-notes/:id" element={<PermissionRoute module="accounts"><CreditNoteForm /></PermissionRoute>} />
 
-            {/* Assets — guarded by 'assets' permission */}
-            <Route path="/assets/register" element={<PermissionRoute module="assets"><AssetRegister /></PermissionRoute>} />
-            <Route path="/assets/register/new" element={<PermissionRoute module="assets"><AssetForm /></PermissionRoute>} />
-            <Route path="/assets/register/:id" element={<PermissionRoute module="assets"><AssetForm /></PermissionRoute>} />
-            <Route path="/assets/movement" element={<PermissionRoute module="assets"><AssetMovement /></PermissionRoute>} />
-            <Route path="/assets/movement/new" element={<PermissionRoute module="assets"><AssetMovementForm /></PermissionRoute>} />
-            <Route path="/assets/movement/:id" element={<PermissionRoute module="assets"><AssetMovementForm /></PermissionRoute>} />
-            <Route path="/assets/spare-mapping" element={<PermissionRoute module="assets"><AssetSpareMapping /></PermissionRoute>} />
-
-            {/* Healthcare SCM — guarded by 'healthcare' permission */}
-            <Route path="/healthcare" element={<PermissionRoute module="healthcare"><Healthcare /></PermissionRoute>} />
-
-            {/* Healthcare Compliance — Wave 7 */}
-            <Route path="/compliance" element={<PermissionRoute module="healthcare"><ComplianceDashboard /></PermissionRoute>} />
 
             {/* Document Management — Wave 8 */}
             <Route path="/documents" element={<PermissionRoute module="settings"><DocumentsPage /></PermissionRoute>} />
@@ -695,8 +637,6 @@ const App = () => {
             {/* Legacy redirects for reports */}
             <Route path="/reports/inventory" element={<Navigate to="/inventory/reports" replace />} />
             <Route path="/reports/procurement" element={<Navigate to="/procurement/reports" replace />} />
-            <Route path="/reports/consumption" element={<Navigate to="/consumption/reports" replace />} />
-            <Route path="/reports/accounts" element={<Navigate to="/accounts/reports" replace />} />
             <Route path="/reports/system" element={<Navigate to="/settings/reports/system" replace />} />
             <Route path="/reports/builder" element={<Navigate to="/settings/reports-v2" replace />} />
             <Route path="/reports" element={<Navigate to="/launcher" replace />} />
