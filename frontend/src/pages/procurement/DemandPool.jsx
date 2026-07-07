@@ -119,7 +119,7 @@ const DemandPool = () => {
   const [loading, setLoading] = useState(false);
   const [warehouses, setWarehouses] = useState([]);
   const user = useAuthStore((s) => s.user);
-  const [filterWh, setFilterWh] = useState(user?.warehouse_id || undefined);
+  const [filterWh, setFilterWh] = useState(undefined);
   const [selectedKeys, setSelectedKeys] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);

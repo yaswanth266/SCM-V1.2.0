@@ -72,7 +72,27 @@ async def list_demand_pool(
         .where(Indent.status.in_(["approved", "partially_fulfilled"]))
     )
     if warehouse_id:
-        q = q.where(Indent.warehouse_id == warehouse_id)
+        # BUG-PRO-wh-filter: if the requested warehouse is a CENTRAL/main type,
+        # also include all child/virtual warehouses whose demand rolls up to it
+        # in get_effective_wh(). Without this, filtering by CENTRAL returns 0
+        # results even though all mallavalli/virtual-wh indents show as CENTRAL.
+        from app.models.warehouse import Warehouse as _WhFilter
+        wh_row = (await db.execute(
+            select(_WhFilter.type).where(_WhFilter.id == warehouse_id)
+        )).scalar_one_or_none()
+        if wh_row in ("main", "regional"):
+            # Expand: include the warehouse itself + all virtual/mobile children
+            child_ids_rows = (await db.execute(
+                select(_WhFilter.id).where(
+                    (_WhFilter.id == warehouse_id)
+                    | (_WhFilter.type == "virtual")
+                    | (_WhFilter.name.ilike("%MOBILE UNIT%"))
+                ).where(_WhFilter.is_active == True)
+            )).scalars().all()
+            q = q.where(Indent.warehouse_id.in_(child_ids_rows))
+        else:
+            q = q.where(Indent.warehouse_id == warehouse_id)
+
 
     indents = (await db.execute(q.order_by(Indent.id.asc()))).scalars().all()
 
