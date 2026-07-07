@@ -20,7 +20,7 @@ from app.schemas.inventory import (
 from app.services.number_series import generate_number
 from app.services.stock_service import post_stock_ledger
 from app.services.approval_service import submit_for_approval
-from app.utils.dependencies import get_current_user, require_any_role, require_permission
+from app.utils.dependencies import get_current_user, require_any_role, require_permission, require_key
 from app.utils.helpers import paginate_params, build_paginated_response, apply_search_filter
 
 router = APIRouter()
@@ -867,7 +867,7 @@ async def submit_transfer(
 async def approve_transfer(
     transfer_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role("admin", "warehouse_manager", "approver")),
+    current_user: User = Depends(require_key("inventory-stock-transfer")),
 ):
     result = await db.execute(
         select(StockTransfer).options(selectinload(StockTransfer.items))
@@ -916,7 +916,7 @@ async def approve_transfer(
 async def dispatch_transfer(
     transfer_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role("admin", "warehouse_manager")),
+    current_user: User = Depends(require_key("inventory-stock-transfer")),
 ):
     result = await db.execute(
         select(StockTransfer).options(selectinload(StockTransfer.items))
@@ -961,7 +961,7 @@ async def receive_transfer(
     transfer_id: int,
     payload: dict | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role("admin", "warehouse_manager")),
+    current_user: User = Depends(require_key("inventory-stock-transfer")),
 ):
     """Receive stock at destination.
 
@@ -1089,9 +1089,7 @@ async def receive_transfer(
 async def cancel_transfer(
     transfer_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager",
-    )),
+    current_user: User = Depends(require_key("inventory-stock-transfer")),
 ):
     """BUG-INV-064: cancel a stock transfer.
 
@@ -1157,9 +1155,7 @@ async def cancel_transfer(
 async def cancel_stock_transfer_alias(
     transfer_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager",
-    )),
+    current_user: User = Depends(require_key("inventory-stock-transfer")),
 ):
     """Alias: POST /inventory/stock-transfers/{id}/cancel."""
     return await cancel_transfer(transfer_id=transfer_id, db=db, current_user=current_user)
@@ -1213,7 +1209,7 @@ async def list_audits(
 async def create_audit(
     payload: AuditCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role("admin", "warehouse_manager", "auditor")),
+    current_user: User = Depends(require_key("inventory-stock-audit")),
 ):
     audit_number = await generate_number(db, "warehouse", "stock_audit")
     variance_count = 0
@@ -1256,10 +1252,7 @@ async def create_audit(
 async def adjust_audit(
     audit_id: int,
     db: AsyncSession = Depends(get_db),
-    # BUG-INV-081: maker-checker — adjustments require a separate approver role
-    # (not just the warehouse_manager who created the audit). super_admin/admin
-    # bypass for emergency corrections.
-    current_user: User = Depends(require_any_role("admin", "super_admin", "approver", "auditor")),
+    current_user: User = Depends(require_key("inventory-stock-audit")),
 ):
     """Apply stock adjustments based on audit findings.
 
@@ -1566,7 +1559,7 @@ async def submit_stock_transfer_alias(
 async def approve_stock_transfer_alias(
     transfer_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role("admin", "warehouse_manager", "approver")),
+    current_user: User = Depends(require_key("inventory-stock-transfer")),
 ):
     """B1 fix: alias now enforces same role check as canonical route."""
     return await approve_transfer(transfer_id=transfer_id, db=db, current_user=current_user)
@@ -1576,7 +1569,7 @@ async def approve_stock_transfer_alias(
 async def dispatch_stock_transfer_alias(
     transfer_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role("admin", "warehouse_manager")),
+    current_user: User = Depends(require_key("inventory-stock-transfer")),
 ):
     """B1 fix: alias now enforces same role check as canonical route."""
     return await dispatch_transfer(transfer_id=transfer_id, db=db, current_user=current_user)
@@ -1587,7 +1580,7 @@ async def receive_stock_transfer_alias(
     transfer_id: int,
     payload: dict | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role("admin", "warehouse_manager")),
+    current_user: User = Depends(require_key("inventory-stock-transfer")),
 ):
     """B1 fix: alias now enforces same role check as canonical route."""
     return await receive_transfer(transfer_id=transfer_id, payload=payload, db=db, current_user=current_user)
@@ -1610,7 +1603,7 @@ async def list_stock_audits_alias(
 async def create_stock_audit_alias(
     payload: AuditCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role("admin", "warehouse_manager", "auditor")),
+    current_user: User = Depends(require_key("inventory-stock-audit")),
 ):
     """Alias: POST /inventory/stock-audits -> delegates to /inventory/audits."""
     return await create_audit(payload=payload, db=db, current_user=current_user)

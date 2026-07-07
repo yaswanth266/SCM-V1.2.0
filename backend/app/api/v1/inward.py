@@ -13,7 +13,7 @@ from app.models.procurement import PurchaseOrder, PurchaseOrderItem
 from app.models.master import Vendor, Item, UOM
 from app.schemas.warehouse import MaterialInwardCreate, MaterialInwardResponse
 from app.services.number_series import generate_number
-from app.utils.dependencies import get_current_user
+from app.utils.dependencies import get_current_user, require_key
 from app.utils.helpers import paginate_params, build_paginated_response, apply_search_filter
 
 logger = logging.getLogger(__name__)
@@ -70,7 +70,7 @@ async def list_material_inwards(
     vendor_id: int = Query(None),
     po_number: str = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-material-inward")),
 ):
     offset, limit = paginate_params(page, page_size)
     query = select(MaterialInward)
@@ -111,7 +111,7 @@ async def list_material_inwards(
 async def fetch_po_details(
     po_number: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-material-inward")),
 ):
     # FIX-INWARD-001: Always look up the is_current version for a given base_po_number.
     # When a PO is amended, the old po_number still exists in the DB but should
@@ -189,7 +189,7 @@ async def fetch_po_details(
 async def create_material_inward(
     payload: MaterialInwardCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-material-inward")),
 ):
     if payload.po_id:
         po_res = await db.execute(
@@ -286,7 +286,7 @@ async def create_material_inward(
 async def get_material_inward(
     id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-material-inward")),
 ):
     result = await db.execute(
         select(MaterialInward)
@@ -309,7 +309,7 @@ async def get_material_inward(
 async def complete_material_inward(
     id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-material-inward")),
 ):
     result = await db.execute(
         select(MaterialInward)

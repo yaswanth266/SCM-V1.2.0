@@ -251,7 +251,7 @@ async def list_grns(
 async def get_grn(
     grn_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-grn")),
 ):
     result = await db.execute(
         select(GoodsReceiptNote)
@@ -682,7 +682,7 @@ async def create_grn(
 async def submit_grn_for_qi(
     grn_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-grn")),
 ):
     """Submit a draft GRN for quality inspection AND auto-create the QI
     record with one line per GRN item. Previously this just flipped status
@@ -712,7 +712,7 @@ async def submit_grn_for_qi(
 async def complete_grn(
     grn_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-grn")),
 ):
     """Mark a GRN as completed (after QI)."""
     result = await db.execute(select(GoodsReceiptNote).where(GoodsReceiptNote.id == grn_id))
@@ -731,7 +731,7 @@ async def update_grn(
     grn_id: int,
     payload: GRNUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-grn")),
 ):
     """Update a draft GRN.
 
@@ -762,7 +762,7 @@ async def update_grn(
 async def delete_grn(
     grn_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-grn")),
 ):
     """Delete a draft GRN."""
     result = await db.execute(
@@ -831,7 +831,7 @@ async def list_quality_inspections(
     date_from: date = Query(None),
     date_to: date = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-quality-inspection")),
 ):
     offset, limit = paginate_params(page, page_size)
     query = select(QualityInspection).options(
@@ -956,7 +956,7 @@ async def list_quality_inspections(
 async def create_quality_inspection(
     payload: QICreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-quality-inspection")),
 ):
     qi_number = await generate_number(db, "warehouse", "quality_inspection")
     qi = QualityInspection(
@@ -1492,9 +1492,7 @@ async def confirm_putaway_item(
 async def quick_complete_putaway(
     putaway_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "warehouse_operator", "store_keeper"
-    )),
+    current_user: User = Depends(get_current_user),
 ):
     """Bug fix R-011/D-019 — fast-path putaway for warehouses without bin
     hierarchy. Confirms ALL pending items in one shot, posts stock to ledger
@@ -1840,7 +1838,7 @@ async def list_quality_inspections_alias(
 async def get_quality_inspection_alias(
     qi_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-quality-inspection")),
 ):
     """Alias: GET /warehouse/quality-inspections/{id}."""
     result = await db.execute(
@@ -1888,7 +1886,7 @@ async def get_quality_inspection_alias(
 async def create_quality_inspection_alias(
     payload: QICreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-quality-inspection")),
 ):
     """Alias: POST /warehouse/quality-inspections -> delegates to /warehouse/qi."""
     return await create_quality_inspection(payload=payload, db=db, current_user=current_user)
@@ -1898,9 +1896,7 @@ async def create_quality_inspection_alias(
 async def complete_quality_inspection(
     qi_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "quality_inspector", "super_admin", "admin",
-    )),
+    current_user: User = Depends(require_key("warehouse-quality-inspection")),
 ):
     """Complete a quality inspection and AUTO-GENERATE a Putaway order
     from the GRN's accepted items so stock can actually land in bins.
@@ -2052,7 +2048,7 @@ async def complete_quality_inspection(
 async def cancel_quality_inspection(
     qi_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_key("warehouse-quality-inspection")),
 ):
     """B6 fix: QualityInspection has no status column. Cancellation reverts
     the linked GRN to pending_qi and deletes the QI + items."""
@@ -2257,10 +2253,7 @@ async def get_putaway_order_alias(
 async def start_putaway_order(
     putaway_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "store_keeper", "warehouse_operator", "warehouse_manager",
-        "super_admin", "admin",
-    )),
+    current_user: User = Depends(get_current_user),
 ):
     """Flip a draft putaway to in_progress so bin assignments can be saved
     and confirmed. Frontend was calling this URL already but the endpoint
@@ -2291,10 +2284,7 @@ async def update_putaway_order(
     putaway_id: int,
     payload: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "store_keeper", "warehouse_operator", "warehouse_manager",
-        "super_admin", "admin",
-    )),
+    current_user: User = Depends(get_current_user),
 ):
     """Patch select fields on a putaway order (e.g. switch system_directed
     vs manual). Used by the bin-assignment UI; missing endpoint -> 404."""
@@ -2318,10 +2308,7 @@ async def confirm_putaway_item_alias(
     item_id: int,
     payload: PutawayItemUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "store_keeper", "warehouse_operator", "warehouse_manager",
-        "super_admin", "admin",
-    )),
+    current_user: User = Depends(get_current_user),
 ):
     """Plural alias for /putaway/{id}/items/{iid}/confirm — frontend uses
     /putaways/ everywhere, this maps it to the existing handler."""
@@ -2336,10 +2323,7 @@ async def save_putaway_bin_assignments(
     putaway_id: int,
     payload: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "store_keeper", "warehouse_operator", "warehouse_manager",
-        "super_admin", "admin",
-    )),
+    current_user: User = Depends(get_current_user),
 ):
     """Bulk-save bin assignments and batch numbers for a putaway. Frontend posts:
        { items: [{id, actual_bin_id, actual_bin?, batch_number?}, ...] }
@@ -2443,10 +2427,7 @@ async def skip_putaway_item(
     putaway_id: int,
     item_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "store_keeper", "warehouse_operator", "warehouse_manager",
-        "super_admin", "admin",
-    )),
+    current_user: User = Depends(get_current_user),
 ):
     """Mark a putaway item as skipped (couldnt place it for some reason)."""
     result = await db.execute(
@@ -2466,10 +2447,7 @@ async def skip_putaway_item(
 async def complete_putaway_alias(
     putaway_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "store_keeper", "warehouse_operator", "warehouse_manager",
-        "super_admin", "admin",
-    )),
+    current_user: User = Depends(get_current_user),
 ):
     """Plural alias for the existing /putaway/{id}/quick-complete handler."""
     return await quick_complete_putaway(
@@ -3268,9 +3246,7 @@ async def create_material_issue(
 async def bulk_create_material_issues(
     payloads: List[MaterialIssueCreate],
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "warehouse_operator", "store_keeper"
-    )),
+    current_user: User = Depends(get_current_user),
 ):
     """Bulk create draft material issues."""
     if not payloads:
@@ -5120,11 +5096,7 @@ async def get_purchase_return(
 async def create_purchase_return(
     payload: PurchaseReturnCreate,
     db: AsyncSession = Depends(get_db),
-    # BUG-ISS-059 — restrict to roles authorised to create returns.
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "warehouse_operator",
-        "store_keeper", "procurement_manager",
-    )),
+    current_user: User = Depends(require_key("warehouse-purchase-returns")),
 ):
     """Create a purchase return with items, auto-generating the return_number via number series.
 
@@ -5305,10 +5277,7 @@ async def update_purchase_return(
 async def approve_purchase_return(
     return_id: int,
     db: AsyncSession = Depends(get_db),
-    # BUG-ISS-064 — approve must be role-gated.
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "procurement_manager"
-    )),
+    current_user: User = Depends(require_key("warehouse-purchase-returns")),
 ):
     """Approve a draft or pending_approval purchase return.
 
@@ -5466,7 +5435,7 @@ async def get_gate_entry(gp_id: int, db: AsyncSession = Depends(get_db), current
     return data
 
 @router.post("/gate-entries/{gp_id}/cancel")
-async def cancel_gate_entry(gp_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_any_role("super_admin", "admin", "warehouse_manager"))):
+async def cancel_gate_entry(gp_id: int, db: AsyncSession = Depends(get_db), current_user: User = Depends(require_key("warehouse-gate-entry", "logistics-gate-entry"))):
     result = await db.execute(select(GatePass).where(GatePass.id == gp_id))
     gp = result.scalar_one_or_none()
     if not gp:
@@ -5689,9 +5658,7 @@ class _IssueReturnIn(BaseModel):
 async def create_issue_return(
     payload: _IssueReturnIn,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "warehouse_operator"
-    )),
+    current_user: User = Depends(require_key("warehouse-material-issues")),
 ):
     if not payload.items:
         raise HTTPException(status_code=400, detail="At least one return line is required")
@@ -6013,9 +5980,7 @@ async def save_floor_plan_layout(
     warehouse_id: int,
     payload: FloorPlanLayoutPayload,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager",
-    )),
+    current_user: User = Depends(require_key("warehouse-masters-floor-plan", "warehouse-masters-floor-plan-3d", "warehouse-floor-plan")),
 ):
     """Persist x/y/w/h for floors/lines/racks/bins after drag-drop edit."""
     from app.models.warehouse import (

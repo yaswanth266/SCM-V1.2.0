@@ -22,7 +22,7 @@ from app.schemas.warehouse import (
 )
 from app.services.number_series import generate_number
 from app.services.stock_service import post_stock_ledger
-from app.utils.dependencies import get_current_user, require_any_role
+from app.utils.dependencies import get_current_user, require_any_role, require_key
 from app.utils.helpers import paginate_params, build_paginated_response, apply_search_filter
 
 router = APIRouter()
@@ -153,9 +153,7 @@ async def confirm_sales_order(
     so_id: int,
     db: AsyncSession = Depends(get_db),
     # BUG-ISS-067 — confirm needs a role gate.
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "sales_manager", "warehouse_manager"
-    )),
+    current_user: User = Depends(require_key("logistics-so", "logistics")),
 ):
     result = await db.execute(select(SalesOrder).where(SalesOrder.id == so_id))
     so = result.scalar_one_or_none()
@@ -379,9 +377,7 @@ async def confirm_pick_item(
     payload: PickingItemUpdate,
     db: AsyncSession = Depends(get_db),
     # BUG-ISS-071 — picking confirm needs a role gate, not just authentication.
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "warehouse_operator", "picker"
-    )),
+    current_user: User = Depends(require_key("warehouse-dispatch", "logistics-dispatch")),
 ):
     # BUG-ISS-068 — picking confirm posts ledger; we MUST verify the parent
     # PickingOrder is in an active state (released/in_progress) and that the
@@ -678,9 +674,7 @@ async def create_dispatch(
     payload: DispatchCreate,
     db: AsyncSession = Depends(get_db),
     # BUG-ISS-090 — restrict to dispatcher / warehouse roles.
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "warehouse_operator", "dispatcher"
-    )),
+    current_user: User = Depends(require_key("warehouse-dispatch", "logistics-dispatch")),
 ):
     """Create a dispatch order.
 
@@ -721,9 +715,7 @@ async def cancel_dispatch(
     dispatch_id: int,
     db: AsyncSession = Depends(get_db),
     # BUG-ISS-091 — add cancel endpoint that the enum already supports.
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "dispatcher"
-    )),
+    current_user: User = Depends(require_key("warehouse-dispatch", "logistics-dispatch")),
 ):
     """Cancel a non-terminal dispatch order."""
     result = await db.execute(
@@ -749,9 +741,7 @@ async def mark_dispatch_delivered(
     db: AsyncSession = Depends(get_db),
     # BUG-ISS-076 — add mark_delivered for DispatchOrder; previously
     # lifecycle ended at 'dispatched' so customer receipt was unrecorded.
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "dispatcher"
-    )),
+    current_user: User = Depends(require_key("warehouse-dispatch", "logistics-dispatch")),
 ):
     """Record customer receipt of a dispatched order with proof of delivery."""
     payload = payload or {}
@@ -946,9 +936,7 @@ async def approve_gate_pass(
     gp_id: int,
     db: AsyncSession = Depends(get_db),
     # BUG-ISS-084 — gate pass approval needs a role gate.
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "security_officer"
-    )),
+    current_user: User = Depends(require_key("warehouse-gate-entry", "logistics-gate-entry")),
 ):
     result = await db.execute(select(GatePass).where(GatePass.id == gp_id))
     gp = result.scalar_one_or_none()
