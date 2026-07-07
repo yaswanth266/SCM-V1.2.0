@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     HRMS_WEBHOOK_SECRET: str = ""
 
     # AIMS Webhook
-    AIMS_WEBHOOK_URL: str = ""
+    AIMS_WEBHOOK_URL: str = "http://10.2.1.50:8090/api/v1/assets/scm-hooks/indent-acknowledged"
     AIMS_WEBHOOK_SECRET: str = ""
 
     @property
