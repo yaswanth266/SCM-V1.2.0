@@ -216,6 +216,7 @@ export const MENU_CONFIG = [
     label: 'Procurement',
     icon: 'ShoppingCartOutlined',
     children: [
+      { key: 'procurement-demand-pool', label: 'Demand Pool', path: '/procurement/demand-pool' },
       { key: 'procurement-material-requests', label: 'Material Requests', path: '/procurement/material-requests' },
       { key: 'procurement-quotations', label: 'RFQs', path: '/procurement/quotations' },
       { key: 'procurement-purchase-orders', label: 'Purchase Orders', path: '/procurement/purchase-orders' },

@@ -168,7 +168,7 @@ _ROLE_KEYS = {
     },
     'purchase_officer': {
         'lms',
-        'procurement', 'procurement-dashboard', 'procurement-material-requests',
+        'procurement', 'procurement-dashboard', 'procurement-demand-pool', 'procurement-material-requests',
         'procurement-quotations', 'procurement-quotation-comparison',
         'procurement-purchase-orders', 'procurement-notifications',
         'procurement-masters', 'procurement-masters-vendors', 'procurement-masters-vendor-material-mapping',
@@ -176,7 +176,7 @@ _ROLE_KEYS = {
     'purchase_manager': {
         'lms',
         'approvals', 'approvals-pending',
-        'procurement', 'procurement-dashboard', 'procurement-material-requests',
+        'procurement', 'procurement-dashboard', 'procurement-demand-pool', 'procurement-material-requests',
         'procurement-quotations', 'procurement-quotation-comparison',
         'procurement-purchase-orders', 'procurement-reports', 'procurement-notifications',
         'procurement-masters', 'procurement-masters-vendors', 'procurement-masters-vendor-material-mapping',
@@ -296,6 +296,16 @@ async def allowed_keys_for_role(db: AsyncSession, role: Role) -> List[str]:
             mapped_keys.extend([
                 "procurement-masters-vendors",
                 "procurement-masters-vendor-material-mapping",
+            ])
+        elif key == "procurement-transactions":
+            # Permission Manager uses "procurement-transactions" to grant access
+            # to the procurement transaction pages including the demand pool.
+            mapped_keys.extend([
+                "procurement-demand-pool",
+                "procurement-material-requests",
+                "procurement-quotations",
+                "procurement-quotation-comparison",
+                "procurement-purchase-orders",
             ])
         elif key == "masters-users":
             mapped_keys.extend([

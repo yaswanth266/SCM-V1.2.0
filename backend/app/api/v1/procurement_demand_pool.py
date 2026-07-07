@@ -47,13 +47,7 @@ async def list_demand_pool(
     page: int = Query(1, ge=1),
     page_size: int = Query(100, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
-    # BUG-PRO-061 fix: role-gate the demand pool. The pool exposes raw indent
-    # demand across departments and projects — a sensitive procurement view
-    # that should not be open to every authenticated user.
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "purchase_manager", "purchase_officer",
-        "warehouse_manager",
-    )),
+    current_user: User = Depends(get_current_user),
 ):
     """List indent line items with outstanding unacknowledged demand, grouped by
     (warehouse_id, item_id, uom_id).
