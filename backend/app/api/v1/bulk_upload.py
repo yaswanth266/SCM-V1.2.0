@@ -10,7 +10,7 @@ from typing import Optional, List, Dict, Any
 
 from app.database import get_db
 from app.models.user import User
-from app.models.master import Item, ItemCategory, UOM, ItemType
+from app.models.master import Item, ItemCategory, UOM, ItemType, Brand
 from app.models.warehouse import Warehouse, Batch
 from app.utils.dependencies import get_current_user, require_permission
 from app.services.item_coding import generate_item_code, ORG_PREFIX_DEFAULT
@@ -68,6 +68,20 @@ def clean_date(v: str) -> Optional[date]:
             continue
     return None
 
+def clean_valuation_method(v: str) -> str:
+    if not v:
+        return "fifo"
+    val = str(v).strip().lower()
+    if "fefo" in val:
+        return "fefo"
+    if "lifo" in val:
+        return "lifo"
+    if "weighted_average" in val or "average" in val or "weighted" in val:
+        return "weighted_average"
+    if "fifo" in val:
+        return "fifo"
+    return "fifo"
+
 @router.get("/items-bulk/template")
 async def download_template(current_user: User = Depends(get_current_user)):
     """Downloads a sample CSV template for bulk uploading items."""
@@ -115,6 +129,39 @@ async def _bulk_upload_items_impl(
             raise HTTPException(status_code=400, detail="Unable to decode file. Please upload a UTF-8 encoded CSV.")
 
     reader = csv.DictReader(io.StringIO(decoded, newline=None))
+    
+    # Map custom/legacy headers to the expected template keys
+    HEADER_MAPPING = {
+        "item_name": "name",
+        "item_class": "item_type",
+        "category_l1": "category_level_1",
+        "category_l2": "category_level_2",
+        "category_l3": "category_level_3",
+        "indent_uom": "primary_uom",
+        "unit_cost": "purchase_price",
+        "batch_managed": "has_batch",
+        "serial_managed": "has_serial",
+        "expiry_managed": "has_expiry",
+        "issue_method": "valuation_method",
+        "remarks": "description",
+        "brand_name": "brand_name",
+        "manufacturer": "manufacturer",
+        "marketer": "marketer",
+        "sku": "sku"
+    }
+
+    if reader.fieldnames:
+        mapped_fieldnames = []
+        for fn in reader.fieldnames:
+            if not fn:
+                mapped_fieldnames.append(fn)
+                continue
+            fn_clean = fn.strip().lower()
+            if fn_clean in HEADER_MAPPING:
+                mapped_fieldnames.append(HEADER_MAPPING[fn_clean])
+            else:
+                mapped_fieldnames.append(fn_clean)
+        reader.fieldnames = mapped_fieldnames
     
     # Verify minimal headers are present
     headers = [h.strip().lower() for h in (reader.fieldnames or []) if h]
@@ -167,6 +214,11 @@ async def _bulk_upload_items_impl(
     for name in ex_names_res.scalars().all():
         if name:
             existing_item_names.add(name.strip().lower())
+
+    # Get all existing brand codes to prevent duplicates and enable resolution
+    brand_res = await db.execute(select(Brand))
+    all_brands = brand_res.scalars().all()
+    db_brand_codes = {b.code.lower(): b.code for b in all_brands if b.code}
 
     report = []
     has_errors = False
@@ -389,13 +441,17 @@ async def _bulk_upload_items_impl(
                 "has_expiry": parse_bool(cleaned_row.get("has_expiry")),
                 "shelf_life_days": clean_int(cleaned_row.get("shelf_life_days")),
                 "dosage_form": (cleaned_row.get("dosage_form") or "").strip() or None,
-                "valuation_method": (cleaned_row.get("valuation_method") or "fifo").strip().lower(),
+                "valuation_method": clean_valuation_method(cleaned_row.get("valuation_method")),
                 "initial_quantity": initial_qty,
                 "initial_warehouse_str": (cleaned_row.get("initial_warehouse") or "").strip() or None,
                 "initial_warehouse_id": initial_warehouse_id,
                 "initial_bin_code": initial_bin_code,
                 "initial_batch_number": initial_batch_number,
                 "initial_batch_expiry": initial_expiry_date,
+                "sku": (cleaned_row.get("sku") or "").strip() or None,
+                "brand_name": (cleaned_row.get("brand_name") or "").strip() or None,
+                "manufacturer": (cleaned_row.get("manufacturer") or "").strip() or None,
+                "marketer": (cleaned_row.get("marketer") or "").strip() or None,
             })
 
         report.append({
@@ -439,7 +495,7 @@ async def _bulk_upload_items_impl(
             # 1. Resolve & Auto-create UOM if missing
             uom_key = r_data["primary_uom_str"].lower()
             if uom_key not in db_uom_ids:
-                uom_db = (await db.execute(select(UOM).where(func.lower(UOM.name) == uom_key))).scalar_one_or_none()
+                uom_db = (await db.execute(select(UOM).where(func.lower(UOM.name) == uom_key))).scalars().first()
                 if not uom_db:
                     uom_db = UOM(
                         name=r_data["primary_uom_str"],
@@ -451,12 +507,30 @@ async def _bulk_upload_items_impl(
                 db_uom_ids[uom_key] = uom_db.id
             primary_uom_id = db_uom_ids[uom_key]
 
+            # 1.1 Resolve & Auto-create Brand if missing
+            brand_code = None
+            brand_str = r_data.get("brand_name")
+            if brand_str:
+                brand_key = brand_str.strip().lower()
+                if brand_key not in db_brand_codes:
+                    brand_db = (await db.execute(select(Brand).where(func.lower(Brand.code) == brand_key))).scalars().first()
+                    if not brand_db:
+                        brand_db = Brand(
+                            code=brand_str.strip().upper()[:50],
+                            name=brand_str.strip(),
+                            is_active=True
+                        )
+                        db.add(brand_db)
+                        await db.flush()
+                    db_brand_codes[brand_key] = brand_db.code
+                brand_code = db_brand_codes[brand_key]
+
             # 2. Resolve & Auto-create Category Level 1, 2, 3 if missing
             cat1_key = (None, r_data["category_l1"].lower())
             if cat1_key not in db_category_ids:
                 l1_db = (await db.execute(
                     select(ItemCategory).where(ItemCategory.parent_id.is_(None), func.lower(ItemCategory.name) == cat1_key[1])
-                )).scalar_one_or_none()
+                )).scalars().first()
                 if not l1_db:
                     short_code = await _generate_category_short_code(db, None)
                     code_val = await _unique_category_code(db, _category_readable_code(r_data["category_l1"]))
@@ -478,7 +552,7 @@ async def _bulk_upload_items_impl(
             if cat2_key not in db_category_ids:
                 l2_db = (await db.execute(
                     select(ItemCategory).where(ItemCategory.parent_id == l1_id, func.lower(ItemCategory.name) == cat2_key[1])
-                )).scalar_one_or_none()
+                )).scalars().first()
                 if not l2_db:
                     short_code = await _generate_category_short_code(db, l1_id)
                     code_val = await _unique_category_code(db, _category_readable_code(r_data["category_l2"]))
@@ -501,7 +575,7 @@ async def _bulk_upload_items_impl(
             if cat3_key not in db_category_ids:
                 l3_db = (await db.execute(
                     select(ItemCategory).where(ItemCategory.parent_id == l2_id, func.lower(ItemCategory.name) == cat3_key[1])
-                )).scalar_one_or_none()
+                )).scalars().first()
                 if not l3_db:
                     short_code = await _generate_category_short_code(db, l2_id)
                     code_val = await _unique_category_code(db, _category_readable_code(r_data["category_l3"]))
@@ -525,14 +599,14 @@ async def _bulk_upload_items_impl(
             if r_data["initial_quantity"] > 0 and r_data["initial_warehouse_str"]:
                 wh_key = r_data["initial_warehouse_str"].lower()
                 if wh_key not in db_warehouse_ids:
-                    wh_db = (await db.execute(select(Warehouse).where(func.lower(Warehouse.name) == wh_key))).scalar_one_or_none()
+                    wh_db = (await db.execute(select(Warehouse).where(func.lower(Warehouse.name) == wh_key))).scalars().first()
                     if not wh_db:
                         # Slugify and find unique code
                         base_code = f"WH-{_readable_token(r_data['initial_warehouse_str'], 20)}"
                         code_val = base_code
                         suffix_char = ""
                         while True:
-                            dup = (await db.execute(select(Warehouse).where(func.lower(Warehouse.code) == code_val.lower()))).scalar_one_or_none()
+                            dup = (await db.execute(select(Warehouse).where(func.lower(Warehouse.code) == code_val.lower()))).scalars().first()
                             if not dup:
                                 break
                             suffix_char += chr(ord("A") + len(suffix_char))
@@ -581,7 +655,11 @@ async def _bulk_upload_items_impl(
                 dosage_form=r_data["dosage_form"] or ("unit" if r_data["item_type"] == "equipment" else None),
                 valuation_method=r_data["valuation_method"],
                 created_by=current_user.id,
-                is_active=True
+                is_active=True,
+                sku=r_data.get("sku"),
+                brand=brand_code,
+                manufacturer=r_data.get("manufacturer"),
+                marketer=r_data.get("marketer")
             )
             db.add(item)
             await db.flush()
@@ -592,14 +670,14 @@ async def _bulk_upload_items_impl(
                 warehouse = None
                 if initial_warehouse_id:
                     wh_res = await db.execute(select(Warehouse).where(Warehouse.id == initial_warehouse_id))
-                    warehouse = wh_res.scalar_one_or_none()
+                    warehouse = wh_res.scalars().first()
                 if not warehouse:
                     # Fallback to Central
                     wh_res = await db.execute(select(Warehouse).where(func.lower(Warehouse.name) == "central"))
-                    warehouse = wh_res.scalar_one_or_none()
+                    warehouse = wh_res.scalars().first()
                 if not warehouse:
                     fallback_res = await db.execute(select(Warehouse).where(Warehouse.is_active == True).limit(1))
-                    warehouse = fallback_res.scalar_one_or_none()
+                    warehouse = fallback_res.scalars().first()
 
                 if warehouse:
                     # Resolve/create bin
@@ -610,7 +688,7 @@ async def _bulk_upload_items_impl(
                     batch_result = await db.execute(
                         select(Batch).where(Batch.item_id == item.id, Batch.batch_number == batch_number)
                     )
-                    batch = batch_result.scalar_one_or_none()
+                    batch = batch_result.scalars().first()
                     if not batch:
                         if r_data["initial_batch_expiry"]:
                             expiry_date = datetime.combine(r_data["initial_batch_expiry"], datetime.min.time())

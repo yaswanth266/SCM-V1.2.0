@@ -149,16 +149,22 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
 
       const header = lines[0];
       const dataLines = lines.slice(1);
-      setImportProgress({ current: 0, total: dataLines.length });
+      
+      const validRowsReports = validationResult && validationResult.report 
+        ? validationResult.report.filter(r => r.status === 'valid')
+        : [];
+        
+      setImportProgress({ current: 0, total: validRowsReports.length });
 
       let successCount = 0;
       const failedRows = [];
 
-      for (let i = 0; i < dataLines.length; i++) {
-        const rowContent = dataLines[i];
+      for (let i = 0; i < validRowsReports.length; i++) {
+        const r = validRowsReports[i];
+        const rowContent = dataLines[r.row_index - 1];
         const csvContent = `${header}\n${rowContent}`;
         const fileBlob = new Blob([csvContent], { type: 'text/csv' });
-        const file = new File([fileBlob], `row_${i + 1}.csv`, { type: 'text/csv' });
+        const file = new File([fileBlob], `row_${r.row_index}.csv`, { type: 'text/csv' });
 
         const formData = new FormData();
         formData.append('file', file);
@@ -172,7 +178,7 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
           successCount++;
           setImportProgress((prev) => ({ ...prev, current: i + 1 }));
         } catch (err) {
-          console.error(`Failed to import row ${i + 1}:`, err);
+          console.error(`Failed to import row ${r.row_index}:`, err);
           let errorMsg = 'Import failed';
           if (err.response?.data?.detail) {
             const detail = err.response.data.detail;
@@ -186,7 +192,7 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
           } else {
             errorMsg = getErrorMessage(err);
           }
-          failedRows.push({ rowNum: i + 1, error: errorMsg });
+          failedRows.push({ rowNum: r.row_index, error: errorMsg });
           break; // Stop sequential upload on first failure
         }
       }
@@ -453,7 +459,7 @@ const BulkUploadModal = ({ open, onClose, onUploadSuccess }) => {
             disabled={
               fileList.length === 0 ||
               validating ||
-              (validationResult && !validationResult.success)
+              (validationResult && validationResult.valid_rows === 0)
             }
             style={{
               background: 'linear-gradient(90deg, #2563eb 0%, #4f46e5 100%)',

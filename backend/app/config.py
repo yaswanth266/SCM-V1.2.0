@@ -108,4 +108,4 @@ class Settings(BaseSettings):
     }
 
 
-settings = Settings()
+settings = Settings()  # config reload trigger

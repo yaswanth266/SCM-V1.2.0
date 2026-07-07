@@ -133,7 +133,7 @@ app = FastAPI(
     description="Read-only access to the SCM tables AIMS depends on. See /docs.",
 )
 app.add_middleware(
-    CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"],
+    CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["*"],
 )
 
 
@@ -221,3 +221,41 @@ def get_one(resource: str, row_id: str, _: None = Depends(require_key)):
     if not r:
         raise HTTPException(status_code=404, detail="Not found")
     return _clean(dict(r))
+
+
+@app.post("/scm/v1/assets/scm-hooks/indent-acknowledged", tags=["webhook"])
+async def forward_indent_acknowledged(request: Request, x_scm_signature: Optional[str] = Header(None)):
+    """Forward indent acknowledged webhook from SCM backend to AIMS."""
+    import urllib.request
+    import urllib.error
+    import json
+    
+    target_url = "http://10.2.1.50:8090/api/v1/assets/scm-hooks/indent-acknowledged"
+    body = await request.body()
+    
+    headers = {
+        "Content-Type": "application/json"
+    }
+    if x_scm_signature:
+        headers["X-SCM-Signature"] = x_scm_signature
+        
+    req = urllib.request.Request(
+        target_url,
+        data=body,
+        headers=headers,
+        method="POST"
+    )
+    
+    try:
+        with urllib.request.urlopen(req, timeout=10.0) as response:
+            resp_body = response.read().decode("utf-8")
+            status_code = response.status
+            try:
+                return json.loads(resp_body)
+            except Exception:
+                return {"status": status_code, "detail": resp_body}
+    except urllib.error.HTTPError as e:
+        err_body = e.read().decode("utf-8")
+        raise HTTPException(status_code=e.code, detail=f"AIMS responded with error: {err_body}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to connect to AIMS: {e}")
