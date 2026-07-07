@@ -2758,6 +2758,8 @@ async def acknowledge_package(
 
     await db.flush()
 
+    _aims_ack_id = None
+
     # --------------------------------------------------------------------------
     # Sync to Indent Acknowledgement tables
     # --------------------------------------------------------------------------
@@ -2790,6 +2792,7 @@ async def acknowledge_package(
             )
             db.add(indent_ack)
             await db.flush()
+            _aims_ack_id = indent_ack.id
 
             # Load indent items
             indent_items_res = await db.execute(
@@ -2904,6 +2907,17 @@ async def acknowledge_package(
     from app.api.v1.dispatch import sync_mdos_to_dispatches
     await sync_mdos_to_dispatches(db)
     await db.commit()
+
+    # Fire AIMS webhook AFTER commit so that IndentAcknowledgementItems are
+    # fully persisted and readable by the webhook service's fresh DB session.
+    if _aims_ack_id:
+        try:
+            import asyncio as _asyncio
+            from app.services.webhook_service import trigger_acknowledgement_webhook
+            _asyncio.create_task(trigger_acknowledgement_webhook(_aims_ack_id))
+        except Exception as _wh_err:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("Failed to schedule AIMS webhook after package ack commit: %s", _wh_err)
 
     return {
         "success": True,
