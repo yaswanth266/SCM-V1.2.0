@@ -206,7 +206,15 @@ const StockBalance = () => {
       try {
         const [whRes, statsRes] = await Promise.allSettled([
           api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } }),
-          api.get('/inventory/stock-balance/summary'),
+          api.get('/inventory/stock-balance/summary', {
+            params: {
+              warehouse_id: filterWarehouse,
+              category: filterCategory,
+              batch: filterBatch,
+              show_zero_stock: showZeroStock || undefined,
+              search: filterItem,
+            }
+          }),
         ]);
         if (whRes.status === 'fulfilled') {
           const d = whRes.value.data;
@@ -765,6 +773,20 @@ const StockBalance = () => {
 
   const filterToolbar = (
     <Space wrap size="small" style={{ marginLeft: 12 }}>
+      <Input
+        placeholder="Search items by code or name..."
+        value={filterItem}
+        onChange={(e) => {
+          setFilterItem(e.target.value);
+          if (!e.target.value) {
+            setRefreshKey((k) => k + 1);
+          }
+        }}
+        onPressEnter={() => setRefreshKey((k) => k + 1)}
+        allowClear
+        style={{ width: 220 }}
+        size="middle"
+      />
       <Select
         placeholder="Warehouse"
         options={warehouses}
@@ -1076,7 +1098,7 @@ const StockBalance = () => {
           columns={columns}
           fetchFunction={fetchStockBalance}
           rowKey="id"
-          searchPlaceholder="Search items by code or name..."
+          showSearch={false}
           exportFileName="Stock_Balance"
           showExport={false}
           toolbar={filterToolbar}

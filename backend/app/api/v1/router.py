@@ -310,6 +310,11 @@ async def replenishment_tasks_alias(
 
 @alias_router.get("/inventory/stock-balance/summary")
 async def stock_balance_summary_alias(
+    warehouse_id: int = Query(None),
+    category: str = Query(None),
+    batch: str = Query(None),
+    search: str = Query(None),
+    show_zero_stock: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -321,32 +326,24 @@ async def stock_balance_summary_alias(
     total_qty is below the master Item.reorder_level. expiring_soon =
     balances backed by a batch within 30 days of expiring.
     """
+    if not isinstance(warehouse_id, int):
+        warehouse_id = None
+    if not isinstance(category, str):
+        category = None
+    if not isinstance(batch, str):
+        batch = None
+    if not isinstance(search, str):
+        search = None
+    if not isinstance(show_zero_stock, bool):
+        show_zero_stock = False
+
     from datetime import date as _date, timedelta as _td
     from app.models.stock import StockBalance
     from app.models.master import Item as _Item
     from app.models.warehouse import Batch as _Batch
     from app.utils.dependencies import get_user_warehouse_scope_ids
-    q_total_stmt = select(StockBalance.item_id, StockBalance.warehouse_id).distinct()
-    q_value = select(func.coalesce(func.sum(StockBalance.stock_value), 0))
-    today = _date.today()
-    expiring_window = today + _td(days=30)
-    q_low = (
-        select(func.count(StockBalance.id))
-        .select_from(StockBalance)
-        .join(_Item, _Item.id == StockBalance.item_id)
-        .where(_Item.reorder_level > 0, StockBalance.total_qty < _Item.reorder_level)
-    )
-    q_exp = (
-        select(func.count(StockBalance.id))
-        .select_from(StockBalance)
-        .join(_Batch, _Batch.id == StockBalance.batch_id)
-        .where(
-            _Batch.expiry_date.is_not(None),
-            _Batch.expiry_date >= today,
-            _Batch.expiry_date <= expiring_window,
-            StockBalance.total_qty > 0,
-        )
-    )
+    from sqlalchemy import or_
+
     scoped = await get_user_warehouse_scope_ids(
         db,
         current_user.id,
@@ -355,10 +352,69 @@ async def stock_balance_summary_alias(
     if not scoped:
         return {"total_items": 0, "total_value": 0.0, "total_stock_value": 0.0,
                 "low_stock_alerts": 0, "expiring_soon": 0}
-    q_total_stmt = q_total_stmt.where(StockBalance.warehouse_id.in_(scoped))
-    q_value = q_value.where(StockBalance.warehouse_id.in_(scoped))
-    q_low = q_low.where(StockBalance.warehouse_id.in_(scoped))
-    q_exp = q_exp.where(StockBalance.warehouse_id.in_(scoped))
+
+    today = _date.today()
+    expiring_window = today + _td(days=30)
+
+    # Base queries
+    q_total_stmt = select(StockBalance.item_id, StockBalance.warehouse_id).distinct()
+    q_value = select(func.coalesce(func.sum(StockBalance.stock_value), 0))
+    q_low = select(func.count(StockBalance.id)).select_from(StockBalance)
+    q_exp = select(func.count(StockBalance.id)).select_from(StockBalance)
+
+    # Common filter application helper
+    def apply_common_filters(stmt, query_type: str):
+        stmt = stmt.where(StockBalance.warehouse_id.in_(scoped))
+        
+        if warehouse_id is not None:
+            stmt = stmt.where(StockBalance.warehouse_id == warehouse_id)
+            
+        if not show_zero_stock:
+            stmt = stmt.where(
+                or_(
+                    StockBalance.available_qty > 0,
+                    StockBalance.reserved_qty > 0,
+                    StockBalance.transit_qty > 0
+                )
+            )
+            
+        if category or search or query_type == "low":
+            stmt = stmt.join(_Item, _Item.id == StockBalance.item_id)
+            
+        if query_type == "low":
+            stmt = stmt.where(_Item.reorder_level > 0, StockBalance.total_qty < _Item.reorder_level)
+            
+        if category:
+            stmt = stmt.where(
+                (_Item.item_type == category)
+                | (_Item.category_id == (int(category) if str(category).isdigit() else -1))
+            )
+            
+        if search:
+            from app.utils.helpers import apply_search_filter
+            stmt = apply_search_filter(stmt, _Item, search, ["item_code", "readable_code", "name", "sku", "hsn_code"])
+            
+        if batch or query_type == "exp":
+            stmt = stmt.join(_Batch, _Batch.id == StockBalance.batch_id)
+            
+        if batch:
+            stmt = stmt.where(_Batch.batch_number.ilike(f"%{batch.strip()}%"))
+            
+        if query_type == "exp":
+            stmt = stmt.where(
+                _Batch.expiry_date.is_not(None),
+                _Batch.expiry_date >= today,
+                _Batch.expiry_date <= expiring_window,
+                StockBalance.total_qty > 0,
+            )
+            
+        return stmt
+
+    q_total_stmt = apply_common_filters(q_total_stmt, "total")
+    q_value = apply_common_filters(q_value, "value")
+    q_low = apply_common_filters(q_low, "low")
+    q_exp = apply_common_filters(q_exp, "exp")
+
     total = (await db.execute(select(func.count()).select_from(q_total_stmt.subquery()))).scalar() or 0
     value = (await db.execute(q_value)).scalar() or 0
     try:
@@ -369,6 +425,7 @@ async def stock_balance_summary_alias(
         expiring = (await db.execute(q_exp)).scalar() or 0
     except Exception:
         expiring = 0
+
     return {"total_items": total, "total_value": float(value), "total_stock_value": float(value),
             "low_stock_alerts": int(low), "expiring_soon": int(expiring)}
 

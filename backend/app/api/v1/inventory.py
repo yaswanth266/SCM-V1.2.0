@@ -45,6 +45,7 @@ async def get_stock_balances(
     batch: str = Query(None),
     # BUG-INV-135: show items with zero qty if explicitly requested.
     show_zero_stock: bool = Query(False),
+    search: str = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -64,6 +65,8 @@ async def get_stock_balances(
         item_id = None
     if not isinstance(show_zero_stock, bool):
         show_zero_stock = False
+    if not isinstance(search, str):
+        search = None
 
     offset, limit = paginate_params(page, page_size)
     from app.models.warehouse import WarehouseBin, WarehouseRack, WarehouseLine, WarehouseLocation
@@ -131,6 +134,15 @@ async def get_stock_balances(
         )
         query = query.where(StockBalance.item_id.in_(cat_subq))
         count_query = count_query.where(StockBalance.item_id.in_(cat_subq))
+
+    # Apply search filter matching item code or name (similar to /items)
+    if search:
+        from app.models.master import Item as _ItemSearch
+        from app.utils.helpers import apply_search_filter
+        search_subq = select(_ItemSearch.id)
+        search_subq = apply_search_filter(search_subq, _ItemSearch, search, ["item_code", "readable_code", "name", "sku", "hsn_code"])
+        query = query.where(StockBalance.item_id.in_(search_subq))
+        count_query = count_query.where(StockBalance.item_id.in_(search_subq))
 
     # BUG-INV-135: filter by quantity unless show_zero_stock is set.
     if not show_zero_stock:
@@ -1486,6 +1498,7 @@ async def get_stock_balance_alias(
     category: str = Query(None),
     batch: str = Query(None),
     show_zero_stock: bool = Query(False),
+    search: str = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1494,6 +1507,7 @@ async def get_stock_balance_alias(
         page=page, page_size=page_size, item_id=item_id,
         warehouse_id=warehouse_id, batch_id=batch_id,
         category=category, batch=batch, show_zero_stock=show_zero_stock,
+        search=search,
         db=db, current_user=current_user,
     )
 
