@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   Button, Form, Input, InputNumber, Select, Space, DatePicker,
   message, Row, Col, Table, Card, Descriptions, Divider,
-  Typography, Tooltip, Tag, Spin, Popconfirm, Upload, Checkbox,
+  Typography, Tooltip, Tag, Spin, Popconfirm, Upload, Checkbox, Timeline, Modal,
 } from 'antd';
 import {
   PlusOutlined, ArrowLeftOutlined, SendOutlined, EditOutlined,
@@ -45,6 +45,8 @@ const IndentForm = () => {
   const [submitting, setSubmitting] = useState(false);
   const [indent, setIndent] = useState(null);
   const [editMode, setEditMode] = useState(isNew);
+  const [rejectModalOpen, setRejectModalOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
 
   // Items
   const [indentItems, setIndentItems] = useState([
@@ -465,8 +467,10 @@ const IndentForm = () => {
 
   const handleReject = async () => {
     try {
-      await api.post(`/indent/indents/${id}/reject`);
+      await api.post(`/indent/indents/${id}/reject`, { comments: rejectReason });
       message.success('Indent rejected');
+      setRejectModalOpen(false);
+      setRejectReason('');
       fetchIndent();
     } catch (err) {
       message.error(getErrorMessage(err));
@@ -513,9 +517,7 @@ const IndentForm = () => {
             {indent.status === 'pending_approval' && indent.can_approve_now === true && indent.raised_by !== user?.id && (
               <>
                 <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleApprove}>Approve</Button>
-                <Popconfirm title="Reject this indent?" onConfirm={handleReject} okButtonProps={{ danger: true }}>
-                  <Button danger icon={<CloseCircleOutlined />}>Reject</Button>
-                </Popconfirm>
+                <Button danger icon={<CloseCircleOutlined />} onClick={() => setRejectModalOpen(true)}>Reject</Button>
               </>
             )}
             <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/indent/indents')}>Back</Button>
@@ -601,7 +603,7 @@ const IndentForm = () => {
           {existingAttachments.length === 0 ? (
             <Text type="secondary">No attachments</Text>
           ) : (
-            <div>
+            <div style={{ marginBottom: 16 }}>
               {existingAttachments.map((a) => (
                 <Tag
                   key={a.id}
@@ -616,7 +618,82 @@ const IndentForm = () => {
               ))}
             </div>
           )}
+
+          <Divider orientation="left">Approval &amp; Rejection History</Divider>
+          {(!indent.approval_history || indent.approval_history.length === 0) ? (
+            <Text type="secondary">No approval history available</Text>
+          ) : (
+            <div style={{ marginTop: 16 }}>
+              <Timeline
+                items={indent.approval_history.map((h) => {
+                  let color = 'blue';
+                  if (h.action === 'approved') color = 'green';
+                  if (h.action === 'rejected') color = 'red';
+                  if (h.action === 'submitted') color = 'orange';
+
+                  return {
+                    color: color,
+                    children: (
+                      <div>
+                        <Text strong>{h.user_name}</Text>{' '}
+                        {h.position_name && (
+                          <Tag color="cyan" style={{ fontSize: '11px', lineHeight: '16px' }}>
+                            {h.position_name}
+                          </Tag>
+                        )}
+                        <span style={{ marginLeft: 8 }}>
+                          <Tag color={color}>{h.action.toUpperCase()}</Tag>
+                        </span>
+                        <div style={{ fontSize: '12px', color: '#8c8c8c' }}>
+                          {formatDate(h.timestamp)} {h.level ? `(Level ${h.level})` : ''}
+                        </div>
+                        {h.remarks && (
+                          <div style={{ 
+                            marginTop: 4, 
+                            padding: '6px 10px', 
+                            backgroundColor: '#f5f5f5', 
+                            borderLeft: `3px solid ${h.action === 'rejected' ? '#ff4d4f' : '#1890ff'}`,
+                            borderRadius: '0 4px 4px 0',
+                            fontSize: '13px'
+                          }}>
+                            <Text type="secondary">Remarks: </Text>
+                            <Text>{h.remarks}</Text>
+                          </div>
+                        )}
+                      </div>
+                    ),
+                  };
+                })}
+              />
+            </div>
+          )}
         </Card>
+
+        {/* Rejection Comments Modal */}
+        <Modal
+          title="Reject Indent"
+          open={rejectModalOpen}
+          onOk={handleReject}
+          onCancel={() => {
+            setRejectModalOpen(false);
+            setRejectReason('');
+          }}
+          okText="Reject"
+          okButtonProps={{ danger: true, disabled: !rejectReason.trim() }}
+          destroyOnClose
+        >
+          <div style={{ marginBottom: 12 }}>
+            <Text type="secondary">Please provide a reason for rejecting this indent:</Text>
+          </div>
+          <TextArea
+            rows={4}
+            value={rejectReason}
+            onChange={(e) => setRejectReason(e.target.value)}
+            placeholder="Type rejection reason here..."
+            maxLength={500}
+            showCount
+          />
+        </Modal>
       </div>
     );
   }
@@ -784,7 +861,11 @@ const IndentForm = () => {
 
           <Row gutter={16}>
             <Col xs={24} sm={12} md={8}>
-              <Form.Item name="vehicle_code" label="Vehicle Code">
+              <Form.Item
+                name="vehicle_code"
+                label="Vehicle Code"
+                rules={[{ required: true, message: 'Vehicle code is required' }]}
+              >
                 <Select
                   placeholder="Select vehicle code"
                   allowClear
