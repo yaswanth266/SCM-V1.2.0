@@ -28,10 +28,17 @@ class IndentCreate(BaseModel):
     indent_date: Optional[date] = None
     required_date: Optional[date] = None
     department: Optional[str] = None
-    vehicle_code: Optional[str] = None
+    vehicle_code: str
     vehicle_number: Optional[str] = None
     service_code: Optional[str] = None
     template_type: Optional[str] = None
+
+    @field_validator("vehicle_code")
+    @classmethod
+    def val_vehicle_code(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Vehicle code is required")
+        return v.strip()
 
     # BUG-IND-028 — `department_id` is a foreign key to the departments
     # table; previously typed as Optional[str] which silently accepted
@@ -104,6 +111,13 @@ class IndentUpdate(BaseModel):
 
     # while the indent is still in draft status (handler enforces).
     items: Optional[List[IndentItemCreate]] = None
+
+    @field_validator("vehicle_code")
+    @classmethod
+    def val_vehicle_code(cls, v):
+        if v is not None and not v.strip():
+            raise ValueError("Vehicle code cannot be empty")
+        return v.strip() if v is not None else None
 
 class IndentItemResponse(BaseModel):
     id: int
