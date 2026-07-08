@@ -1,7 +1,7 @@
 import logging
 from decimal import Decimal
 from datetime import datetime, timezone, date
-from typing import List, Optional
+from typing import List, Optional, Any
 from pydantic import BaseModel
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, and_, or_
@@ -2872,6 +2872,132 @@ async def clean_serial_numbers(db: AsyncSession, item_id: int, serials: Optional
     return cleaned
 
 
+async def validate_material_issue_items_flow(
+    db: AsyncSession,
+    warehouse_id: int,
+    items: List[Any],
+    is_central: bool,
+):
+    """Validate batches, bins, and serial numbers/asset codes for material issue items."""
+    item_ids = list({it.item_id for it in items if it.item_id})
+    if not item_ids:
+        return
+
+    from app.models.master import Item as _ItemModel
+    
+    rows = await db.execute(
+        select(
+            _ItemModel.id,
+            _ItemModel.item_code,
+            _ItemModel.name,
+            _ItemModel.has_batch,
+            _ItemModel.has_serial,
+            _ItemModel.item_type,
+        ).where(_ItemModel.id.in_(item_ids))
+    )
+    item_meta = {r.id: r for r in rows.all()}
+
+    # Pre-fetch bin IDs to validate they belong to the warehouse
+    bin_ids = list({it.bin_id for it in items if it.bin_id is not None})
+    bin_to_wh = {}
+    if bin_ids:
+        from app.models.warehouse import (
+            WarehouseBin as _Bin, WarehouseRack as _Rack,
+            WarehouseLine as _Line, WarehouseLocation as _Loc,
+        )
+        wh_rows = await db.execute(
+            select(_Bin.id, _Loc.warehouse_id)
+            .join(_Rack, _Rack.id == _Bin.rack_id)
+            .join(_Line, _Line.id == _Rack.line_id)
+            .join(_Loc, _Loc.id == _Line.location_id)
+            .where(_Bin.id.in_(bin_ids))
+        )
+        bin_to_wh = {r[0]: r[1] for r in wh_rows.all()}
+
+    BATCH_REQUIRED_TYPES_MI = {"medicine", "pharma", "drug", "consumable_medicine"}
+
+    for it in items:
+        m = item_meta.get(it.item_id)
+        if not m:
+            raise HTTPException(status_code=400, detail=f"Item ID {it.item_id} not found")
+
+        # 1. Batch Validation
+        requires_batch = is_central and (m.has_batch or (
+            m.item_type and str(m.item_type).lower() in BATCH_REQUIRED_TYPES_MI
+        ))
+        if requires_batch and it.batch_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{m.item_code}: batch_id is required for batch-tracked items (expiry must be verified before issue)."
+            )
+
+        # 2. Bin Validation
+        if is_central and it.bin_id is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{m.item_code}: bin_id is required for central warehouse issues."
+            )
+        if is_central and it.bin_id is not None:
+            wh_for_bin = bin_to_wh.get(it.bin_id)
+            if wh_for_bin is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Bin {it.bin_id} not found"
+                )
+            if wh_for_bin != warehouse_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Bin {it.bin_id} belongs to warehouse {wh_for_bin}, but material issue is for warehouse {warehouse_id}"
+                )
+
+        # 3. Serial/Asset Validation
+        has_serial = bool(m.has_serial)
+        
+        # Clean serial numbers
+        cleaned_sns = await clean_serial_numbers(db, it.item_id, it.serial_numbers)
+        
+        qty_val = it.qty or Decimal("0")
+        
+        # If has_serial is True, serial numbers are mandatory and length must match qty
+        if has_serial:
+            if qty_val % 1 != 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Item {m.name} is serial-tracked, so quantity must be a whole number, but got {qty_val}."
+                )
+            qty_int = int(qty_val)
+            if not cleaned_sns:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Item {m.name} requires serial numbers, but none were provided."
+                )
+            if len(cleaned_sns) != qty_int:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Item {m.name} requires {qty_int} serial numbers, but got {len(cleaned_sns)}."
+                )
+        # If any serial numbers are present, validate that len(cleaned_sns) == qty
+        elif cleaned_sns:
+            if qty_val % 1 != 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Item {m.name} has serial numbers specified, so quantity must be a whole number, but got {qty_val}."
+                )
+            qty_int = int(qty_val)
+            if len(cleaned_sns) != qty_int:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Item {m.name} has {len(cleaned_sns)} serial numbers specified, but quantity is {qty_int}."
+                )
+                
+        # Validate no duplicate serials in the line
+        if cleaned_sns and len(cleaned_sns) != len(set(cleaned_sns)):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Duplicate serial numbers provided for item {m.name}."
+            )
+
+
 @router.post("/material-issues", status_code=201, dependencies=[Depends(require_key("warehouse-material-issues"))])
 async def create_material_issue(
     payload: MaterialIssueCreate,
@@ -2892,10 +3018,6 @@ async def create_material_issue(
     if not payload.items:
         raise HTTPException(status_code=422, detail="At least one item is required")
 
-
-
-
-
     # Resolve central warehouse
     from app.models.warehouse import Warehouse as _Wh, WarehouseConfig
     wh_row = await db.execute(select(_Wh).where(_Wh.id == payload.warehouse_id))
@@ -2909,6 +3031,8 @@ async def create_material_issue(
         for it in payload.items:
             it.batch_id = None
             it.bin_id = None
+
+    await validate_material_issue_items_flow(db, payload.warehouse_id, payload.items, is_central)
 
     # PATIENT SAFETY: block issuing expired medicine batches.
     # BUG-INV-046: use <= today (a batch expiring TODAY is already unusable —
@@ -3272,6 +3396,22 @@ async def bulk_create_material_issues(
                     status_code=403,
                     detail=f"You are not authorised to issue from warehouse {payload.warehouse_id}",
                 )
+
+        # Resolve central warehouse
+        from app.models.warehouse import Warehouse as _Wh, WarehouseConfig
+        wh_row = await db.execute(select(_Wh).where(_Wh.id == payload.warehouse_id))
+        wh = wh_row.scalar_one_or_none()
+        cfg_row = await db.execute(select(WarehouseConfig.is_central).where(WarehouseConfig.warehouse_id == payload.warehouse_id))
+        is_central = cfg_row.scalar()
+        if is_central is None:
+            is_central = wh is not None and wh.parent_id is None
+
+        if not is_central:
+            for it in payload.items:
+                it.batch_id = None
+                it.bin_id = None
+
+        await validate_material_issue_items_flow(db, payload.warehouse_id, payload.items, is_central)
 
         # Safety batch expiry check
         from datetime import date as _date
@@ -3844,6 +3984,9 @@ async def update_material_issue(
             it.batch_id = None
             it.bin_id = None
 
+    if payload.items is not None:
+        await validate_material_issue_items_flow(db, target_wh_id, payload.items, is_central)
+
     # Replace items if provided
     if payload.items is not None:
         from app.models.master import Item as _MIItem
@@ -3957,6 +4100,8 @@ async def issue_material(
 
     if not mi.items or len(mi.items) == 0:
         raise HTTPException(status_code=400, detail="Material issue has no items")
+
+    await validate_material_issue_items_flow(db, mi.warehouse_id, mi.items, is_central)
 
     # Validate serial numbers for serial-tracked items
     serials_to_issue = []
