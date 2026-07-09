@@ -34,8 +34,13 @@ async def list_notifications(
         count_query = count_query.where(Notification.type == notification_type)
     # BUG-FIN-144: honour the `module` query parameter the FE sidebar sends.
     if module:
-        query = query.where(Notification.module == module)
-        count_query = count_query.where(Notification.module == module)
+        if module == "indent":
+            from sqlalchemy import or_
+            query = query.where(or_(Notification.module == "indent", Notification.reference_type == "indent"))
+            count_query = count_query.where(or_(Notification.module == "indent", Notification.reference_type == "indent"))
+        else:
+            query = query.where(Notification.module == module)
+            count_query = count_query.where(Notification.module == module)
 
     total = (await db.execute(count_query)).scalar()
     result = await db.execute(query.offset(offset).limit(limit).order_by(Notification.id.desc()))
