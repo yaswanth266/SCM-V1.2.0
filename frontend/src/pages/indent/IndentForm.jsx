@@ -75,13 +75,18 @@ const IndentForm = () => {
 
   const loadLookups = useCallback(async () => {
     const uid = user?.id;
+    const isUserAdmin = user?.role === 'super_admin' || user?.role === 'admin' || user?.roles?.some(r => r.code === 'super_admin' || r.code === 'admin');
     try {
       const bomParams = { page_size: 200, is_active: true, position_id: user?.position_id || -1 };
+      const projParams = { page_size: 200 };
+      if (!isUserAdmin && uid) {
+        projParams.user_id = uid;
+      }
 
       const [deptRes, whRes, projRes, uomRes, bomRes] = await Promise.allSettled([
         api.get('/masters/departments', { params: { page_size: 200 } }),
         api.get('/masters/warehouses', { params: { page_size: 200, user_id: uid, exclude_virtual: true } }),
-        api.get('/masters/projects', { params: { page_size: 200, user_id: uid } }),
+        api.get('/masters/projects', { params: projParams }),
         api.get('/masters/uom', { params: { page_size: 200 } }),
         api.get('/masters/boms', { params: bomParams }),
       ]);
@@ -811,23 +816,23 @@ const IndentForm = () => {
               JSX entirely caused the field to disappear from the validated
               payload and the submit handler to error with "Warehouse is
               required". */}
-          {warehouses.length <= 1 && (
+          {warehouses.length === 0 && (
             <Form.Item name="warehouse_id" hidden><Input /></Form.Item>
           )}
-          {projects.length <= 1 && (
+          {projects.length === 0 && (
             <Form.Item name="project_id" hidden><Input /></Form.Item>
           )}
           <Form.Item name="source_bom_id" hidden><Input /></Form.Item>
 
           <Row gutter={16}>
-            {warehouses.length > 1 && (
+            {warehouses.length > 0 && (
               <Col xs={24} sm={12} md={8}>
                 <Form.Item name="warehouse_id" label="Warehouse" rules={[{ required: true, message: 'Warehouse is required' }]}>
                   <Select options={warehouses} placeholder="Select warehouse" allowClear showSearch optionFilterProp="label" />
                 </Form.Item>
               </Col>
             )}
-            {projects.length > 1 && (
+            {projects.length > 0 && (
               <Col xs={24} sm={12} md={8}>
                 <Form.Item name="project_id" label="Project" rules={[{ required: true, message: 'Project is required' }]}>
                   <Select options={projects} placeholder="Select project" allowClear optionFilterProp="label" />

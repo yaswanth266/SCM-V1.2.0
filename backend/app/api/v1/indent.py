@@ -437,6 +437,7 @@ async def get_indent(
             selectinload(Indent.items).selectinload(IndentItem.uom),
             selectinload(Indent.warehouse),
             selectinload(Indent.source_bom),
+            selectinload(Indent.project),
             selectinload(Indent.position),
         )
         .where(Indent.id == indent_id)
@@ -555,6 +556,7 @@ async def get_indent(
 
     data = IndentResponse.model_validate(indent).model_dump()
     data["warehouse_name"] = indent.warehouse.name if indent.warehouse else None
+    data["project_name"] = indent.project.name if indent.project else None
     data["source_bom_code"] = indent.source_bom.bom_code if indent.source_bom else None
     data["source_bom_name"] = indent.source_bom.name if indent.source_bom else None
     data["position_id"] = indent.position_id
