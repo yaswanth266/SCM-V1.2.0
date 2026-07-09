@@ -2877,29 +2877,31 @@ async def delete_category(
     return {"success": True, "message": "Category deactivated"}
 
 async def _check_items_view_permission(db: AsyncSession, current_user: User) -> None:
-    """BUG-FE-001: items expose price/MRP/HSN â€” gate to roles that legitimately
+    """BUG-FE-001: items expose price/MRP/HSN — gate to roles that legitimately
     need this. Mirrors vendor pattern in list_vendors."""
-    from app.utils.dependencies import get_user_permissions, get_user_role_codes
-    role_codes = await get_user_role_codes(db, current_user.id)
-    if "super_admin" in role_codes or "admin" in role_codes:
-        return
-    perms = set(await get_user_permissions(db, current_user.id))
-    allowed_modules = {
-        "masters", "masters-items", "procurement", "procurement-purchase-orders",
-        "procurement-material-requests", "procurement-quotations", "procurement-indents",
-        "indent", "indent-indents", "consumption", "consumption-entry", "warehouse",
-        "warehouse-grn", "warehouse-stock", "warehouse-bins", "inventory",
-        "inventory-stock-balance", "inventory-stock-ledger", "accounts", "accounts-invoices",
-        "sales", "sales-orders", "sales-invoices"
-    }
-    has_item_access = False
-    for perm in perms:
-        parts = perm.split('.')
-        if len(parts) == 3:
-            if parts[0] in allowed_modules:
-                has_item_access = True
-                break
-    if not has_item_access:
+    from app.utils.dependencies import check_user_has_any_permission
+    has_perm = await check_user_has_any_permission(
+        db,
+        current_user.id,
+        [
+            ("inventory", "view", "items"),
+            ("masters", "view", "items"),
+            ("procurement", "view", "purchase-orders"),
+            ("procurement", "view", "material-requests"),
+            ("procurement", "view", "quotations"),
+            ("indent", "view", "indents"),
+            ("consumption", "view", "entry"),
+            ("warehouse", "view", "grn"),
+            ("warehouse", "view", "stock"),
+            ("warehouse", "view", "bins"),
+            ("inventory", "view", "stock-balance"),
+            ("inventory", "view", "stock-ledger"),
+            ("accounts", "view", "invoices"),
+            ("sales", "view", "orders"),
+            ("sales", "view", "invoices")
+        ]
+    )
+    if not has_perm:
         raise HTTPException(status_code=403, detail="Permission denied: masters.view.items")
 
 

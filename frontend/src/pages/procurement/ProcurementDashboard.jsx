@@ -127,9 +127,9 @@ const ProcurementDashboard = () => {
           <p style={{ margin: 0, color: '#6C757D' }}>Track MR sourcing pipelines, RFQ comparisons, purchase approvals, spend limits, and vendor performance.</p>
         </div>
         <Space>
-          <Button 
-            type="primary" 
-            icon={<PlusOutlined />} 
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
             onClick={() => navigate('/procurement/material-requests/new')}
             style={{ background: '#D80048', borderColor: '#D80048', height: '40px', borderRadius: '6px' }}
           >
@@ -141,8 +141,8 @@ const ProcurementDashboard = () => {
       {/* KPI Cards Row */}
       <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
         <Col xs={24} sm={12} md={6}>
-          <Card 
-            hoverable 
+          <Card
+            hoverable
             bodyStyle={{ padding: '20px' }}
             style={{ borderRadius: '8px', borderLeft: '4px solid #D80048', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
@@ -154,8 +154,8 @@ const ProcurementDashboard = () => {
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Card 
-            hoverable 
+          <Card
+            hoverable
             bodyStyle={{ padding: '20px' }}
             style={{ borderRadius: '8px', borderLeft: '4px solid #fa8c16', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
@@ -167,8 +167,8 @@ const ProcurementDashboard = () => {
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Card 
-            hoverable 
+          <Card
+            hoverable
             bodyStyle={{ padding: '20px' }}
             style={{ borderRadius: '8px', borderLeft: '4px solid #52c41a', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
@@ -180,8 +180,8 @@ const ProcurementDashboard = () => {
           </Card>
         </Col>
         <Col xs={24} sm={12} md={6}>
-          <Card 
-            hoverable 
+          <Card
+            hoverable
             bodyStyle={{ padding: '20px' }}
             style={{ borderRadius: '8px', borderLeft: '4px solid #fa541c', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
@@ -198,8 +198,8 @@ const ProcurementDashboard = () => {
       <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
         {/* PO Monthly Spend trend */}
         <Col xs={24} lg={16}>
-          <Card 
-            title="Monthly Purchase Order Expenditure Trend" 
+          <Card
+            title="Monthly Purchase Order Expenditure Trend"
             style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
             <div style={{ height: '300px' }}>
@@ -219,8 +219,8 @@ const ProcurementDashboard = () => {
 
         {/* Quotation Conversion Ratio */}
         <Col xs={24} lg={8}>
-          <Card 
-            title="RFQ Sourcing Status" 
+          <Card
+            title="RFQ Sourcing Status"
             style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
             <div style={{ height: '300px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
@@ -259,8 +259,8 @@ const ProcurementDashboard = () => {
       <Row gutter={[16, 16]}>
         {/* Vendor OTIF Bar Chart */}
         <Col xs={24} lg={12}>
-          <Card 
-            title="Vendor On-Time In-Full (OTIF) Compliance" 
+          <Card
+            title="Vendor On-Time In-Full (OTIF) Compliance"
             style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
             <div style={{ height: '300px' }}>
@@ -284,8 +284,8 @@ const ProcurementDashboard = () => {
 
         {/* Recent POs list */}
         <Col xs={24} lg={12}>
-          <Card 
-            title="Recent Purchase Orders" 
+          <Card
+            title="Recent Purchase Orders"
             extra={<Button type="link" onClick={() => navigate('/procurement/purchase-orders')}>View All</Button>}
             style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', height: '100%' }}
           >
@@ -296,9 +296,9 @@ const ProcurementDashboard = () => {
                 renderItem={(item) => (
                   <List.Item
                     actions={[
-                      <Button 
-                        type="link" 
-                        icon={<ArrowRightOutlined />} 
+                      <Button
+                        type="link"
+                        icon={<ArrowRightOutlined />}
                         onClick={() => navigate(`/procurement/purchase-orders/${item.id}`)}
                       />
                     ]}
@@ -335,15 +335,15 @@ const ProcurementDashboard = () => {
       {/* Quick SCM Operations Panel */}
       <Row gutter={[16, 16]} style={{ marginTop: '24px' }}>
         <Col xs={24}>
-          <Card 
-            title="Procurement SCM Actions" 
+          <Card
+            title="Procurement SCM Actions"
             style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
             <Row gutter={[16, 16]}>
               <Col xs={24} sm={12} md={6}>
-                <Button 
-                  type="primary" 
-                  icon={<PlusOutlined />} 
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
                   onClick={() => navigate('/procurement/material-requests/new')}
                   block
                   style={{ background: '#D80048', borderColor: '#D80048', height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
@@ -352,8 +352,8 @@ const ProcurementDashboard = () => {
                 </Button>
               </Col>
               <Col xs={24} sm={12} md={6}>
-                <Button 
-                  icon={<ShoppingOutlined />} 
+                <Button
+                  icon={<ShoppingOutlined />}
                   onClick={() => navigate('/procurement/purchase-orders/new')}
                   block
                   style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
@@ -362,8 +362,8 @@ const ProcurementDashboard = () => {
                 </Button>
               </Col>
               <Col xs={24} sm={12} md={6}>
-                <Button 
-                  icon={<PieChartOutlined />} 
+                <Button
+                  icon={<PieChartOutlined />}
                   onClick={() => navigate('/procurement/reports')}
                   block
                   style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
@@ -372,8 +372,8 @@ const ProcurementDashboard = () => {
                 </Button>
               </Col>
               <Col xs={24} sm={12} md={6}>
-                <Button 
-                  icon={<NotificationOutlined />} 
+                <Button
+                  icon={<NotificationOutlined />}
                   onClick={() => navigate('/procurement/notifications')}
                   block
                   style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}

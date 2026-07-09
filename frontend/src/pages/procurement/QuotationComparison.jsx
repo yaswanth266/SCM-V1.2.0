@@ -123,7 +123,7 @@ const QuotationComparison = () => {
         for (const mi of rfq.items) {
           const itemId = mi.item_id || mi.id;
           const requiredQty = Number(mi.qty || mi.quantity || 0);
-          
+
           let totalAwarded = 0;
           const itemAwards = awardedItems[itemId] || {};
           Object.values(itemAwards).forEach((award) => {
@@ -375,7 +375,7 @@ const QuotationComparison = () => {
             render: (val, record) => {
               if (val == null) return <Text type="secondary">N/A</Text>;
               const isLowest = val === record._minRate && record._minRate > 0;
-              
+
               const qi = q.items.find((x) => x.item_id === record.item_id);
               let taxText = '';
               if (qi) {
@@ -384,7 +384,7 @@ const QuotationComparison = () => {
                 const ig = Number(qi.igst_rate || 0);
                 const tx = Number(qi.tax_rate || 0);
                 const disc = Number(qi.discount_pct || 0);
-                
+
                 const parts = [];
                 if (ig > 0) {
                   parts.push(`IGST ${ig}%`);
@@ -393,11 +393,11 @@ const QuotationComparison = () => {
                 } else if (tx > 0) {
                   parts.push(`Tax ${tx}%`);
                 }
-                
+
                 if (disc > 0) {
                   parts.push(`Disc ${disc}%`);
                 }
-                
+
                 if (parts.length > 0) {
                   taxText = parts.join(' · ');
                 }
@@ -437,7 +437,7 @@ const QuotationComparison = () => {
               if (!qi) return <Text type="secondary">—</Text>;
               const bidQty = Number(qi.qty || 0);
               const awardState = awardedItems[record.item_id]?.[q.vendor_id] || { checked: false, qty: 0 };
-              
+
               return (
                 <Space size={4} align="center">
                   <Checkbox
@@ -777,7 +777,7 @@ const QuotationComparison = () => {
             <Collapse defaultActiveKey={rfq.items.map((mi) => String(mi.item_id || mi.id))}>
               {rfq.items.map((mi) => {
                 const itemId = mi.item_id || mi.id;
-                
+
                 // Find all bids for this item across all suppliers
                 const supplierBids = quotations.map((q) => {
                   const qi = (q.items || []).find((x) => x.item_id === itemId);
@@ -869,7 +869,7 @@ const QuotationComparison = () => {
                             const val = b.rate;
                             if (val == null) return <Text type="secondary">N/A</Text>;
                             const isLowest = val === minRate && minRate > 0;
-                            
+
                             let taxText = '';
                             if (b.bidItem) {
                               const cg = Number(b.bidItem.cgst_rate || 0);
@@ -877,7 +877,7 @@ const QuotationComparison = () => {
                               const ig = Number(b.bidItem.igst_rate || 0);
                               const tx = Number(b.bidItem.tax_rate || 0);
                               const disc = Number(b.bidItem.discount_pct || 0);
-                              
+
                               const parts = [];
                               if (ig > 0) {
                                 parts.push(`IGST ${ig}%`);
@@ -886,11 +886,11 @@ const QuotationComparison = () => {
                               } else if (tx > 0) {
                                 parts.push(`Tax ${tx}%`);
                               }
-                              
+
                               if (disc > 0) {
                                 parts.push(`Disc ${disc}%`);
                               }
-                              
+
                               if (parts.length > 0) {
                                 taxText = parts.join(' · ');
                               }

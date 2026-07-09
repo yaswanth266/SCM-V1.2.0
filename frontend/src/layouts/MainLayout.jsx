@@ -75,172 +75,13 @@ const iconMap = {
 // now filter children using either an explicit child.module/child.action
 // override or, for known privileged children, a role-based gate.
 // Top-level menus that should be visible only to admin / super_admin codes.
-const _ADMIN_ONLY_PARENT_KEYS = new Set(['settings']);
-
-// Top-level menus that field staff / field_supervisor should never see —
-// these are master-data setup pages aimed at procurement / store
-// managers. Field users have indent.create + consumption + inventory.view
-// (stock_balance) and that's the full scope of what they need on the
-// menu. The DB still grants them masters.view (items) for *referential*
-// reads (e.g. picking an item in the indent form), but the menu entry
-// itself stays hidden so they don't navigate into a near-empty admin
-// area.
-const _FIELD_HIDE_PARENT_KEYS = new Set([
-  'masters',
-  'procurement',
-  'warehouse',
-  'accounts',
-  'assets',
-  'reports',
-  'healthcare',
-  'approvals', // field_staff has no approve perm; field_supervisor sees via launcher tile (kept by manager check below)
-]);
-
-// Field-user role codes — when a user holds ONLY these (and nothing
-// manager-grade or admin), the parent-key restriction above kicks in.
-const _FIELD_ROLE_CODES = new Set([
-  'field_staff',
-  'field_supervisor',
-  'field_user',
-  'field_operator',
-  'nurse',
-  'pharmacy_assistant',
-  'site_user',
-]);
-
-// Child menu keys that require admin / super_admin regardless of any
-// module-level "view" grant on a non-admin role. Hyphenated form matches
-// MENU_CONFIG keys exactly (earlier code used underscores by mistake, so
-// the gate never fired). Includes Settings sub-pages, workflow config,
-// and the System reports tab.
-const _ADMIN_ONLY_CHILD_KEYS = new Set([
-  'settings-users',
-  'settings-roles',
-  'settings-system',
-  'approvals-workflow-config',
-  'reports-system',
-  // Masters config that drives RBAC / item-attribute schema — admin-only.
-  'masters-users',
-  'masters-user-groups',
-  'masters-organization-structure',
-  'masters-item-attributes',
-  'masters-specs',
-]);
-
-// Child menu keys that should be visible only to manager-grade roles or
-// admins. Field staff with module-level `view` permission should still
-// see the entry point of a module (e.g. Inventory → Stock Balance) but
-// not sub-pages that drive operational changes (transfer, audit,
-// replenishment) or expose financial/historical detail (ledger).
-// Add new keys here when reports show field-staff users seeing
-// manager-only sub-pages.
-const _MANAGER_ONLY_CHILD_KEYS = new Set([
-  // Inventory: field staff can access Stock Balance and Stock Ledger (scoped to their warehouses).
-  'inventory-stock-transfer',
-  'inventory-stock-audit',
-  'inventory-replenishment',
-  // Warehouse: field staff sees gate entry only (intake), not the
-  // downstream operational pages.
-  'warehouse-quality-inspection',
-  'warehouse-putaway',
-  'warehouse-purchase-returns',
-  // Procurement: field staff can raise material requests; quotations
-  // and POs are manager-grade.
-  'procurement-quotations',
-  'procurement-purchase-orders',
-  // Accounts: full module is manager-grade. Children below + the
-  // module-level perm check handle visibility.
-  'accounts-invoices',
-  'accounts-payments',
-  'accounts-ledger',
-  'accounts-credit-notes',
-  // Approvals: pending list is fine; workflow config is admin-only
-  // (already in _ADMIN_ONLY_CHILD_KEYS).
-  // Masters: field staff sees Items + Warehouses (read). Brands,
-  // Categories, Vendors, UOM, Price Lists are master-data setup —
-  // manager-grade.
-  'masters-categories',
-  'masters-brands',
-  'masters-features',
-  'masters-vendors',
-  'masters-vendor-material-mapping',
-  'masters-user-material-mapping',
-  'masters-uom',
-  'masters-packaging',
-  'masters-price-lists',
-]);
-
-const _MANAGER_ROLE_CODES = new Set([
-  'super_admin',
-  'admin',
-  'procurement_manager',
-  'store_manager',
-  'warehouse_manager',
-  'inventory_manager',
-  'accounts_manager',
-  'finance_manager',
-  'compliance_manager',
-  'project_manager',
-  'manager',
-  'pharmacy_manager',
-  'qa_manager',
-]);
-
-const _isAdminUser = (hasPermission) => {
-  // hasPermission in authStore short-circuits to true for super_admin / admin
-  // role codes, so any privileged check (e.g. a synthetic module that no
-  // regular role grants) returns true ONLY for admins. Use a sentinel.
-  return hasPermission('__admin_only__', 'manage');
-};
-
-const _isManagerUser = (user, hasPermission) => {
-  if (_isAdminUser(hasPermission)) return true;
-  const codes = (user?.roles || []).map((r) => (r?.code || r?.role_code || '').toLowerCase());
-  return codes.some((c) => _MANAGER_ROLE_CODES.has(c));
-};
-
-// True only if the user holds at least one field-role and NO manager /
-// admin role. Field_supervisor counts as a field role but if they also
-// hold (e.g.) warehouse_manager elsewhere, manager access wins.
-const _isFieldOnlyUser = (user, hasPermission) => {
-  if (_isAdminUser(hasPermission)) return false;
-  if (_isManagerUser(user, hasPermission)) return false;
-  const codes = (user?.roles || []).map((r) => (r?.code || r?.role_code || '').toLowerCase());
-  return codes.length > 0 && codes.every((c) => _FIELD_ROLE_CODES.has(c));
-};
-
-const buildMenuItems = (config, hasPermission, user) => {
-  const adminUser = _isAdminUser(hasPermission);
-  const managerUser = _isManagerUser(user, hasPermission);
-  const fieldOnlyUser = _isFieldOnlyUser(user, hasPermission);
+const buildMenuItems = (config, hasPermission) => {
   return config
     .filter((item) => {
-      // Top-level admin-only items hidden from non-admin users entirely.
-      if (_ADMIN_ONLY_PARENT_KEYS.has(item.key) && !adminUser) {
-        return false;
-      }
-      // Field-only users get a stripped menu: Dashboard, Indent,
-      // Consumption, Inventory (Stock Balance), LMS. Everything else
-      // (Masters, Procurement, Warehouse ops, Logistics, Accounts,
-      // Reports, etc.) is hidden because they have no operational use
-      // for it. Approvals tile stays visible only for those holding
-      // the Approve permission (handled by hasPermission below).
-      if (fieldOnlyUser && _FIELD_HIDE_PARENT_KEYS.has(item.key)) {
-        // approvals exception: field_supervisor needs to approve indents
-        // at level 1 — keep the parent visible if they have the approve
-        // permission.
-        if (item.key === 'approvals' && hasPermission('approvals', 'approve')) {
-          // fall through to permission check
-        } else {
-          return false;
-        }
-      }
-      // Explicit override on the menu node.
       if (item.module) {
         return hasPermission(item.module, item.action || 'view');
       }
-      const mod = item.key; // menu key matches module name (dashboard, masters, procurement, etc.)
-      return hasPermission(mod, 'view');
+      return hasPermission(item.key, 'view');
     })
     .map((item) => {
       const menuItem = {
@@ -251,26 +92,13 @@ const buildMenuItems = (config, hasPermission, user) => {
       if (item.children && item.children.length > 0) {
         const filteredChildren = item.children
           .filter((child) => {
-            // Admin-only children: hidden from non-admin users.
-            if (_ADMIN_ONLY_CHILD_KEYS.has(child.key)) {
-              return adminUser;
-            }
-            // Manager-only children: hidden from field/operator users.
-            if (_MANAGER_ONLY_CHILD_KEYS.has(child.key)) {
-              return managerUser;
-            }
-            // Child can declare its own module/action override.
             if (child.module) {
               return hasPermission(child.module, child.action || 'view');
             }
-            // Default: inherit parent module + child action (if any).
             return hasPermission(item.key, child.action || 'view');
           })
           .map((child) => ({ key: child.key, label: child.label }));
-        if (filteredChildren.length === 0) {
-          // Hide the parent entirely if all children were filtered out.
-          return null;
-        }
+        if (filteredChildren.length === 0) return null;
         menuItem.children = filteredChildren;
       }
       return menuItem;
@@ -405,13 +233,42 @@ const filterModuleTabs = (tabs, allowedSet, useServerKeys, userRoleCodes = []) =
       }
 
       // Per-tab role hide rule (e.g. Indent → Board hidden from field roles).
-      if (Array.isArray(t.hideForRoles) && t.hideForRoles.some((r) => userRoleSet.has(r))) {
+      if (!useServerKeys && Array.isArray(t.hideForRoles) && t.hideForRoles.some((r) => userRoleSet.has(r))) {
         return null;
       }
       if (!useServerKeys) return t;
       const parts = (t.path || '').split('/').filter(Boolean);
       if (parts.length < 2) return t;
       const derivedKey = `${parts[0]}-${parts[1]}`;
+
+      const PUBLIC_BYPASS_KEYS = new Set([
+        'settings-profile',
+        'settings-change-password',
+        'settings-delegations',
+      ]);
+      if (PUBLIC_BYPASS_KEYS.has(derivedKey)) return t;
+
+      // Handle 3-level paths (e.g. /inventory/masters/items -> inventory-masters-items)
+      if (parts.length >= 3) {
+        const fullDerivedKey = `${parts[0]}-${parts[1]}-${parts[2]}`;
+        if (allowedSet.has(fullDerivedKey)) {
+          return t;
+        }
+        // Legacy/Special fallback for 3-level paths
+        const legacyKey = `${parts[1]}-${parts[2]}`;
+        if (allowedSet.has(legacyKey)) {
+          return t;
+        }
+        if (
+          legacyKey === 'masters-organization-structure' &&
+          (allowedSet.has('settings-users') || allowedSet.has('masters-user-groups'))
+        ) {
+          return t;
+        }
+        return null; // Do NOT fall back to checking parent key like 'inventory-masters'
+      }
+
+      // Handle 2-level paths (e.g. /inventory/stock-balance -> inventory-stock-balance)
       if (derivedKey === 'masters-packaging' && (allowedSet.has('masters') || allowedSet.has('masters-items') || allowedSet.has('masters-uom'))) {
         return t;
       }
@@ -427,43 +284,27 @@ const filterModuleTabs = (tabs, allowedSet, useServerKeys, userRoleCodes = []) =
       if (derivedKey === 'masters-users' && allowedSet.has('settings-users')) {
         return t;
       }
-      if (
-        derivedKey === 'masters-organization-structure'
-        && (allowedSet.has('settings-users') || allowedSet.has('masters-user-groups'))
-      ) {
-        return t;
-      }
 
-      // Modularized keys support (e.g. warehouse-masters, inventory-reports)
-      const modularDerivedKey = `${parts[0]}-${parts[1]}`;
-      if (allowedSet.has(modularDerivedKey)) {
+      // Modularized keys support
+      if (allowedSet.has(derivedKey)) {
         return t;
-      }
-
-      if (parts.length >= 3) {
-        const fullDerivedKey = `${parts[0]}-${parts[1]}-${parts[2]}`;
-        if (allowedSet.has(fullDerivedKey)) {
-          return t;
-        }
       }
 
       // Legacy master/reports key fallback
       if (parts[1] === 'masters') {
         const legacyKey = `masters-${parts[2]}`;
-        if (allowedSet.has(legacyKey) || allowedSet.has('masters')) {
+        if (allowedSet.has(legacyKey) || allowedSet.has(`${parts[0]}-masters`)) {
           return t;
         }
       }
       if (parts[1] === 'reports') {
         const legacyKey = `reports-${parts[0]}`;
-        if (allowedSet.has(legacyKey) || allowedSet.has('reports')) {
+        if (allowedSet.has(legacyKey) || allowedSet.has(`${parts[0]}-reports`)) {
           return t;
         }
       }
 
-      // Personal / not-in-MENU_CONFIG paths always show.
-      if (!_ALL_MENU_CHILD_KEYS.has(derivedKey) && !_ALL_MENU_CHILD_KEYS.has(modularDerivedKey)) return t;
-      return allowedSet.has(derivedKey) || allowedSet.has(modularDerivedKey) ? t : null;
+      return null;
     })
     .filter(Boolean);
 };
@@ -782,7 +623,7 @@ const MainLayout = () => {
     return { ..._rawModule, tabs: filteredTabs };
   }, [_rawModule, allowedSet, useServerMenu, userRoleCodesForTabs]);
   const inModule = !!currentModule;
-  const showTopnav = inModule && currentModule.tabs.length > 1;
+  const showTopnav = inModule && currentModule.tabs.length >= 1;
   const activeTab = currentModule
     ? activeTabForPath(currentModule, location.pathname)
     : null;

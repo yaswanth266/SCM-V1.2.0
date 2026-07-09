@@ -23,12 +23,14 @@ import {
   Pie,
 } from 'recharts';
 import api from '../../config/api';
+import useAuthStore from '../../store/authStore';
 import { formatCurrency, formatNumber } from '../../utils/helpers';
 
 const COLORS = ['#900078', '#481890', '#fa8c16', '#fa541c', '#1677ff'];
 
 const InventoryDashboard = () => {
   const navigate = useNavigate();
+  const hasKey = useAuthStore((s) => s.hasKey);
   const [loading, setLoading] = useState(true);
   const [summary, setSummary] = useState({});
   const [alerts, setAlerts] = useState({});
@@ -41,11 +43,26 @@ const InventoryDashboard = () => {
   const fetchInventoryData = async () => {
     try {
       setLoading(true);
-      const [sumRes, alertsRes, whRes] = await Promise.all([
-        api.get('/inventory/stock-balance/summary'),
-        api.get('/dashboard/alerts'),
-        api.get('/inventory/reports', { params: { report_type: 'warehouse_balance', page_size: 100 } }),
-      ]);
+      const promises = [];
+      
+      const canViewBalance = hasKey('inventory-stock-balance');
+      const canViewReports = hasKey('inventory-reports');
+
+      if (canViewBalance) {
+        promises.push(api.get('/inventory/stock-balance/summary'));
+      } else {
+        promises.push(Promise.resolve({ data: {} }));
+      }
+
+      promises.push(api.get('/dashboard/alerts'));
+
+      if (canViewReports) {
+        promises.push(api.get('/inventory/reports', { params: { report_type: 'warehouse_balance', page_size: 100 } }));
+      } else {
+        promises.push(Promise.resolve({ data: { items: [] } }));
+      }
+
+      const [sumRes, alertsRes, whRes] = await Promise.all(promises);
 
       setSummary(sumRes.data || {});
       setAlerts(alertsRes.data || {});
@@ -105,16 +122,18 @@ const InventoryDashboard = () => {
           <h1 style={{ margin: 0, fontSize: '28px', color: '#1A1A1A', fontWeight: 600 }}>Inventory Dashboard</h1>
           <p style={{ margin: 0, color: '#6C757D' }}>Monitor stock levels, expiry timelines, safety limits, and valuations.</p>
         </div>
-        <Space>
-          <Button 
-            type="primary" 
-            icon={<PlusOutlined />} 
-            onClick={() => navigate('/inventory/stock-transfer/new')}
-            style={{ background: '#900078', borderColor: '#900078', height: '40px', borderRadius: '6px' }}
-          >
-            Stock Transfer
-          </Button>
-        </Space>
+        {hasKey('inventory-stock-transfer') && (
+          <Space>
+            <Button 
+              type="primary" 
+              icon={<PlusOutlined />} 
+              onClick={() => navigate('/inventory/stock-transfer/new')}
+              style={{ background: '#900078', borderColor: '#900078', height: '40px', borderRadius: '6px' }}
+            >
+              Stock Transfer
+            </Button>
+          </Space>
+        )}
       </div>
 
       {/* KPI Cards Row */}
@@ -232,63 +251,85 @@ const InventoryDashboard = () => {
       </Row>
 
       {/* Critical Lists and Actions */}
-      <Row gutter={[16, 16]}>
-        {/* Critical Low Stock Items */}
-        <Col xs={24} md={16}>
-          <Card 
-            title="Critical Low-Stock Items" 
-            extra={<Button type="link" onClick={() => navigate('/inventory/stock-balance')}>View Stock Balance</Button>}
-            style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
-          >
-            {alerts.low_stock?.length > 0 ? (
-              <Table
-                dataSource={alerts.low_stock.slice(0, 5).map(item => ({ ...item, key: item.id }))}
-                columns={lowStockColumns}
-                pagination={false}
-                size="middle"
-              />
-            ) : (
-              <Empty description="No low-stock items detected!" />
-            )}
-          </Card>
-        </Col>
+      {(() => {
+        const canViewBalance = hasKey('inventory-stock-balance');
+        const showOperations = hasKey('inventory-stock-transfer') || hasKey('inventory-stock-audit') || hasKey('inventory-replenishment');
+        
+        if (!canViewBalance && !showOperations) return null;
+        
+        const balanceSpan = 16;
+        const opsSpan = canViewBalance ? 8 : 24;
 
-        {/* Quick Actions Panel */}
-        <Col xs={24} md={8}>
-          <Card 
-            title="Inventory Operations" 
-            style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <Button 
-                type="primary" 
-                icon={<PlusOutlined />} 
-                onClick={() => navigate('/inventory/stock-transfer/new')}
-                block
-                style={{ background: '#900078', borderColor: '#900078', height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
-              >
-                New Stock Transfer
-              </Button>
-              <Button 
-                icon={<ArrowRightOutlined />} 
-                onClick={() => navigate('/inventory/stock-audit')}
-                block
-                style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
-              >
-                Perform Stock Audit
-              </Button>
-              <Button 
-                icon={<ArrowRightOutlined />} 
-                onClick={() => navigate('/inventory/replenishment')}
-                block
-                style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
-              >
-                Run Replenishment Tool
-              </Button>
-            </div>
-          </Card>
-        </Col>
-      </Row>
+        return (
+          <Row gutter={[16, 16]}>
+            {/* Critical Low Stock Items */}
+            {canViewBalance && (
+              <Col xs={24} md={balanceSpan}>
+                <Card 
+                  title="Critical Low-Stock Items" 
+                  extra={<Button type="link" onClick={() => navigate('/inventory/stock-balance')}>View Stock Balance</Button>}
+                  style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
+                >
+                  {alerts.low_stock?.length > 0 ? (
+                    <Table
+                      dataSource={alerts.low_stock.slice(0, 5).map(item => ({ ...item, key: item.id }))}
+                      columns={lowStockColumns}
+                      pagination={false}
+                      size="middle"
+                    />
+                  ) : (
+                    <Empty description="No low-stock items detected!" />
+                  )}
+                </Card>
+              </Col>
+            )}
+
+            {/* Quick Actions Panel */}
+            {showOperations && (
+              <Col xs={24} md={opsSpan}>
+                <Card 
+                  title="Inventory Operations" 
+                  style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {hasKey('inventory-stock-transfer') && (
+                      <Button 
+                        type="primary" 
+                        icon={<PlusOutlined />} 
+                        onClick={() => navigate('/inventory/stock-transfer/new')}
+                        block
+                        style={{ background: '#900078', borderColor: '#900078', height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
+                      >
+                        New Stock Transfer
+                      </Button>
+                    )}
+                    {hasKey('inventory-stock-audit') && (
+                      <Button 
+                        icon={<ArrowRightOutlined />} 
+                        onClick={() => navigate('/inventory/stock-audit')}
+                        block
+                        style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
+                      >
+                        Perform Stock Audit
+                      </Button>
+                    )}
+                    {hasKey('inventory-replenishment') && (
+                      <Button 
+                        icon={<ArrowRightOutlined />} 
+                        onClick={() => navigate('/inventory/replenishment')}
+                        block
+                        style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
+                      >
+                        Run Replenishment Tool
+                      </Button>
+                    )}
+                  </div>
+                </Card>
+              </Col>
+            )}
+          </Row>
+        );
+      })()}
     </div>
   );
 };

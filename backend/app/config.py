@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     DB_PORT: int = 3306
     DB_USER: str = "root"
     DB_PASSWORD: str = ""
-    DB_NAME: str = "bhspl_scm"
+    DB_NAME: str = "scm-v1"
 
     # JWT — access and refresh tokens use DIFFERENT secrets (B7 fix)
     JWT_SECRET_KEY: str = "CHANGE_ME_BEFORE_PRODUCTION"

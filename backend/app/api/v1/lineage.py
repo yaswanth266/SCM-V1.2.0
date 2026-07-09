@@ -156,9 +156,6 @@ async def _downstream_for(db, type_: str, id_: int) -> list[dict]:
         for g_id in await _ids_by(db, GoodsReceiptNote, GoodsReceiptNote.po_id, id_):
             d = await _doc_summary(db, "goods_receipt_note", g_id)
             if d: out.append(d)
-        for inv_id in await _ids_by(db, Invoice, Invoice.po_id, id_):
-            d = await _doc_summary(db, "invoice", inv_id)
-            if d: out.append(d)
     elif type_ == "goods_receipt_note":
         for p_id in await _ids_by(db, PutawayOrder, PutawayOrder.grn_id, id_):
             d = await _doc_summary(db, "putaway_order", p_id)

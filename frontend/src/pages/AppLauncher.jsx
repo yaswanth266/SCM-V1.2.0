@@ -316,44 +316,6 @@ const AppLauncher = () => {
     return '/masters/items';
   };
 
-  // Admin / super_admin sentinel — same trick as MainLayout: real roles
-  // never grant `__admin_only__.manage`, so this returns true only for
-  // admin/super_admin codes.
-  const isAdmin = hasPermission('__admin_only__', 'manage');
-
-  // Field-only users — tile-level scope to match MainLayout's sidebar
-  // gating. Field staff / field supervisors see Dashboard, Indent,
-  // Consumption, Inventory (Stock Balance), LMS, and (if they have the
-  // approve perm) Approvals. They must NOT see Masters, Procurement,
-  // Warehouse, Accounts, Assets, Reports, Healthcare —
-  // those are management/setup areas that just confuse field users.
-  const FIELD_HIDE_TILES = new Set([
-    'masters', 'procurement', 'warehouse',
-    'accounts', 'assets', 'reports', 'healthcare',
-  ]);
-  const FIELD_ROLE_CODES = new Set([
-    'field_staff', 'field_supervisor', 'field_user', 'field_operator',
-    'nurse', 'pharmacy_assistant', 'site_user',
-  ]);
-  const userRoleCodes = (user?.roles || []).map(
-    (r) => (r?.code || r?.role_code || '').toLowerCase()
-  );
-  const MANAGER_ROLE_CODES = new Set([
-    'super_admin','admin','procurement_manager','store_manager',
-    'warehouse_manager','inventory_manager',
-    'accounts_manager','finance_manager','compliance_manager',
-    'project_manager','manager','pharmacy_manager','qa_manager',
-  ]);
-  const isManagerUser = isAdmin || userRoleCodes.some((c) => MANAGER_ROLE_CODES.has(c));
-  const isFieldOnly = !isAdmin && !isManagerUser
-    && userRoleCodes.length > 0
-    && userRoleCodes.every((c) => FIELD_ROLE_CODES.has(c));
-
-  // Settings tile is admin-only on the launcher.
-  // Server-driven path (preferred): when allowedKeys is populated, a tile is
-  // visible iff the module's top-level key is in the whitelist. lms always
-  // shows. Falls back to client-side hasPermission when allowedKeys is empty
-  // (e.g. /me/sidebar fetch failed / not yet hydrated).
   const useServerKeys = Array.isArray(allowedKeys) && allowedKeys.length > 0;
   const allowedSet = new Set(allowedKeys || []);
   const findFirstAllowedPath = (moduleId, allowedSet) => {
@@ -373,9 +335,15 @@ const AppLauncher = () => {
         const parts = tab.path.split('/').filter(Boolean);
         if (parts.length >= 2) {
           const derivedKey = `${parts[0]}-${parts[1]}`;
-          const fullDerivedKey = parts.length >= 3 ? `${parts[0]}-${parts[1]}-${parts[2]}` : null;
-          if (allowedSet.has(derivedKey) || (fullDerivedKey && allowedSet.has(fullDerivedKey))) {
-            return tab.path;
+          if (parts.length >= 3) {
+            const fullDerivedKey = `${parts[0]}-${parts[1]}-${parts[2]}`;
+            if (allowedSet.has(fullDerivedKey)) {
+              return tab.path;
+            }
+          } else {
+            if (allowedSet.has(derivedKey)) {
+              return tab.path;
+            }
           }
         }
       }
@@ -390,22 +358,18 @@ const AppLauncher = () => {
       return allowedSet.has(m.id);
     }
     // Legacy fallback: hasPermission-based filter.
-    if (m.id === 'settings') return isAdmin;
-    if (isFieldOnly && FIELD_HIDE_TILES.has(m.id)) {
-      if (m.id === 'approvals' && hasPermission('approvals', 'approve')) {
-        // fall through to perm check
-      } else {
-        return false;
-      }
+    if (m.id === 'settings') {
+      return hasPermission('settings', 'view');
     }
     return hasPermission(PERM_MAP[m.id], 'view');
   }).map((m) => {
-    if (m.id === 'masters') return { ...m, path: resolveMastersPath() };
     if (useServerKeys) {
       const allowedPath = findFirstAllowedPath(m.id, allowedSet);
       if (allowedPath) {
         return { ...m, path: allowedPath };
       }
+    } else if (m.id === 'masters') {
+      return { ...m, path: resolveMastersPath() };
     }
     return m;
   });

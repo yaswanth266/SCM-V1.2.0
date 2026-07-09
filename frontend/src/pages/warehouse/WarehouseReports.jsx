@@ -68,7 +68,7 @@ const WarehouseReports = () => {
       if (reportType === 'putaway_efficiency') {
         const res = await api.get('/warehouse/putaways', { params });
         const putaways = res.data?.items || res.data || [];
-        
+
         let filtered = putaways;
         if (dateRange && dateRange[0] && dateRange[1]) {
           const start = dateRange[0].startOf('day').toDate();
@@ -87,7 +87,7 @@ const WarehouseReports = () => {
           setLoading(false);
           return;
         }
-        
+
         // Group by month of completed_at
         const monthMap = {};
         filtered.forEach(p => {
@@ -115,7 +115,7 @@ const WarehouseReports = () => {
       } else if (reportType === 'pick_sla') {
         const res = await api.get('/outbound/picking-orders', { params });
         const picks = res.data?.items || res.data || [];
-        
+
         let filtered = picks;
         if (dateRange && dateRange[0] && dateRange[1]) {
           const start = dateRange[0].startOf('day').toDate();
@@ -165,7 +165,7 @@ const WarehouseReports = () => {
       } else if (reportType === 'qa_log') {
         const res = await api.get('/warehouse/quality-inspections', { params });
         const inspections = res.data?.items || res.data || [];
-        
+
         let filtered = inspections;
         if (warehouse) {
           filtered = inspections.filter(qi => Number(qi.warehouse_id || qi.grn?.warehouse_id) === Number(warehouse));
@@ -209,7 +209,7 @@ const WarehouseReports = () => {
       } else if (reportType === 'gate_log') {
         const res = await api.get('/warehouse/gate-entries', { params });
         const entries = res.data?.items || res.data || [];
-        
+
         let filtered = entries;
         if (warehouse) {
           filtered = entries.filter(e => Number(e.warehouse_id) === Number(warehouse));
@@ -240,7 +240,7 @@ const WarehouseReports = () => {
             dateMap[dateStr] = { date: dateStr, entries: 0, waitSum: 0, maxWait: 0 };
           }
           dateMap[dateStr].entries += 1;
-          
+
           if (e.gate_in_time) {
             const raised = new Date(e.created_at).getTime();
             const gateIn = new Date(e.gate_in_time).getTime();
@@ -261,12 +261,12 @@ const WarehouseReports = () => {
         setChartData(list);
       }
 
-      
+
       // --- NEW TRANSACTION LOG REPORTS ---
       else if (reportType === 'material_issues_log') {
         const res = await api.get('/warehouse/material-issues', { params });
         const issues = res.data?.items || res.data || [];
-        
+
         let filtered = issues;
         if (dateRange && dateRange[0] && dateRange[1]) {
           const start = dateRange[0].startOf('day').toDate();
@@ -307,7 +307,7 @@ const WarehouseReports = () => {
       } else if (reportType === 'grn_log') {
         const res = await api.get('/warehouse/grn', { params });
         const grns = res.data?.items || res.data || [];
-        
+
         let filtered = grns;
         if (dateRange && dateRange[0] && dateRange[1]) {
           const start = dateRange[0].startOf('day').toDate();
@@ -347,7 +347,7 @@ const WarehouseReports = () => {
       } else if (reportType === 'putaway_log') {
         const res = await api.get('/warehouse/putaways', { params });
         const putaways = res.data?.items || res.data || [];
-        
+
         let filtered = putaways;
         if (dateRange && dateRange[0] && dateRange[1]) {
           const start = dateRange[0].startOf('day').toDate();
@@ -386,7 +386,7 @@ const WarehouseReports = () => {
       } else if (reportType === 'material_inwards_log') {
         const res = await api.get('/warehouse/inwards', { params });
         const inwards = res.data?.items || res.data || [];
-        
+
         let filtered = inwards;
         if (dateRange && dateRange[0] && dateRange[1]) {
           const start = dateRange[0].startOf('day').toDate();
@@ -434,7 +434,7 @@ const WarehouseReports = () => {
 
   const handleExport = () => {
     const title = REPORT_TYPES.find(r => r.value === reportType)?.label || 'Report';
-    
+
     // Structure export data to match UI columns for better readability
     const cols = getColumns();
     const exportData = data.map((row) => {
@@ -473,12 +473,12 @@ const WarehouseReports = () => {
         { title: 'Storage Zone', dataIndex: 'zone', key: 'zone' },
         { title: 'Total Picks', dataIndex: 'totalPicks', key: 'totalPicks', align: 'right' },
         { title: 'SLA Breached Picks', dataIndex: 'breachedPicks', key: 'breachedPicks', align: 'right', render: (v) => <span style={{ color: v > 15 ? '#f5222d' : '#fa8c16' }}>{v}</span> },
-        { 
-          title: 'SLA Compliance Rate', 
-          dataIndex: 'compliance', 
-          key: 'compliance', 
-          align: 'right', 
-          render: (v) => <span style={{ fontWeight: 600, color: v > 90 ? '#52c41a' : '#fa8c16' }}>{v}%</span> 
+        {
+          title: 'SLA Compliance Rate',
+          dataIndex: 'compliance',
+          key: 'compliance',
+          align: 'right',
+          render: (v) => <span style={{ fontWeight: 600, color: v > 90 ? '#52c41a' : '#fa8c16' }}>{v}%</span>
         },
       ];
     } else if (reportType === 'qa_log') {
@@ -487,9 +487,9 @@ const WarehouseReports = () => {
         { title: 'Inspected Batches', dataIndex: 'totalInspected', key: 'totalInspected', align: 'right' },
         { title: 'Passed Batches', dataIndex: 'passed', key: 'passed', align: 'right', render: (v) => <span style={{ color: '#52c41a' }}>{v}</span> },
         { title: 'Failed Batches', dataIndex: 'failed', key: 'failed', align: 'right', render: (v) => <span style={{ color: v > 0 ? '#f5222d' : 'inherit' }}>{v}</span> },
-        { 
-          title: 'Rejection Rate (%)', 
-          key: 'rejection_rate', 
+        {
+          title: 'Rejection Rate (%)',
+          key: 'rejection_rate',
           align: 'right',
           render: (_, r) => {
             const rate = ((r.failed / r.totalInspected) * 100).toFixed(1);
@@ -505,7 +505,7 @@ const WarehouseReports = () => {
         { title: 'Max Yard Wait Time', dataIndex: 'maxWaitMins', key: 'maxWaitMins', align: 'right', render: (v) => `${v} mins` },
       ];
     }
-    
+
     // --- NEW TRANSACTION COLUMNS ---
     else if (reportType === 'material_issues_log') {
       return [
@@ -601,10 +601,10 @@ const WarehouseReports = () => {
             />
           </Col>
           <Col xs={24} md={4}>
-            <Button 
-              type="primary" 
-              icon={<FilterOutlined />} 
-              onClick={loadReportData} 
+            <Button
+              type="primary"
+              icon={<FilterOutlined />}
+              onClick={loadReportData}
               block
               style={{ background: '#F09000', borderColor: '#F09000', borderRadius: '6px' }}
             >
@@ -622,96 +622,96 @@ const WarehouseReports = () => {
         <>
           {/* Graphical Analysis */}
           <Card style={{ marginBottom: 24, borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-           <div style={{ height: '350px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-             {chartData.length > 0 ? (
-               <ResponsiveContainer width="100%" height="100%">
-                 {reportType === 'putaway_efficiency' ? (
-                   <LineChart data={chartData}>
-                     <CartesianGrid strokeDasharray="3 3" />
-                     <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
-                     <YAxis label={{ value: 'Hours', angle: -90, position: 'insideLeft' }} stroke="#6C757D" tickLine={false} />
-                     <Tooltip />
-                     <Legend />
-                     <Line type="monotone" dataKey="avgHours" name="Avg Putaway TAT (Hrs)" stroke="#F09000" strokeWidth={2.5} activeDot={{ r: 8 }} />
-                     <Line type="monotone" dataKey="targetHours" name="SLA SLA Limit (Hrs)" stroke="#f5222d" strokeDasharray="5 5" strokeWidth={1.5} />
-                   </LineChart>
-                 ) : reportType === 'pick_sla' ? (
-                   <BarChart data={chartData}>
-                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                     <XAxis dataKey="zone" stroke="#6C757D" tickLine={false} />
-                     <YAxis stroke="#6C757D" tickLine={false} />
-                     <Tooltip />
-                     <Legend />
-                     <Bar dataKey="totalPicks" name="Total Picks" fill="#F09000" radius={[4, 4, 0, 0]} />
-                     <Bar dataKey="breachedPicks" name="SLA Breaches" fill="#fa541c" radius={[4, 4, 0, 0]} />
-                   </BarChart>
-                 ) : reportType === 'qa_log' ? (
-                   <BarChart data={chartData}>
-                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                     <XAxis dataKey="vendor" stroke="#6C757D" tickLine={false} />
-                     <YAxis stroke="#6C757D" tickLine={false} />
-                     <Tooltip />
-                     <Legend />
-                     <Bar dataKey="passed" name="Accepted Batches" fill="#52c41a" stackId="a" />
-                     <Bar dataKey="failed" name="Rejected Batches" fill="#f5222d" stackId="a" />
-                   </BarChart>
-                 ) : reportType === 'gate_log' ? (
-                   <LineChart data={chartData}>
-                     <CartesianGrid strokeDasharray="3 3" />
-                     <XAxis dataKey="date" stroke="#6C757D" tickLine={false} />
-                     <YAxis label={{ value: 'Minutes', angle: -90, position: 'insideLeft' }} stroke="#6C757D" tickLine={false} />
-                     <Tooltip />
-                     <Legend />
-                     <Line type="monotone" dataKey="avgWaitMins" name="Avg Wait (Mins)" stroke="#F09000" strokeWidth={2} />
-                     <Line type="monotone" dataKey="maxWaitMins" name="Max Wait (Mins)" stroke="#fa541c" strokeWidth={2} />
-                   </LineChart>
-                 ) : reportType === 'material_issues_log' ? (
-                   <BarChart data={chartData}>
-                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                     <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
-                     <YAxis stroke="#6C757D" tickLine={false} />
-                     <Tooltip />
-                     <Legend />
-                     <Bar dataKey="count" name="Issues Count" fill="#F09000" radius={[4, 4, 0, 0]} />
-                     <Bar dataKey="totalQty" name="Total Qty Issued" fill="#1890ff" radius={[4, 4, 0, 0]} />
-                   </BarChart>
-                 ) : reportType === 'grn_log' ? (
-                   <BarChart data={chartData}>
-                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                     <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
-                     <YAxis stroke="#6C757D" tickLine={false} />
-                     <Tooltip />
-                     <Legend />
-                     <Bar dataKey="count" name="GRN Count" fill="#F09000" radius={[4, 4, 0, 0]} />
-                     <Bar dataKey="acceptedQty" name="Accepted Qty" fill="#52c41a" radius={[4, 4, 0, 0]} />
-                     <Bar dataKey="rejectedQty" name="Rejected Qty" fill="#f5222d" radius={[4, 4, 0, 0]} />
-                   </BarChart>
-                 ) : reportType === 'putaway_log' ? (
-                   <BarChart data={chartData}>
-                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                     <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
-                     <YAxis stroke="#6C757D" tickLine={false} />
-                     <Tooltip />
-                     <Legend />
-                     <Bar dataKey="count" name="Putaway Orders" fill="#F09000" radius={[4, 4, 0, 0]} />
-                     <Bar dataKey="completedItems" name="Completed Items" fill="#52c41a" radius={[4, 4, 0, 0]} />
-                   </BarChart>
-                 ) : (
-                   <BarChart data={chartData}>
-                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                     <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
-                     <YAxis stroke="#6C757D" tickLine={false} />
-                     <Tooltip />
-                     <Legend />
-                     <Bar dataKey="count" name="Inward Receipts" fill="#F09000" radius={[4, 4, 0, 0]} />
-                     <Bar dataKey="itemsCount" name="Total Inwarded Items" fill="#1890ff" radius={[4, 4, 0, 0]} />
-                   </BarChart>
-                 )}
-               </ResponsiveContainer>
-             ) : (
-               <Empty description="No report metrics available for the selected filters" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-             )}
-           </div>
+            <div style={{ height: '350px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              {chartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  {reportType === 'putaway_efficiency' ? (
+                    <LineChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
+                      <YAxis label={{ value: 'Hours', angle: -90, position: 'insideLeft' }} stroke="#6C757D" tickLine={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Line type="monotone" dataKey="avgHours" name="Avg Putaway TAT (Hrs)" stroke="#F09000" strokeWidth={2.5} activeDot={{ r: 8 }} />
+                      <Line type="monotone" dataKey="targetHours" name="SLA SLA Limit (Hrs)" stroke="#f5222d" strokeDasharray="5 5" strokeWidth={1.5} />
+                    </LineChart>
+                  ) : reportType === 'pick_sla' ? (
+                    <BarChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="zone" stroke="#6C757D" tickLine={false} />
+                      <YAxis stroke="#6C757D" tickLine={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="totalPicks" name="Total Picks" fill="#F09000" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="breachedPicks" name="SLA Breaches" fill="#fa541c" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  ) : reportType === 'qa_log' ? (
+                    <BarChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="vendor" stroke="#6C757D" tickLine={false} />
+                      <YAxis stroke="#6C757D" tickLine={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="passed" name="Accepted Batches" fill="#52c41a" stackId="a" />
+                      <Bar dataKey="failed" name="Rejected Batches" fill="#f5222d" stackId="a" />
+                    </BarChart>
+                  ) : reportType === 'gate_log' ? (
+                    <LineChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="date" stroke="#6C757D" tickLine={false} />
+                      <YAxis label={{ value: 'Minutes', angle: -90, position: 'insideLeft' }} stroke="#6C757D" tickLine={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Line type="monotone" dataKey="avgWaitMins" name="Avg Wait (Mins)" stroke="#F09000" strokeWidth={2} />
+                      <Line type="monotone" dataKey="maxWaitMins" name="Max Wait (Mins)" stroke="#fa541c" strokeWidth={2} />
+                    </LineChart>
+                  ) : reportType === 'material_issues_log' ? (
+                    <BarChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
+                      <YAxis stroke="#6C757D" tickLine={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="count" name="Issues Count" fill="#F09000" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="totalQty" name="Total Qty Issued" fill="#1890ff" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  ) : reportType === 'grn_log' ? (
+                    <BarChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
+                      <YAxis stroke="#6C757D" tickLine={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="count" name="GRN Count" fill="#F09000" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="acceptedQty" name="Accepted Qty" fill="#52c41a" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="rejectedQty" name="Rejected Qty" fill="#f5222d" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  ) : reportType === 'putaway_log' ? (
+                    <BarChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
+                      <YAxis stroke="#6C757D" tickLine={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="count" name="Putaway Orders" fill="#F09000" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="completedItems" name="Completed Items" fill="#52c41a" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  ) : (
+                    <BarChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
+                      <YAxis stroke="#6C757D" tickLine={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="count" name="Inward Receipts" fill="#F09000" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="itemsCount" name="Total Inwarded Items" fill="#1890ff" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  )}
+                </ResponsiveContainer>
+              ) : (
+                <Empty description="No report metrics available for the selected filters" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
+            </div>
           </Card>
 
           {/* Details Table */}

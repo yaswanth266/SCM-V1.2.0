@@ -24,16 +24,8 @@ from app.schemas.procurement import (
 from app.services.number_series import generate_number
 from app.services.approval_service import submit_for_approval
 from app.services.notification_service import create_notification
-from app.utils.dependencies import get_current_user, require_any_role, require_permission, require_key
+from app.utils.dependencies import get_current_user, require_permission, require_key
 
-# Role groups for procurement endpoints.
-# BUG-PRO-024 fix: super_admin must be present in every approver tuple — the
-# system superuser was previously 403'd from PO approvals, breaking the
-# escalation path when a purchase_manager was unavailable.
-MR_CREATOR_ROLES = ("super_admin", "warehouse_manager", "store_keeper", "purchase_manager", "purchase_officer", "admin")
-PO_CREATOR_ROLES = ("super_admin", "purchase_manager", "purchase_officer", "admin")
-PO_APPROVER_ROLES = ("super_admin", "purchase_manager", "admin")
-QUOTATION_ROLES = ("super_admin", "purchase_manager", "purchase_officer", "admin")
 from app.utils.helpers import paginate_params, build_paginated_response, apply_search_filter, calculate_line_amount
 from app.utils.schema_sync import ensure_rfq_schema
 
@@ -167,7 +159,7 @@ async def get_material_request(
 async def create_material_request(
     payload: MRCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(*MR_CREATOR_ROLES)),
+    current_user: User = Depends(require_permission("procurement", "create", "material-requests")),
 ):
     if not payload.items:
         raise HTTPException(status_code=422, detail="At least one item is required")
@@ -222,7 +214,7 @@ async def update_material_request(
     mr_id: int,
     payload: MRUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(*MR_CREATOR_ROLES)),
+    current_user: User = Depends(require_permission("procurement", "edit", "material-requests")),
 ):
     result = await db.execute(select(MaterialRequest).where(MaterialRequest.id == mr_id))
     mr = result.scalar_one_or_none()
@@ -268,7 +260,7 @@ async def submit_mr_for_approval(
 async def approve_material_request(
     mr_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role("warehouse_manager", "purchase_manager", "admin")),
+    current_user: User = Depends(require_permission("procurement", "approve", "material-requests")),
 ):
     result = await db.execute(select(MaterialRequest).where(MaterialRequest.id == mr_id))
     mr = result.scalar_one_or_none()
@@ -319,7 +311,7 @@ async def list_rfqs(
     search: str = Query(None),
     status: str = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("procurement", "view", "quotations")),
+    current_user: User = Depends(require_key("procurement-quotations", "procurement-quotation-comparison")),
 ):
     await ensure_rfq_schema(db)
     q_result = await db.execute(
@@ -371,7 +363,7 @@ async def list_rfqs(
 async def get_rfq(
     rfq_number: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("procurement", "view", "quotations")),
+    current_user: User = Depends(require_key("procurement-quotations", "procurement-quotation-comparison")),
 ):
     await ensure_rfq_schema(db)
     # Segregated RFQ details loading
@@ -457,7 +449,7 @@ async def get_rfq(
 async def create_rfq(
     payload: RFQCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(*QUOTATION_ROLES)),
+    current_user: User = Depends(require_permission("procurement", "create", "quotations")),
 ):
     await ensure_rfq_schema(db)
     rfq_number = await generate_number(db, "procurement", "rfq", pad_length=7)
@@ -667,7 +659,7 @@ async def get_quotation(
 async def create_quotation(
     payload: QuotationCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(*QUOTATION_ROLES)),
+    current_user: User = Depends(require_permission("procurement", "create", "quotations")),
 ):
     await ensure_rfq_schema(db)
     if not payload.items:
@@ -762,7 +754,7 @@ async def update_quotation(
     # BUG-PRO-049 fix: role-gate quotation update. Same procurement-roles set
     # used by /quotations create. Plain get_current_user let any logged-in
     # user mutate quotation fields.
-    current_user: User = Depends(require_any_role(*QUOTATION_ROLES)),
+    current_user: User = Depends(require_permission("procurement", "edit", "quotations")),
 ):
     result = await db.execute(select(Quotation).options(selectinload(Quotation.items)).where(Quotation.id == quotation_id))
     q = result.scalar_one_or_none()
@@ -872,12 +864,18 @@ async def list_purchase_orders(
     current_user: User = Depends(get_current_user),
 ):
     # R-001 inline check (multi-permission OR)
-    from app.utils.dependencies import get_user_permissions, get_user_role_codes
-    role_codes = await get_user_role_codes(db, current_user.id)
-    if "super_admin" not in role_codes and "admin" not in role_codes:
-        perms = set(await get_user_permissions(db, current_user.id))
-        if not (perms & {"procurement.view.purchase_orders", "warehouse.view.grn", "warehouse.view.material_issue"}):
-            raise HTTPException(status_code=403, detail="Permission denied: procurement.view.purchase_orders")
+    from app.utils.dependencies import check_user_has_any_permission
+    has_perm = await check_user_has_any_permission(
+        db,
+        current_user.id,
+        [
+            ("procurement", "view", "purchase-orders"),
+            ("warehouse", "view", "grn"),
+            ("warehouse", "view", "material-issues")
+        ]
+    )
+    if not has_perm:
+        raise HTTPException(status_code=403, detail="Permission denied")
     offset, limit = paginate_params(page, page_size)
     query = select(PurchaseOrder).options(
         selectinload(PurchaseOrder.vendor),
@@ -980,12 +978,18 @@ async def get_purchase_order(
     # R-001 inline check (mirrors list_purchase_orders): warehouse staff need
     # read access to POs so the GRN page can fetch line items. Procurement
     # staff also need it. Anyone else 403.
-    from app.utils.dependencies import get_user_permissions, get_user_role_codes
-    role_codes = await get_user_role_codes(db, current_user.id)
-    if "super_admin" not in role_codes and "admin" not in role_codes:
-        perms = set(await get_user_permissions(db, current_user.id))
-        if not (perms & {"procurement.view.purchase_orders", "warehouse.view.grn", "warehouse.view.material_issue"}):
-            raise HTTPException(status_code=403, detail="Permission denied: procurement.view.purchase_orders")
+    from app.utils.dependencies import check_user_has_any_permission
+    has_perm = await check_user_has_any_permission(
+        db,
+        current_user.id,
+        [
+            ("procurement", "view", "purchase-orders"),
+            ("warehouse", "view", "grn"),
+            ("warehouse", "view", "material-issues")
+        ]
+    )
+    if not has_perm:
+        raise HTTPException(status_code=403, detail="Permission denied")
 
     result = await db.execute(
         select(PurchaseOrder).options(
@@ -1135,7 +1139,7 @@ async def get_purchase_order(
 async def create_purchase_order(
     payload: POCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(*PO_CREATOR_ROLES)),
+    current_user: User = Depends(require_permission("procurement", "create", "purchase-orders")),
 ):
     if not payload.items:
         raise HTTPException(status_code=422, detail="At least one item is required")
@@ -1369,7 +1373,7 @@ async def update_purchase_order(
     po_id: int,
     payload: POUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(*PO_CREATOR_ROLES)),
+    current_user: User = Depends(require_permission("procurement", "edit", "purchase-orders")),
 ):
     result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))
     po = result.scalar_one_or_none()
@@ -1511,7 +1515,7 @@ async def submit_po_for_approval(
     # BUG-PRO-031 fix: role-gate submit. Previously any logged-in user could
     # push another user's draft PO into the approval workflow — that lets
     # non-procurement staff move drafts they were never meant to see.
-    current_user: User = Depends(require_any_role(*PO_CREATOR_ROLES)),
+    current_user: User = Depends(require_permission("procurement", "create", "purchase-orders")),
 ):
     result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))
     po = result.scalar_one_or_none()
@@ -1604,7 +1608,7 @@ async def approve_purchase_order(
     po_id: int,
     payload: dict | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(*PO_APPROVER_ROLES)),
+    current_user: User = Depends(require_permission("procurement", "approve", "purchase-orders")),
 ):
     result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))
     po = result.scalar_one_or_none()
@@ -1826,7 +1830,7 @@ async def cancel_purchase_order(
     po_id: int,
     payload: dict | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(*PO_APPROVER_ROLES)),
+    current_user: User = Depends(require_permission("procurement", "delete", "purchase-orders")),
 ):
     result = await db.execute(select(PurchaseOrder).where(PurchaseOrder.id == po_id))
     po = result.scalar_one_or_none()
@@ -1950,7 +1954,7 @@ async def short_close_purchase_order(
     po_id: int,
     payload: dict | None = None,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(*PO_APPROVER_ROLES)),
+    current_user: User = Depends(require_permission("procurement", "delete", "purchase-orders")),
 ):
     """BUG-PRO-041 fix: short-close a partially-received PO.
 
@@ -2012,7 +2016,7 @@ async def short_close_purchase_order(
 async def amend_purchase_order(
     po_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(*PO_CREATOR_ROLES)),
+    current_user: User = Depends(require_permission("procurement", "edit", "purchase-orders")),
 ):
     """Create a new draft version of an approved or accepted Purchase Order."""
     from datetime import timedelta
@@ -2137,7 +2141,7 @@ async def create_po_from_quotation(
     # 2026-05-06 — only admin / super_admin can finalize a vendor by
     # converting their quotation to a PO. Purchase team prepares quotes;
     # admin / super_admin pick the winner.
-    current_user: User = Depends(require_any_role("super_admin", "admin")),
+    current_user: User = Depends(require_permission("procurement", "create", "purchase-orders")),
 ):
     """Create a Purchase Order from an accepted quotation.
 
@@ -2361,7 +2365,7 @@ async def create_po_from_quotation(
 async def create_split_po(
     payload: SplitPORequest,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role("super_admin", "admin")),
+    current_user: User = Depends(require_permission("procurement", "create", "purchase-orders")),
 ):
     """Create split Purchase Orders from selected quotation items."""
     if not payload.awards:
@@ -2964,19 +2968,25 @@ async def list_vendors(
     current_user: User = Depends(get_current_user),
 ):
     await ensure_vendor_type_schema(db)
-    # R-001 (re-audit): vendors contain bank/GST/DL info â€” gate to roles that
+    # R-001 (re-audit): vendors contain bank/GST/DL info — gate to roles that
     # actually need them. Procurement (PO+MR forms), warehouse (GRN), masters,
     # accounts (payments). Read fails for nurse/field_staff/etc.
-    from app.utils.dependencies import get_user_permissions, get_user_role_codes
-    role_codes = await get_user_role_codes(db, current_user.id)
-    if "super_admin" not in role_codes and "admin" not in role_codes:
-        perms = set(await get_user_permissions(db, current_user.id))
-        if not (perms & {
-            "masters.view.vendors", "procurement.view.purchase_orders",
-            "procurement.view.material_requests", "procurement.view.quotations",
-            "warehouse.view.grn", "accounts.view.payments", "accounts.view.invoices",
-        }):
-            raise HTTPException(status_code=403, detail="Permission denied: masters.view.vendors")
+    from app.utils.dependencies import check_user_has_any_permission
+    has_perm = await check_user_has_any_permission(
+        db,
+        current_user.id,
+        [
+            ("procurement", "view", "vendors"),
+            ("procurement", "view", "purchase-orders"),
+            ("procurement", "view", "material-requests"),
+            ("procurement", "view", "quotations"),
+            ("warehouse", "view", "grn"),
+            ("accounts", "view", "payments"),
+            ("accounts", "view", "invoices"),
+        ]
+    )
+    if not has_perm:
+        raise HTTPException(status_code=403, detail="Permission denied")
     offset, limit = paginate_params(page, page_size)
     query = select(Vendor)
     count_query = select(func.count(Vendor.id))
@@ -3036,18 +3046,24 @@ async def get_vendor(
     current_user: User = Depends(get_current_user),
 ):
     await ensure_vendor_type_schema(db)
-    # BUG-FE-052: mirror the role guard from list_vendors â€” vendor records
+    # BUG-FE-052: mirror the role guard from list_vendors — vendor records
     # contain bank/GST/DL/PII that must not leak to nurses/field_staff/etc.
-    from app.utils.dependencies import get_user_permissions, get_user_role_codes
-    role_codes = await get_user_role_codes(db, current_user.id)
-    if "super_admin" not in role_codes and "admin" not in role_codes:
-        perms = set(await get_user_permissions(db, current_user.id))
-        if not (perms & {
-            "masters.view.vendors", "procurement.view.purchase_orders",
-            "procurement.view.material_requests", "procurement.view.quotations",
-            "warehouse.view.grn", "accounts.view.payments", "accounts.view.invoices",
-        }):
-            raise HTTPException(status_code=403, detail="Permission denied: masters.view.vendors")
+    from app.utils.dependencies import check_user_has_any_permission
+    has_perm = await check_user_has_any_permission(
+        db,
+        current_user.id,
+        [
+            ("procurement", "view", "vendors"),
+            ("procurement", "view", "purchase-orders"),
+            ("procurement", "view", "material-requests"),
+            ("procurement", "view", "quotations"),
+            ("warehouse", "view", "grn"),
+            ("accounts", "view", "payments"),
+            ("accounts", "view", "invoices"),
+        ]
+    )
+    if not has_perm:
+        raise HTTPException(status_code=403, detail="Permission denied")
     result = await db.execute(select(Vendor).where(Vendor.id == vendor_id))
     vendor = result.scalar_one_or_none()
     if not vendor:

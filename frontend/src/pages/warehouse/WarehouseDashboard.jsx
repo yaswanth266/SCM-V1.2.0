@@ -25,11 +25,13 @@ import {
   Legend,
 } from 'recharts';
 import api from '../../config/api';
+import useAuthStore from '../../store/authStore';
 
 const COLORS = ['#F09000', '#52c41a', '#fa8c16', '#fa541c', '#1890ff'];
 
 const WarehouseDashboard = () => {
   const navigate = useNavigate();
+  const hasKey = useAuthStore((s) => s.hasKey);
   const [loading, setLoading] = useState(true);
   const [procSummary, setProcSummary] = useState({});
   const [recentGRNs, setRecentGRNs] = useState([]);
@@ -42,11 +44,24 @@ const WarehouseDashboard = () => {
   const fetchDashboardData = async () => {
     try {
       setLoading(true);
-      const [summaryRes, grnRes, qiRes] = await Promise.all([
-        api.get('/dashboard/procurement-summary'),
-        api.get('/warehouse/grn', { params: { page_size: 5 } }),
-        api.get('/warehouse/quality-inspections', { params: { page_size: 5 } }),
-      ]);
+      const promises = [api.get('/dashboard/procurement-summary')];
+      
+      const canViewGRN = hasKey('warehouse-grn');
+      const canViewQI = hasKey('warehouse-quality-inspections');
+
+      if (canViewGRN) {
+        promises.push(api.get('/warehouse/grn', { params: { page_size: 5 } }));
+      } else {
+        promises.push(Promise.resolve({ data: { items: [] } }));
+      }
+
+      if (canViewQI) {
+        promises.push(api.get('/warehouse/quality-inspections', { params: { page_size: 5 } }));
+      } else {
+        promises.push(Promise.resolve({ data: { items: [] } }));
+      }
+
+      const [summaryRes, grnRes, qiRes] = await Promise.all(promises);
 
       setProcSummary(summaryRes.data || {});
       setRecentGRNs(grnRes.data?.items || grnRes.data || []);
@@ -106,16 +121,18 @@ const WarehouseDashboard = () => {
           <h1 style={{ margin: 0, fontSize: '28px', color: '#1A1A1A', fontWeight: 600 }}>Warehouse Dashboard</h1>
           <p style={{ margin: 0, color: '#6C757D' }}>Manage goods receipts, QA inspections, bin mapping, putaway, and dispatch queues.</p>
         </div>
-        <Space>
-          <Button 
-            type="primary" 
-            icon={<PlusOutlined />} 
-            onClick={() => navigate('/warehouse/grn/new')}
-            style={{ background: '#F09000', borderColor: '#F09000', height: '40px', borderRadius: '6px' }}
-          >
-            Receive GRN
-          </Button>
-        </Space>
+        {hasKey('warehouse-grn') && (
+          <Space>
+            <Button 
+              type="primary" 
+              icon={<PlusOutlined />} 
+              onClick={() => navigate('/warehouse/grn/new')}
+              style={{ background: '#F09000', borderColor: '#F09000', height: '40px', borderRadius: '6px' }}
+            >
+              Receive GRN
+            </Button>
+          </Space>
+        )}
       </div>
 
       {/* KPI Cards Row */}
@@ -240,100 +257,124 @@ const WarehouseDashboard = () => {
       </Row>
 
       {/* Recent Activity / Quick Actions Row */}
-      <Row gutter={[16, 16]}>
-        {/* Recent GRNs */}
-        <Col xs={24} md={16}>
-          <Card 
-            title="Recent Goods Receipt Notes" 
-            extra={<Button type="link" onClick={() => navigate('/warehouse/grn')}>View All</Button>}
-            style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
-          >
-            {recentGRNs.length > 0 ? (
-              <List
-                itemLayout="horizontal"
-                dataSource={recentGRNs}
-                renderItem={(item) => (
-                  <List.Item
-                    actions={[
-                      <Button 
-                        type="link" 
-                        icon={<ArrowRightOutlined />} 
-                        onClick={() => navigate(`/warehouse/grn/${item.id}`)}
-                      />
-                    ]}
-                  >
-                    <List.Item.Meta
-                      title={
-                        <Space>
-                          <a onClick={() => navigate(`/warehouse/grn/${item.id}`)} style={{ fontWeight: 600, color: '#1A1A1A' }}>
-                            {item.grn_number}
-                          </a>
-                          {getStatusTag(item.status)}
-                        </Space>
-                      }
-                      description={
-                        <div style={{ fontSize: '13px', color: '#6C757D' }}>
-                          <span>Vendor: {item.vendor_name}</span>
-                          <span style={{ margin: '0 8px' }}>|</span>
-                          <span>Date: {item.grn_date}</span>
-                          <span style={{ margin: '0 8px' }}>|</span>
-                          <span>Warehouse: {item.warehouse_name || `Warehouse ${item.warehouse_id}`}</span>
-                        </div>
-                      }
-                    />
-                  </List.Item>
-                )}
-              />
-            ) : (
-              <Empty description="No recent GRNs found." />
-            )}
-          </Card>
-        </Col>
+      {(() => {
+        const canViewGRN = hasKey('warehouse-grn');
+        const showOperations = hasKey('warehouse-grn') || hasKey('warehouse-quality-inspections') || hasKey('warehouse-material-issues') || hasKey('warehouse-notifications');
+        
+        if (!canViewGRN && !showOperations) return null;
+        
+        const grnSpan = 16;
+        const opsSpan = canViewGRN ? 8 : 24;
 
-        {/* Quick Actions Panel */}
-        <Col xs={24} md={8}>
-          <Card 
-            title="Warehouse Operations" 
-            style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
-          >
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <Button 
-                type="primary" 
-                icon={<PlusOutlined />} 
-                onClick={() => navigate('/warehouse/grn/new')}
-                block
-                style={{ background: '#F09000', borderColor: '#F09000', height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
-              >
-                Inward New GRN
-              </Button>
-              <Button 
-                icon={<CheckSquareOutlined />} 
-                onClick={() => navigate('/warehouse/quality-inspection/new')}
-                block
-                style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
-              >
-                New Quality Check
-              </Button>
-              <Button 
-                icon={<PlusOutlined />} 
-                onClick={() => navigate('/warehouse/material-issues/new')}
-                block
-                style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
-              >
-                Issue Raw Materials
-              </Button>
-              <Button 
-                icon={<NotificationOutlined />} 
-                onClick={() => navigate('/warehouse/notifications')}
-                block
-                style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
-              >
-                Warehouse Alerts
-              </Button>
-            </div>
-          </Card>
-        </Col>
-      </Row>
+        return (
+          <Row gutter={[16, 16]}>
+            {/* Recent GRNs */}
+            {canViewGRN && (
+              <Col xs={24} md={grnSpan}>
+                <Card 
+                  title="Recent Goods Receipt Notes" 
+                  extra={<Button type="link" onClick={() => navigate('/warehouse/grn')}>View All</Button>}
+                  style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
+                >
+                  {recentGRNs.length > 0 ? (
+                    <List
+                      itemLayout="horizontal"
+                      dataSource={recentGRNs}
+                      renderItem={(item) => (
+                        <List.Item
+                          actions={[
+                            <Button 
+                              type="link" 
+                              icon={<ArrowRightOutlined />} 
+                              onClick={() => navigate(`/warehouse/grn/${item.id}`)}
+                            />
+                          ]}
+                        >
+                          <List.Item.Meta
+                            title={
+                              <Space>
+                                <a onClick={() => navigate(`/warehouse/grn/${item.id}`)} style={{ fontWeight: 600, color: '#1A1A1A' }}>
+                                  {item.grn_number}
+                                </a>
+                                {getStatusTag(item.status)}
+                              </Space>
+                            }
+                            description={
+                              <div style={{ fontSize: '13px', color: '#6C757D' }}>
+                                <span>Vendor: {item.vendor_name}</span>
+                                <span style={{ margin: '0 8px' }}>|</span>
+                                <span>Date: {item.grn_date}</span>
+                                <span style={{ margin: '0 8px' }}>|</span>
+                                <span>Warehouse: {item.warehouse_name || `Warehouse ${item.warehouse_id}`}</span>
+                              </div>
+                            }
+                          />
+                        </List.Item>
+                      )}
+                    />
+                  ) : (
+                    <Empty description="No recent GRNs found." />
+                  )}
+                </Card>
+              </Col>
+            )}
+
+            {/* Quick Actions Panel */}
+            {showOperations && (
+              <Col xs={24} md={opsSpan}>
+                <Card 
+                  title="Warehouse Operations" 
+                  style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {hasKey('warehouse-grn') && (
+                      <Button 
+                        type="primary" 
+                        icon={<PlusOutlined />} 
+                        onClick={() => navigate('/warehouse/grn/new')}
+                        block
+                        style={{ background: '#F09000', borderColor: '#F09000', height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
+                      >
+                        Inward New GRN
+                      </Button>
+                    )}
+                    {hasKey('warehouse-quality-inspections') && (
+                      <Button 
+                        icon={<CheckSquareOutlined />} 
+                        onClick={() => navigate('/warehouse/quality-inspection/new')}
+                        block
+                        style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
+                      >
+                        New Quality Check
+                      </Button>
+                    )}
+                    {hasKey('warehouse-material-issues') && (
+                      <Button 
+                        icon={<PlusOutlined />} 
+                        onClick={() => navigate('/warehouse/material-issues/new')}
+                        block
+                        style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
+                      >
+                        Issue Raw Materials
+                      </Button>
+                    )}
+                    {hasKey('warehouse-notifications') && (
+                      <Button 
+                        icon={<NotificationOutlined />} 
+                        onClick={() => navigate('/warehouse/notifications')}
+                        block
+                        style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
+                      >
+                        Warehouse Alerts
+                      </Button>
+                    )}
+                  </div>
+                </Card>
+              </Col>
+            )}
+          </Row>
+        );
+      })()}
     </div>
   );
 };

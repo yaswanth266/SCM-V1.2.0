@@ -1177,16 +1177,6 @@ async def delete_purchase_order(
     # constraint blew up at flush time with an IntegrityError 500. Check up
     # front so the caller gets a clean 409 with a clear reason.
     blockers: list[str] = []
-    inv_count = (await db.execute(
-        select(func.count(Invoice.id)).where(Invoice.po_id == po_id)
-    )).scalar() or 0
-    if inv_count:
-        blockers.append(f"{inv_count} invoice(s)")
-    pay_count = (await db.execute(
-        select(func.count(Payment.id)).where(Payment.po_id == po_id)
-    )).scalar() or 0
-    if pay_count:
-        blockers.append(f"{pay_count} payment(s)")
     grn_count = (await db.execute(
         select(func.count(GoodsReceiptNote.id)).where(GoodsReceiptNote.po_id == po_id)
     )).scalar() or 0
@@ -1230,17 +1220,7 @@ async def po_invoices(
     po_id: int,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    rows = (await db.execute(
-        select(Invoice).where(Invoice.po_id == po_id).order_by(desc(Invoice.id))
-    )).scalars().all()
-    return {"items": [{
-        "id": i.id, "invoice_number": i.invoice_number,
-        "invoice_date": i.invoice_date.isoformat() if i.invoice_date else None,
-        "grand_total": float(i.grand_total or 0),
-        "paid_amount": float(i.paid_amount or 0),
-        "balance_amount": float(i.balance_amount or 0),
-        "status": i.status,
-    } for i in rows]}
+    return {"items": []}
 
 
 @router.get("/procurement/purchase-orders/{po_id}/payments")
@@ -1248,15 +1228,7 @@ async def po_payments(
     po_id: int,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    rows = (await db.execute(
-        select(Payment).where(Payment.po_id == po_id).order_by(desc(Payment.id))
-    )).scalars().all()
-    return {"items": [{
-        "id": p.id, "payment_number": p.payment_number,
-        "payment_date": p.payment_date.isoformat() if p.payment_date else None,
-        "amount": float(p.amount or 0),
-        "payment_mode": p.payment_mode, "status": p.status,
-    } for p in rows]}
+    return {"items": []}
 
 
 # ==================== procurement: quotations ====================
@@ -1612,12 +1584,7 @@ async def delete_invoice(
     invoice_id: int,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    inv = await _require(db, Invoice, invoice_id, "Invoice")
-    if inv.status not in ("draft", "cancelled"):
-        raise HTTPException(status_code=400, detail=f"Cannot delete invoice in '{inv.status}' status")
-    await db.delete(inv)
-    await db.flush()
-    return {"success": True}
+    raise HTTPException(status_code=404, detail="Accounts module has been deactivated")
 
 
 @router.get("/accounts/invoices/{invoice_id}/payments")
@@ -1625,16 +1592,7 @@ async def invoice_payments(
     invoice_id: int,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    rows = (await db.execute(
-        select(Payment).where(Payment.invoice_id == invoice_id).order_by(desc(Payment.id))
-    )).scalars().all()
-    return {"items": [{
-        "id": p.id, "payment_number": p.payment_number,
-        "payment_date": p.payment_date.isoformat() if p.payment_date else None,
-        "amount": float(p.amount or 0),
-        "payment_mode": p.payment_mode, "status": p.status,
-        "reference_number": p.reference_number,
-    } for p in rows]}
+    return {"items": []}
 
 
 @router.get("/accounts/invoices/{invoice_id}/print")
@@ -1642,31 +1600,7 @@ async def invoice_print(
     invoice_id: int,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    inv = (await db.execute(
-        select(Invoice).options(selectinload(Invoice.items)).where(Invoice.id == invoice_id)
-    )).scalar_one_or_none()
-    if not inv:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    return {
-        "id": inv.id,
-        "invoice_number": inv.invoice_number,
-        "invoice_date": inv.invoice_date.isoformat() if inv.invoice_date else None,
-        "due_date": inv.due_date.isoformat() if inv.due_date else None,
-        "party_type": inv.party_type,
-        "party_id": inv.party_id,
-        "subtotal": float(inv.subtotal or 0),
-        "tax_amount": float(inv.tax_amount or 0),
-        "grand_total": float(inv.grand_total or 0),
-        "paid_amount": float(inv.paid_amount or 0),
-        "balance_amount": float(inv.balance_amount or 0),
-        "status": inv.status,
-        "items": [{
-            "id": i.id, "item_id": i.item_id,
-            "qty": float(i.qty or 0),
-            "rate": float(i.rate or 0),
-            "amount": float(i.amount or 0),
-        } for i in inv.items],
-    }
+    raise HTTPException(status_code=404, detail="Accounts module has been deactivated")
 
 
 # ==================== accounts: payments ====================
@@ -1676,16 +1610,7 @@ async def get_payment(
     payment_id: int,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    p = await _require(db, Payment, payment_id, "Payment")
-    return {
-        "id": p.id, "payment_number": p.payment_number,
-        "payment_type": p.payment_type, "party_type": p.party_type, "party_id": p.party_id,
-        "invoice_id": p.invoice_id, "po_id": p.po_id, "project_id": p.project_id,
-        "payment_date": p.payment_date.isoformat() if p.payment_date else None,
-        "amount": float(p.amount or 0), "payment_mode": p.payment_mode,
-        "reference_number": p.reference_number, "bank_account": p.bank_account,
-        "is_advance": p.is_advance, "status": p.status, "remarks": p.remarks,
-    }
+    raise HTTPException(status_code=404, detail="Accounts module has been deactivated")
 
 
 class PaymentUpdate(BaseModel):
@@ -1703,13 +1628,7 @@ async def update_payment(
     payment_id: int, payload: PaymentUpdate,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    p = await _require(db, Payment, payment_id, "Payment")
-    if p.status in ("reconciled", "cancelled"):
-        raise HTTPException(status_code=400, detail=f"Cannot edit payment in '{p.status}' status")
-    for k, v in payload.model_dump(exclude_unset=True).items():
-        setattr(p, k, v)
-    await db.flush()
-    return {"success": True}
+    raise HTTPException(status_code=404, detail="Accounts module has been deactivated")
 
 
 @router.delete("/accounts/payments/{payment_id}")
@@ -1717,12 +1636,7 @@ async def delete_payment(
     payment_id: int,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    p = await _require(db, Payment, payment_id, "Payment")
-    if p.status not in ("draft", "cancelled"):
-        raise HTTPException(status_code=400, detail=f"Cannot delete payment in '{p.status}' status")
-    await db.delete(p)
-    await db.flush()
-    return {"success": True}
+    raise HTTPException(status_code=404, detail="Accounts module has been deactivated")
 
 
 # ==================== accounts: credit notes ====================
@@ -1732,13 +1646,7 @@ async def get_credit_note(
     cn_id: int,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    cn = await _require(db, CreditNote, cn_id, "Credit note")
-    return {
-        "id": cn.id, "cn_number": cn.cn_number, "invoice_id": cn.invoice_id,
-        "party_type": cn.party_type, "party_id": cn.party_id,
-        "cn_date": cn.cn_date.isoformat() if cn.cn_date else None,
-        "amount": float(cn.amount or 0), "reason": cn.reason, "status": cn.status,
-    }
+    raise HTTPException(status_code=404, detail="Accounts module has been deactivated")
 
 
 class CreditNoteUpdate(BaseModel):
@@ -1755,13 +1663,7 @@ async def update_credit_note(
     cn_id: int, payload: CreditNoteUpdate,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    cn = await _require(db, CreditNote, cn_id, "Credit note")
-    if cn.status != "draft":
-        raise HTTPException(status_code=400, detail=f"Cannot edit credit note in '{cn.status}' status")
-    for k, v in payload.model_dump(exclude_unset=True).items():
-        setattr(cn, k, v)
-    await db.flush()
-    return {"success": True}
+    raise HTTPException(status_code=404, detail="Accounts module has been deactivated")
 
 
 @router.delete("/accounts/credit-notes/{cn_id}")
@@ -1769,12 +1671,7 @@ async def delete_credit_note(
     cn_id: int,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    cn = await _require(db, CreditNote, cn_id, "Credit note")
-    if cn.status not in ("draft", "cancelled"):
-        raise HTTPException(status_code=400, detail=f"Cannot delete credit note in '{cn.status}' status")
-    await db.delete(cn)
-    await db.flush()
-    return {"success": True}
+    raise HTTPException(status_code=404, detail="Accounts module has been deactivated")
 
 
 @router.post("/accounts/credit-notes/{cn_id}/issue")
@@ -1782,11 +1679,7 @@ async def issue_credit_note(
     cn_id: int,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    cn = await _require(db, CreditNote, cn_id, "Credit note")
-    _assert_status(cn, ("draft",), "issue")
-    cn.status = "issued"
-    await db.flush()
-    return {"success": True, "message": "Credit note issued"}
+    raise HTTPException(status_code=404, detail="Accounts module has been deactivated")
 
 
 @router.post("/accounts/credit-notes/{cn_id}/adjust")
@@ -1794,11 +1687,7 @@ async def adjust_credit_note(
     cn_id: int,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    cn = await _require(db, CreditNote, cn_id, "Credit note")
-    _assert_status(cn, ("issued",), "adjust")
-    cn.status = "adjusted"
-    await db.flush()
-    return {"success": True, "message": "Credit note adjusted"}
+    raise HTTPException(status_code=404, detail="Accounts module has been deactivated")
 
 
 @router.post("/accounts/credit-notes/{cn_id}/cancel")
@@ -1806,12 +1695,7 @@ async def cancel_credit_note(
     cn_id: int,
     db: AsyncSession = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    cn = await _require(db, CreditNote, cn_id, "Credit note")
-    if cn.status == "cancelled":
-        raise HTTPException(status_code=400, detail="Already cancelled")
-    cn.status = "cancelled"
-    await db.flush()
-    return {"success": True, "message": "Credit note cancelled"}
+    raise HTTPException(status_code=404, detail="Accounts module has been deactivated")
 
 
 # ==================== settings ====================

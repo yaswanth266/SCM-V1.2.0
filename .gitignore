@@ -79,3 +79,6 @@ frontend/.vite
 # Run-time local app data directory
 backend/appDataDir/
 
+# Root level scratch directory
+scratch/
+

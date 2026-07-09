@@ -272,42 +272,103 @@ def require_permission(module: str, action: str, resource: str):
     ) -> User:
         role_codes = await get_user_role_codes(db, current_user.id)
 
-        # BUG-AUTH-082 fix: only super_admin gets the global bypass. The
-        # plain `admin` role must satisfy permission checks via its actual
-        # permission rows (i.e. an admin without the relevant module
-        # permission no longer passes silently).
         if "super_admin" in role_codes:
             return current_user
 
         permissions = set(await get_user_permissions(db, current_user.id))
-        required = f"{module}.{action}.{resource}"
-        resource_key = (resource or "").replace("_", "-")
+        
+        allowed = set()
         action_keys = {action}
-        if action == "update":
-            action_keys.add("edit")
-        if action == "edit":
-            action_keys.add("update")
-        allowed = {required}
+        if action in ("edit", "update"):
+            action_keys.update(("edit", "update"))
+            
+        resource_key = (resource or "").replace("_", "-")
+        resource_keys = {resource_key}
+        if resource_key.endswith("s"):
+            resource_keys.add(resource_key[:-1])
+        else:
+            resource_keys.add(resource_key + "s")
+        if resource_key.endswith("y"):
+            resource_keys.add(resource_key[:-1] + "ies")
+        elif resource_key.endswith("ies"):
+            resource_keys.add(resource_key[:-3] + "y")
+            
         for act in action_keys:
             allowed.add(f"{module}.{act}.{resource}")
-            allowed.add(f"{module}-{resource_key}.{act}.{module}-{resource_key}")
-            # Map grouped transaction permissions
-            if module.startswith("warehouse-"):
+            for r_key in resource_keys:
+                allowed.add(f"{module}.{act}.{r_key}")
+                allowed.add(f"{module}-{r_key}.{act}.{module}-{r_key}")
+                allowed.add(f"{module}-masters-{r_key}.{act}.{module}-masters-{r_key}")
+                allowed.add(f"{module}-transactions-{r_key}.{act}.{module}-transactions-{r_key}")
+                allowed.add(f"{module}-reports-{r_key}.{act}.{module}-reports-{r_key}")
+                allowed.add(f"{module}-notifications-{r_key}.{act}.{module}-notifications-{r_key}")
+                allowed.add(f"{module}-dashboard-{r_key}.{act}.{module}-dashboard-{r_key}")
+                
+            if module.startswith("warehouse-") or module == "warehouse":
                 allowed.add(f"warehouse-transactions.{act}.warehouse-transactions")
-            if module.startswith("inventory-"):
+            if module.startswith("inventory-") or module == "inventory":
                 allowed.add(f"inventory-transactions.{act}.inventory-transactions")
-            if module.startswith("indent-"):
+            if module.startswith("indent-") or module == "indent":
                 allowed.add(f"indent-transactions.{act}.indent-transactions")
 
         if not (allowed & permissions):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied: {required}",
+                detail=f"Permission denied: {module}.{action}.{resource}",
             )
 
         return current_user
 
     return check_permission
+
+
+async def check_user_has_any_permission(db: AsyncSession, user_id: int, permission_tuples: list) -> bool:
+    """Check if the user has any of the specified permission tuples (module, action, resource)."""
+    role_codes = await get_user_role_codes(db, user_id)
+    if "super_admin" in role_codes:
+        return True
+
+    permissions = set(await get_user_permissions(db, user_id))
+    
+    for module, action, resource in permission_tuples:
+        allowed = set()
+        action_keys = {action}
+        if action in ("edit", "update"):
+            action_keys.update(("edit", "update"))
+            
+        resource_key = (resource or "").replace("_", "-")
+        resource_keys = {resource_key}
+        if resource_key.endswith("s"):
+            resource_keys.add(resource_key[:-1])
+        else:
+            resource_keys.add(resource_key + "s")
+        if resource_key.endswith("y"):
+            resource_keys.add(resource_key[:-1] + "ies")
+        elif resource_key.endswith("ies"):
+            resource_keys.add(resource_key[:-3] + "y")
+            
+        for act in action_keys:
+            allowed.add(f"{module}.{act}.{resource}")
+            for r_key in resource_keys:
+                allowed.add(f"{module}.{act}.{r_key}")
+                allowed.add(f"{module}-{r_key}.{act}.{module}-{r_key}")
+                allowed.add(f"{module}-masters-{r_key}.{act}.{module}-masters-{r_key}")
+                allowed.add(f"{module}-transactions-{r_key}.{act}.{module}-transactions-{r_key}")
+                allowed.add(f"{module}-reports-{r_key}.{act}.{module}-reports-{r_key}")
+                allowed.add(f"{module}-notifications-{r_key}.{act}.{module}-notifications-{r_key}")
+                allowed.add(f"{module}-dashboard-{r_key}.{act}.{module}-dashboard-{r_key}")
+                
+            if module.startswith("warehouse-") or module == "warehouse":
+                allowed.add(f"warehouse-transactions.{act}.warehouse-transactions")
+            if module.startswith("inventory-") or module == "inventory":
+                allowed.add(f"inventory-transactions.{act}.inventory-transactions")
+            if module.startswith("indent-") or module == "indent":
+                allowed.add(f"indent-transactions.{act}.indent-transactions")
+                
+        if allowed & permissions:
+            return True
+            
+    return False
 
 
 def require_key(*allowed_keys: str):
@@ -349,6 +410,7 @@ def require_key(*allowed_keys: str):
 def require_any_role(*role_codes: str):
     """Dependency to check if user has any of the specified roles."""
     async def check_role(
+        request: Request,
         current_user: User = Depends(get_current_user),
         db: AsyncSession = Depends(get_db),
     ) -> User:
@@ -357,13 +419,68 @@ def require_any_role(*role_codes: str):
         if "super_admin" in user_roles:
             return current_user
 
-        if not any(r in user_roles for r in role_codes):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient role privileges",
-            )
+        if any(r in user_roles for r in role_codes):
+            return current_user
 
-        return current_user
+        # Dynamic permission check fallback: parse module/action/resource from request path
+        try:
+            path = request.url.path
+            method = request.method.upper()
+            
+            parts = [p for p in path.split("/") if p]
+            if len(parts) >= 2 and parts[0] == "api":
+                if parts[1] == "v1":
+                    parts = parts[2:]
+                else:
+                    parts = parts[1:]
+                    
+            if parts:
+                module = parts[0]
+                resource = parts[1] if len(parts) > 1 else module
+                
+                # If resource is digit or UUID-like, treat it as module
+                if len(parts) > 1 and (parts[1].isdigit() or (len(parts[1]) > 8 and "-" in parts[1])):
+                    resource = module
+                    
+                # Action mapping
+                action = "view"
+                if method == "POST":
+                    action = "create"
+                    if parts[-1] in ("approve", "reject", "cancel", "submit", "finalize"):
+                        action = "approve" if parts[-1] in ("approve", "finalize") else "delete" if parts[-1] == "cancel" else "create"
+                elif method in ("PUT", "PATCH"):
+                    action = "edit"
+                elif method == "DELETE":
+                    action = "delete"
+                
+                permissions = set(await get_user_permissions(db, current_user.id))
+                required = f"{module}.{action}.{resource}"
+                resource_key = (resource or "").replace("_", "-")
+                action_keys = {action}
+                if action == "update":
+                    action_keys.add("edit")
+                if action == "edit":
+                    action_keys.add("update")
+                allowed = {required}
+                for act in action_keys:
+                    allowed.add(f"{module}.{act}.{resource}")
+                    allowed.add(f"{module}-{resource_key}.{act}.{module}-{resource_key}")
+                    if module.startswith("warehouse-"):
+                        allowed.add(f"warehouse-transactions.{act}.warehouse-transactions")
+                    if module.startswith("inventory-"):
+                        allowed.add(f"inventory-transactions.{act}.inventory-transactions")
+                    if module.startswith("indent-"):
+                        allowed.add(f"indent-transactions.{act}.indent-transactions")
+                
+                if allowed & permissions:
+                    return current_user
+        except Exception:
+            pass
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient role privileges",
+        )
 
     return check_role
 

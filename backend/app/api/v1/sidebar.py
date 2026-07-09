@@ -236,7 +236,7 @@ def _allowed_for_role(role_code: str) -> List[str]:
 
 
 async def allowed_keys_for_role(db: AsyncSession, role: Role) -> List[str]:
-    if role.code in {"super_admin", "admin"}:
+    if role.code == "super_admin":
         return sorted(_allowed_for_role(role.code))
 
     role_codes = [role.code]
@@ -260,54 +260,7 @@ async def allowed_keys_for_role(db: AsyncSession, role: Role) -> List[str]:
         
         # Map DB permission names to frontend menu keys if they differ
         mapped_keys = [key]
-        if key == "indent-transactions":
-            mapped_keys.extend([
-                "indent-indents",
-                "indent-ap104-consumables",
-                "indent-ap104-install",
-            ])
-        elif key == "inventory-masters":
-            mapped_keys.extend([
-                "inventory-masters-items",
-                "inventory-masters-packaging",
-                "inventory-masters-categories",
-                "inventory-masters-features",
-                "inventory-masters-user-material-mapping",
-                "inventory-masters-uom",
-                "inventory-masters-brands",
-                "inventory-masters-item-types",
-                "inventory-masters-item-sub-classes",
-                "inventory-masters-item-attributes",
-                "inventory-masters-category-attribute-mapping",
-                "inventory-masters-specs",
-                "inventory-masters-boms",
-                "inventory-masters-price-lists",
-                "inventory-masters-ap104-consumables",
-                "inventory-masters-ap104-install",
-                "inventory-masters-vehicles",
-            ])
-        elif key == "warehouse-masters":
-            mapped_keys.extend([
-                "warehouse-masters-warehouses",
-                "warehouse-masters-floor-plan",
-                "warehouse-masters-floor-plan-3d",
-            ])
-        elif key == "procurement-masters":
-            mapped_keys.extend([
-                "procurement-masters-vendors",
-                "procurement-masters-vendor-material-mapping",
-            ])
-        elif key == "procurement-transactions":
-            # Permission Manager uses "procurement-transactions" to grant access
-            # to the procurement transaction pages including the demand pool.
-            mapped_keys.extend([
-                "procurement-demand-pool",
-                "procurement-material-requests",
-                "procurement-quotations",
-                "procurement-quotation-comparison",
-                "procurement-purchase-orders",
-            ])
-        elif key == "masters-users":
+        if key == "masters-users":
             mapped_keys.extend([
                 "settings-masters-users",
             ])
@@ -319,39 +272,34 @@ async def allowed_keys_for_role(db: AsyncSession, role: Role) -> List[str]:
             mapped_keys.extend([
                 "settings-masters-organization-structure",
             ])
-        elif key == "inventory-transactions":
-            mapped_keys.extend([
-                "inventory-stock-balance",
-                "inventory-stock-ledger",
-                "inventory-stock-transfer",
-                "inventory-stock-audit",
-                "inventory-replenishment",
-            ])
-        elif key == "warehouse-transactions":
-            mapped_keys.extend([
-                "warehouse-material-inward",
-                "warehouse-gate-entry",
-                "warehouse-grn",
-                "warehouse-quality-inspection",
-                "warehouse-putaway",
-                "warehouse-purchase-returns",
-                "warehouse-material-issues",
-                "warehouse-material-issues-ap104-consumables",
-                "warehouse-material-issues-ap104-install",
-                "warehouse-dispatch",
-            ])
             
         for k in mapped_keys:
             dynamic_keys.add(k)
             if "-" in k:
                 dynamic_keys.add(k.split("-", 1)[0])
 
-    keys = list(dynamic_keys) if dynamic_keys else list(_allowed_for_role(role.code))
-    if role.code in {"field_staff", "field_supervisor", "storekeeper", "store_keeper", "lab_technician"}:
-        # Ensure field staff/supervisors and storekeepers can always access stock balance and stock ledger
-        for k in ["inventory", "inventory-stock-balance", "inventory-stock-ledger"]:
-            if k not in keys:
-                keys.append(k)
+    # Dynamic parent filtering: prevent rendering empty navigation structures
+    parents = {"inventory", "warehouse", "procurement", "indent", "logistics", "settings", "accounts", "approvals"}
+    section_headers = {
+        f"{p}-{suffix}" for p in parents for suffix in ["transactions", "masters", "reports", "notifications"]
+    }
+    
+    actual_subkeys = {k for k in dynamic_keys if "-" in k and k not in section_headers}
+    allowed_parents = {k.split("-", 1)[0] for k in actual_subkeys}
+    
+    filtered_keys = set()
+    for k in dynamic_keys:
+        if k in parents:
+            if k in allowed_parents:
+                filtered_keys.add(k)
+        elif k in section_headers:
+            parent = k.split("-", 1)[0]
+            if parent in allowed_parents:
+                filtered_keys.add(k)
+        else:
+            filtered_keys.add(k)
+
+    keys = list(filtered_keys)
     return sorted(keys)
 
 

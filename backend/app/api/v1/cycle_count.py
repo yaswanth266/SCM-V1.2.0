@@ -20,7 +20,7 @@ from app.models.stock import StockBalance
 from app.models.audit import StockAudit, StockAuditItem
 from app.services.number_series import generate_number
 from app.services.stock_service import post_stock_ledger
-from app.utils.dependencies import get_current_user, require_any_role
+from app.utils.dependencies import get_current_user, require_permission
 from app.utils.helpers import paginate_params, build_paginated_response
 
 
@@ -65,9 +65,7 @@ async def list_cycle_counts(
 async def start_cycle_count(
     payload: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "warehouse_operator", "store_keeper",
-    )),
+    current_user: User = Depends(require_permission("inventory", "create", "stock-audit")),
 ):
     """Start a new cycle count.
     Body: {warehouse_id, item_ids?[] (optional — if blank, all stocked items in warehouse)}
@@ -146,9 +144,7 @@ async def update_count_qty(
     item_row_id: int,
     payload: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager", "warehouse_operator", "store_keeper",
-    )),
+    current_user: User = Depends(require_permission("inventory", "edit", "stock-audit")),
 ):
     """Update physical_qty for one count line. Auto-computes variance."""
     row = (await db.execute(
@@ -208,9 +204,7 @@ async def remove_count_line(
     cc_id: int,
     item_row_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager",
-    )),
+    current_user: User = Depends(require_permission("inventory", "delete", "stock-audit")),
 ):
     """BUG-INV-077: remove an erroneous cycle-count line.
 
@@ -269,9 +263,7 @@ def _was_counted(row: StockAuditItem) -> bool:
 async def finalize_cycle_count(
     cc_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_any_role(
-        "super_admin", "admin", "warehouse_manager",
-    )),
+    current_user: User = Depends(require_permission("inventory", "approve", "stock-audit")),
 ):
     """Post all variance adjustments to the stock ledger and mark audit completed.
     For each line with variance != 0, posts a stock_audit_adjustment entry.

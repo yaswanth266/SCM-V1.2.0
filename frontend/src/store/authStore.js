@@ -167,9 +167,9 @@ const useAuthStore = create((set, get) => ({
   },
 
   hasPermission: (module, action) => {
-    const { permissions, user } = get();
-    const activeRole = user?.role;
-    if (activeRole === 'super_admin' || activeRole === 'admin') return true;
+    const { permissions, user, activeRoleCode } = get();
+    const activeRole = activeRoleCode || user?.role;
+    if (activeRole === 'super_admin') return true;
     if (!permissions || permissions.length === 0) return false;
     // Permissions are strings like "module.action.resource"
     return permissions.some((p) => {
@@ -187,16 +187,16 @@ const useAuthStore = create((set, get) => ({
     return get().hasPermission(module, 'view');
   },
 
-  // RBAC-FE: per-page key gate. Mirrors hasPermission's super_admin/admin
+  // RBAC-FE: per-page key gate. Mirrors hasPermission's super_admin
   // bypass (matched strictly by role.code per BUG-AUTH-122) but checks the
   // server-driven allowed-keys whitelist instead of the legacy
   // module.action permission strings. Anything not on the whitelist is
   // denied — so callers must guarantee /me/sidebar has been fetched at
   // least once after login (or rely on the hydrated localStorage copy).
   hasKey: (key) => {
-    const { allowedKeys, user } = get();
-    const activeRole = user?.role;
-    if (activeRole === 'super_admin' || activeRole === 'admin') return true;
+    const { allowedKeys, user, activeRoleCode } = get();
+    const activeRole = activeRoleCode || user?.role;
+    if (activeRole === 'super_admin') return true;
     if (!key) return false;
     return Array.isArray(allowedKeys) && allowedKeys.includes(key);
   },

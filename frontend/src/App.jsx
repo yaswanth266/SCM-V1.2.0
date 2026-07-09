@@ -386,12 +386,25 @@ const ModuleIndexRedirect = ({ moduleId, fallback }) => {
   const allowedSet = new Set(Array.isArray(allowedKeys) ? allowedKeys : []);
 
   if (nav && allowedSet.size > 0) {
-    const tab = nav.tabs.find((t) => {
-      const parts = (t.path || '').split('/').filter(Boolean);
-      if (parts.length < 2) return false;
-      return allowedSet.has(`${parts[0]}-${parts[1]}`);
-    });
-    if (tab) return <Navigate to={tab.path} replace />;
+    const queue = [...nav.tabs];
+    while (queue.length > 0) {
+      const t = queue.shift();
+      if (t.children) {
+        queue.push(...t.children);
+        continue;
+      }
+      if (t.path) {
+        const parts = (t.path || '').split('/').filter(Boolean);
+        if (parts.length >= 2) {
+          const derivedKey = `${parts[0]}-${parts[1]}`;
+          const fullKey = parts.join('-');
+          const isPersonal = ['/settings/profile', '/settings/change-password', '/settings/delegations'].includes(t.path);
+          if (isPersonal || allowedSet.has(derivedKey) || allowedSet.has(fullKey)) {
+            return <Navigate to={t.path} replace />;
+          }
+        }
+      }
+    }
   }
 
   return <Navigate to={fallback} replace />;
@@ -462,7 +475,7 @@ const App = () => {
             {/* Launcher (Bavya home) */}
             <Route path="/launcher" element={<AppLauncher />} />
             <Route path="/warehouse" element={<ModuleIndexRedirect moduleId="warehouse" fallback="/warehouse/dashboard" />} />
-            <Route path="/warehouse/dashboard" element={<PermissionRoute module="warehouse"><WarehouseDashboard /></PermissionRoute>} />
+            <Route path="/warehouse/dashboard" element={<KeyRoute requiredKey="warehouse-dashboard"><WarehouseDashboard /></KeyRoute>} />
             <Route path="/warehouse/masters/warehouses" element={<KeyRoute requiredKey="warehouse-masters-warehouses"><Warehouses /></KeyRoute>} />
             <Route path="/warehouse/masters/warehouses/new" element={<KeyRoute requiredKey="warehouse-masters-warehouses"><WarehouseForm /></KeyRoute>} />
             <Route path="/warehouse/masters/warehouses/:id" element={<KeyRoute requiredKey="warehouse-masters-warehouses"><WarehouseDetail /></KeyRoute>} />
@@ -470,70 +483,70 @@ const App = () => {
             <Route path="/warehouse/masters/floor-plan" element={<KeyRoute requiredKey="warehouse-masters-floor-plan"><FloorPlan /></KeyRoute>} />
             <Route path="/warehouse/masters/floor-plan-3d" element={<KeyRoute requiredKey="warehouse-masters-floor-plan-3d"><FloorPlan3D /></KeyRoute>} />
             <Route path="/warehouse/grn" element={<KeyRoute requiredKey="warehouse-grn"><GRN /></KeyRoute>} />
-            <Route path="/warehouse/grn/new" element={<PermissionRoute module="warehouse"><GRNForm /></PermissionRoute>} />
+            <Route path="/warehouse/grn/new" element={<KeyRoute requiredKey="warehouse-grn"><GRNForm /></KeyRoute>} />
             <Route path="/warehouse/grn/create" element={<Navigate to="/warehouse/grn/new" replace />} />
-            <Route path="/warehouse/grn/:id" element={<PermissionRoute module="warehouse"><GRNForm /></PermissionRoute>} />
+            <Route path="/warehouse/grn/:id" element={<KeyRoute requiredKey="warehouse-grn"><GRNForm /></KeyRoute>} />
             <Route path="/warehouse/quality-inspection" element={<KeyRoute requiredKey="warehouse-quality-inspection"><QualityInspection /></KeyRoute>} />
-            <Route path="/warehouse/quality-inspection/new" element={<PermissionRoute module="warehouse"><QualityInspectionForm /></PermissionRoute>} />
-            <Route path="/warehouse/quality-inspection/:id" element={<PermissionRoute module="warehouse"><QualityInspectionForm /></PermissionRoute>} />
+            <Route path="/warehouse/quality-inspection/new" element={<KeyRoute requiredKey="warehouse-quality-inspection"><QualityInspectionForm /></KeyRoute>} />
+            <Route path="/warehouse/quality-inspection/:id" element={<KeyRoute requiredKey="warehouse-quality-inspection"><QualityInspectionForm /></KeyRoute>} />
             <Route path="/warehouse/putaway" element={<KeyRoute requiredKey="warehouse-putaway"><Putaway /></KeyRoute>} />
-            <Route path="/warehouse/putaway/new" element={<PermissionRoute module="warehouse"><PutawayForm /></PermissionRoute>} />
-            <Route path="/warehouse/putaway/:id" element={<PermissionRoute module="warehouse"><PutawayForm /></PermissionRoute>} />
+            <Route path="/warehouse/putaway/new" element={<KeyRoute requiredKey="warehouse-putaway"><PutawayForm /></KeyRoute>} />
+            <Route path="/warehouse/putaway/:id" element={<KeyRoute requiredKey="warehouse-putaway"><PutawayForm /></KeyRoute>} />
             <Route path="/warehouse/floor-plan" element={<Navigate to="/warehouse/masters/floor-plan" replace />} />
             <Route path="/warehouse/floor-plan-3d" element={<Navigate to="/warehouse/masters/floor-plan-3d" replace />} />
             <Route path="/warehouse/purchase-returns" element={<KeyRoute requiredKey="warehouse-purchase-returns"><PurchaseReturns /></KeyRoute>} />
-            <Route path="/warehouse/purchase-returns/new" element={<PermissionRoute module="warehouse"><PurchaseReturnForm /></PermissionRoute>} />
-            <Route path="/warehouse/purchase-returns/:id" element={<PermissionRoute module="warehouse"><PurchaseReturnForm /></PermissionRoute>} />
+            <Route path="/warehouse/purchase-returns/new" element={<KeyRoute requiredKey="warehouse-purchase-returns"><PurchaseReturnForm /></KeyRoute>} />
+            <Route path="/warehouse/purchase-returns/:id" element={<KeyRoute requiredKey="warehouse-purchase-returns"><PurchaseReturnForm /></KeyRoute>} />
             <Route path="/warehouse/material-issues" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssues /></KeyRoute>} />
-            <Route path="/warehouse/material-issues/new" element={<PermissionRoute module="warehouse"><MaterialIssueForm /></PermissionRoute>} />
-            <Route path="/warehouse/material-issues/:id" element={<PermissionRoute module="warehouse"><MaterialIssueForm /></PermissionRoute>} />
+            <Route path="/warehouse/material-issues/new" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssueForm /></KeyRoute>} />
+            <Route path="/warehouse/material-issues/:id" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssueForm /></KeyRoute>} />
             <Route path="/warehouse/material-issues/ap104-consumables" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-consumables"><TemplateMaterialIssueList templateType="consumables" title="AP 104 DP / Consumables Issues" /></KeyRoute>} />
-            <Route path="/warehouse/material-issues/ap104-consumables/new" element={<PermissionRoute module="warehouse"><MaterialIssueForm templateType="consumables" title="Create AP 104 DP / Consumables Material Issue" /></PermissionRoute>} />
-            <Route path="/warehouse/material-issues/ap104-consumables/:id" element={<PermissionRoute module="warehouse"><MaterialIssueForm templateType="consumables" title="AP 104 DP / Consumables Material Issue" /></PermissionRoute>} />
+            <Route path="/warehouse/material-issues/ap104-consumables/new" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-consumables"><MaterialIssueForm templateType="consumables" title="Create AP 104 DP / Consumables Material Issue" /></KeyRoute>} />
+            <Route path="/warehouse/material-issues/ap104-consumables/:id" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-consumables"><MaterialIssueForm templateType="consumables" title="AP 104 DP / Consumables Material Issue" /></KeyRoute>} />
             <Route path="/warehouse/material-issues/ap104-install" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-install"><TemplateMaterialIssueList templateType="install" title="AP 104 DP Install Issues" /></KeyRoute>} />
-            <Route path="/warehouse/material-issues/ap104-install/new" element={<PermissionRoute module="warehouse"><MaterialIssueForm templateType="install" title="Create AP 104 DP Install Material Issue" /></PermissionRoute>} />
-            <Route path="/warehouse/material-issues/ap104-install/:id" element={<PermissionRoute module="warehouse"><MaterialIssueForm templateType="install" title="AP 104 DP Install Material Issue" /></PermissionRoute>} />
+            <Route path="/warehouse/material-issues/ap104-install/new" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-install"><MaterialIssueForm templateType="install" title="Create AP 104 DP Install Material Issue" /></KeyRoute>} />
+            <Route path="/warehouse/material-issues/ap104-install/:id" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-install"><MaterialIssueForm templateType="install" title="AP 104 DP Install Material Issue" /></KeyRoute>} />
             <Route path="/warehouse/picklist" element={<KeyRoute requiredKey="warehouse-picklist"><Picklist /></KeyRoute>} />
             <Route path="/warehouse/picklist/new" element={<KeyRoute requiredKey="warehouse-picklist"><PicklistForm /></KeyRoute>} />
             <Route path="/warehouse/qc-outward" element={<KeyRoute requiredKey="warehouse-qc-outward"><QCOutward /></KeyRoute>} />
-            <Route path="/warehouse/qc-outward/new" element={<PermissionRoute module="warehouse"><QCOutwardForm /></PermissionRoute>} />
-            <Route path="/warehouse/qc-outward/:id" element={<PermissionRoute module="warehouse"><QCOutwardForm /></PermissionRoute>} />
+            <Route path="/warehouse/qc-outward/new" element={<KeyRoute requiredKey="warehouse-qc-outward"><QCOutwardForm /></KeyRoute>} />
+            <Route path="/warehouse/qc-outward/:id" element={<KeyRoute requiredKey="warehouse-qc-outward"><QCOutwardForm /></KeyRoute>} />
             <Route path="/warehouse/outward-labelling" element={<KeyRoute requiredKey="warehouse-outward-labelling"><OutwardLabelling /></KeyRoute>} />
             <Route path="/warehouse/stock-segregation" element={<KeyRoute requiredKey="warehouse-stock-segregation"><StockSegregation /></KeyRoute>} />
             <Route path="/warehouse/material-inward" element={<KeyRoute requiredKey="warehouse-material-inward"><MaterialInward /></KeyRoute>} />
-            <Route path="/warehouse/material-inward/new" element={<PermissionRoute module="warehouse"><MaterialInwardForm /></PermissionRoute>} />
-            <Route path="/warehouse/material-inward/:id" element={<PermissionRoute module="warehouse"><MaterialInwardForm /></PermissionRoute>} />
+            <Route path="/warehouse/material-inward/new" element={<KeyRoute requiredKey="warehouse-material-inward"><MaterialInwardForm /></KeyRoute>} />
+            <Route path="/warehouse/material-inward/:id" element={<KeyRoute requiredKey="warehouse-material-inward"><MaterialInwardForm /></KeyRoute>} />
             <Route path="/warehouse/gate-entry" element={<KeyRoute requiredKey="warehouse-gate-entry"><GateEntry /></KeyRoute>} />
-            <Route path="/warehouse/gate-entry/new" element={<PermissionRoute module="warehouse"><GateEntryForm /></PermissionRoute>} />
-            <Route path="/warehouse/gate-entry/:id" element={<PermissionRoute module="warehouse"><GateEntryForm /></PermissionRoute>} />
-            <Route path="/warehouse/reports" element={<PermissionRoute module="warehouse"><WarehouseReports /></PermissionRoute>} />
-            <Route path="/warehouse/notifications" element={<PermissionRoute module="warehouse"><WarehouseNotifications /></PermissionRoute>} />
+            <Route path="/warehouse/gate-entry/new" element={<KeyRoute requiredKey="warehouse-gate-entry"><GateEntryForm /></KeyRoute>} />
+            <Route path="/warehouse/gate-entry/:id" element={<KeyRoute requiredKey="warehouse-gate-entry"><GateEntryForm /></KeyRoute>} />
+            <Route path="/warehouse/reports" element={<KeyRoute requiredKey="warehouse-reports"><WarehouseReports /></KeyRoute>} />
+            <Route path="/warehouse/notifications" element={<KeyRoute requiredKey="warehouse-notifications"><WarehouseNotifications /></KeyRoute>} />
 
             {/* Procurement — guarded by 'procurement' permission */}
             <Route path="/procurement" element={<ModuleIndexRedirect moduleId="procurement" fallback="/procurement/dashboard" />} />
-            <Route path="/procurement/dashboard" element={<PermissionRoute module="procurement"><ProcurementDashboard /></PermissionRoute>} />
+            <Route path="/procurement/dashboard" element={<KeyRoute requiredKey="procurement-dashboard"><ProcurementDashboard /></KeyRoute>} />
             <Route path="/procurement/masters/vendors" element={<KeyRoute requiredKey="procurement-masters-vendors"><Vendors /></KeyRoute>} />
             <Route path="/procurement/masters/vendors/new" element={<KeyRoute requiredKey="procurement-masters-vendors"><VendorForm /></KeyRoute>} />
             <Route path="/procurement/masters/vendors/:id" element={<KeyRoute requiredKey="procurement-masters-vendors"><VendorDetail /></KeyRoute>} />
             <Route path="/procurement/masters/vendors/:id/edit" element={<KeyRoute requiredKey="procurement-masters-vendors"><VendorForm /></KeyRoute>} />
             <Route path="/procurement/masters/vendor-material-mapping" element={<KeyRoute requiredKey="procurement-masters-vendor-material-mapping"><VendorMaterialMapping /></KeyRoute>} />
             <Route path="/procurement/material-requests" element={<KeyRoute requiredKey="procurement-material-requests"><MaterialRequests /></KeyRoute>} />
-            <Route path="/procurement/material-requests/kanban" element={<PermissionRoute module="procurement"><MaterialRequestsKanban /></PermissionRoute>} />
-            <Route path="/procurement/material-requests/new" element={<PermissionRoute module="procurement"><MaterialRequestForm /></PermissionRoute>} />
+            <Route path="/procurement/material-requests/kanban" element={<KeyRoute requiredKey="procurement-material-requests"><MaterialRequestsKanban /></KeyRoute>} />
+            <Route path="/procurement/material-requests/new" element={<KeyRoute requiredKey="procurement-material-requests"><MaterialRequestForm /></KeyRoute>} />
             <Route path="/procurement/material-requests/create" element={<Navigate to="/procurement/material-requests/new" replace />} />
-            <Route path="/procurement/material-requests/:id" element={<PermissionRoute module="procurement"><MaterialRequestForm /></PermissionRoute>} />
-            <Route path="/procurement/demand-pool" element={<PermissionRoute module="procurement"><DemandPool /></PermissionRoute>} />
+            <Route path="/procurement/material-requests/:id" element={<KeyRoute requiredKey="procurement-material-requests"><MaterialRequestForm /></KeyRoute>} />
+            <Route path="/procurement/demand-pool" element={<KeyRoute requiredKey="procurement-demand-pool"><DemandPool /></KeyRoute>} />
             <Route path="/procurement/quotations" element={<KeyRoute requiredKey="procurement-quotations"><Quotations /></KeyRoute>} />
-            <Route path="/procurement/quotations/new" element={<PermissionRoute module="procurement"><QuotationForm /></PermissionRoute>} />
-            <Route path="/procurement/quotations/:id" element={<PermissionRoute module="procurement"><QuotationForm /></PermissionRoute>} />
+            <Route path="/procurement/quotations/new" element={<KeyRoute requiredKey="procurement-quotations"><QuotationForm /></KeyRoute>} />
+            <Route path="/procurement/quotations/:id" element={<KeyRoute requiredKey="procurement-quotations"><QuotationForm /></KeyRoute>} />
             <Route path="/procurement/purchase-orders" element={<KeyRoute requiredKey="procurement-purchase-orders"><PurchaseOrders /></KeyRoute>} />
             <Route path="/procurement/purchase-orders/new" element={<KeyRoute requiredKey="procurement-purchase-orders"><PurchaseOrderForm /></KeyRoute>} />
             <Route path="/procurement/purchase-orders/create" element={<Navigate to="/procurement/purchase-orders/new" replace />} />
             <Route path="/procurement/purchase-orders/:id" element={<KeyRoute requiredKey="procurement-purchase-orders"><PurchaseOrderDetail /></KeyRoute>} />
             <Route path="/procurement/purchase-orders/:id/edit" element={<KeyRoute requiredKey="procurement-purchase-orders"><PurchaseOrderForm /></KeyRoute>} />
             <Route path="/procurement/quotation-comparison" element={<KeyRoute requiredKey="procurement-quotation-comparison"><QuotationComparison /></KeyRoute>} />
-            <Route path="/procurement/reports" element={<PermissionRoute module="procurement"><ProcurementReports /></PermissionRoute>} />
-            <Route path="/procurement/notifications" element={<PermissionRoute module="procurement"><ProcurementNotifications /></PermissionRoute>} />
+            <Route path="/procurement/reports" element={<KeyRoute requiredKey="procurement-reports"><ProcurementReports /></KeyRoute>} />
+            <Route path="/procurement/notifications" element={<KeyRoute requiredKey="procurement-notifications"><ProcurementNotifications /></KeyRoute>} />
 
             {/* Outward Dispatch - Unified under Logistics */}
             <Route path="/logistics/dispatch-orders" element={<KeyRoute requiredKey="warehouse-dispatch"><Dispatch /></KeyRoute>} />
@@ -549,7 +562,7 @@ const App = () => {
 
             {/* Inventory — guarded by 'inventory' permission */}
             <Route path="/inventory" element={<ModuleIndexRedirect moduleId="inventory" fallback="/inventory/dashboard" />} />
-            <Route path="/inventory/dashboard" element={<PermissionRoute module="inventory"><InventoryDashboard /></PermissionRoute>} />
+            <Route path="/inventory/dashboard" element={<KeyRoute requiredKey="inventory-dashboard"><InventoryDashboard /></KeyRoute>} />
             <Route path="/inventory/masters/items" element={<KeyRoute requiredKey="inventory-masters-items"><Items /></KeyRoute>} />
             <Route path="/inventory/masters/items/new" element={<KeyRoute requiredKey="inventory-masters-items"><ItemForm /></KeyRoute>} />
             <Route path="/inventory/masters/items/:id" element={<KeyRoute requiredKey="inventory-masters-items"><ItemDetail /></KeyRoute>} />
@@ -561,7 +574,7 @@ const App = () => {
             <Route path="/inventory/masters/brands" element={<KeyRoute requiredKey="inventory-masters-brands"><Brands /></KeyRoute>} />
             <Route path="/inventory/masters/features" element={<KeyRoute requiredKey="inventory-masters-features"><Features /></KeyRoute>} />
             <Route path="/inventory/masters/item-types" element={<KeyRoute requiredKey="inventory-masters-item-types"><ItemTypes /></KeyRoute>} />
-            <Route path="/inventory/masters/item-sub-classes" element={<KeyRoute requiredKey="inventory-masters-item-types"><ItemSubClasses /></KeyRoute>} />
+            <Route path="/inventory/masters/item-sub-classes" element={<KeyRoute requiredKey="inventory-masters-item-sub-classes"><ItemSubClasses /></KeyRoute>} />
             <Route path="/inventory/masters/item-attributes" element={<KeyRoute requiredKey="inventory-masters-item-attributes"><ItemAttributes /></KeyRoute>} />
             <Route path="/inventory/masters/category-attribute-mapping" element={<KeyRoute requiredKey="inventory-masters-category-attribute-mapping"><CategoryAttributeMapping /></KeyRoute>} />
             <Route path="/inventory/masters/specs" element={<KeyRoute requiredKey="inventory-masters-specs"><Specs /></KeyRoute>} />
@@ -574,7 +587,7 @@ const App = () => {
             <Route path="/inventory/masters/ap104-install" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateList templateType="install" title="AP 104 DP Install Master" /></KeyRoute>} />
             <Route path="/inventory/masters/ap104-install/new" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateForm templateType="install" title="AP 104 DP Install Master" /></KeyRoute>} />
             <Route path="/inventory/masters/ap104-install/edit/:projectId" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateForm templateType="install" title="AP 104 DP Install Master" /></KeyRoute>} />
-            <Route path="/inventory/masters/vehicles" element={<KeyRoute requiredKey="inventory-masters-items"><Vehicles /></KeyRoute>} />
+            <Route path="/inventory/masters/vehicles" element={<KeyRoute requiredKey="inventory-masters-vehicles"><Vehicles /></KeyRoute>} />
             <Route path="/inventory/masters/price-lists" element={<KeyRoute requiredKey="inventory-masters-price-lists"><PriceLists /></KeyRoute>} />
 
             <Route path="/inventory/masters/price-lists/new" element={<KeyRoute requiredKey="inventory-masters-price-lists"><PriceListForm /></KeyRoute>} />
@@ -583,34 +596,34 @@ const App = () => {
             <Route path="/inventory/stock-balance" element={<KeyRoute requiredKey="inventory-stock-balance"><StockBalance /></KeyRoute>} />
             <Route path="/inventory/stock-ledger" element={<KeyRoute requiredKey="inventory-stock-ledger"><StockLedger /></KeyRoute>} />
             <Route path="/inventory/stock-transfer" element={<KeyRoute requiredKey="inventory-stock-transfer"><StockTransfer /></KeyRoute>} />
-            <Route path="/inventory/stock-transfer/new" element={<PermissionRoute module="inventory"><StockTransferForm /></PermissionRoute>} />
-            <Route path="/inventory/stock-transfer/:id" element={<PermissionRoute module="inventory"><StockTransferForm /></PermissionRoute>} />
+            <Route path="/inventory/stock-transfer/new" element={<KeyRoute requiredKey="inventory-stock-transfer"><StockTransferForm /></KeyRoute>} />
+            <Route path="/inventory/stock-transfer/:id" element={<KeyRoute requiredKey="inventory-stock-transfer"><StockTransferForm /></KeyRoute>} />
             <Route path="/inventory/stock-audit" element={<KeyRoute requiredKey="inventory-stock-audit"><StockAudit /></KeyRoute>} />
-            <Route path="/inventory/stock-audit/new" element={<PermissionRoute module="inventory"><StockAuditForm /></PermissionRoute>} />
-            <Route path="/inventory/stock-audit/:id" element={<PermissionRoute module="inventory"><StockAuditForm /></PermissionRoute>} />
+            <Route path="/inventory/stock-audit/new" element={<KeyRoute requiredKey="inventory-stock-audit"><StockAuditForm /></KeyRoute>} />
+            <Route path="/inventory/stock-audit/:id" element={<KeyRoute requiredKey="inventory-stock-audit"><StockAuditForm /></KeyRoute>} />
             <Route path="/inventory/replenishment" element={<KeyRoute requiredKey="inventory-replenishment"><Replenishment /></KeyRoute>} />
-            <Route path="/inventory/reports" element={<PermissionRoute module="inventory"><InventoryReports /></PermissionRoute>} />
-            <Route path="/inventory/notifications" element={<PermissionRoute module="inventory"><InventoryNotifications /></PermissionRoute>} />
+            <Route path="/inventory/reports" element={<KeyRoute requiredKey="inventory-reports"><InventoryReports /></KeyRoute>} />
+            <Route path="/inventory/notifications" element={<KeyRoute requiredKey="inventory-notifications"><InventoryNotifications /></KeyRoute>} />
 
             {/* Indent — guarded by 'indent' permission */}
             <Route path="/indent" element={<ModuleIndexRedirect moduleId="indent" fallback="/indent/dashboard" />} />
-            <Route path="/indent/dashboard" element={<PermissionRoute module="indent"><IndentDashboard /></PermissionRoute>} />
+            <Route path="/indent/dashboard" element={<KeyRoute requiredKey="indent-dashboard"><IndentDashboard /></KeyRoute>} />
             <Route path="/indent/indents" element={<KeyRoute requiredKey="indent-indents"><Indents /></KeyRoute>} />
-            <Route path="/indent/indents/kanban" element={<PermissionRoute module="indent"><IndentsKanban /></PermissionRoute>} />
-            <Route path="/indent/indents/new" element={<PermissionRoute module="indent"><IndentForm /></PermissionRoute>} />
+            <Route path="/indent/indents/kanban" element={<KeyRoute requiredKey="indent-indents"><IndentsKanban /></KeyRoute>} />
+            <Route path="/indent/indents/new" element={<KeyRoute requiredKey="indent-indents"><IndentForm /></KeyRoute>} />
             <Route path="/indent/indents/create" element={<Navigate to="/indent/indents/new" replace />} />
-            <Route path="/indent/indents/:id" element={<PermissionRoute module="indent"><IndentForm /></PermissionRoute>} />
+            <Route path="/indent/indents/:id" element={<KeyRoute requiredKey="indent-indents"><IndentForm /></KeyRoute>} />
             <Route path="/indent/ap104-consumables" element={<KeyRoute requiredKey="indent-ap104-consumables"><TemplateIndentList templateType="consumables" title="AP 104 DP / Consumables Indents" /></KeyRoute>} />
-            <Route path="/indent/ap104-consumables/new" element={<PermissionRoute module="indent"><TemplateIndentForm templateType="consumables" title="Create AP 104 DP / Consumables Indent" /></PermissionRoute>} />
-            <Route path="/indent/ap104-consumables/:id" element={<PermissionRoute module="indent"><TemplateIndentForm templateType="consumables" title="AP 104 DP / Consumables Indent" /></PermissionRoute>} />
+            <Route path="/indent/ap104-consumables/new" element={<KeyRoute requiredKey="indent-ap104-consumables"><TemplateIndentForm templateType="consumables" title="Create AP 104 DP / Consumables Indent" /></KeyRoute>} />
+            <Route path="/indent/ap104-consumables/:id" element={<KeyRoute requiredKey="indent-ap104-consumables"><TemplateIndentForm templateType="consumables" title="AP 104 DP / Consumables Indent" /></KeyRoute>} />
             <Route path="/indent/ap104-install" element={<KeyRoute requiredKey="indent-ap104-install"><TemplateIndentList templateType="install" title="AP 104 DP Install Indents" /></KeyRoute>} />
-            <Route path="/indent/ap104-install/new" element={<PermissionRoute module="indent"><TemplateIndentForm templateType="install" title="Create AP 104 DP Install Indent" /></PermissionRoute>} />
-            <Route path="/indent/ap104-install/:id" element={<PermissionRoute module="indent"><TemplateIndentForm templateType="install" title="AP 104 DP Install Indent" /></PermissionRoute>} />
+            <Route path="/indent/ap104-install/new" element={<KeyRoute requiredKey="indent-ap104-install"><TemplateIndentForm templateType="install" title="Create AP 104 DP Install Indent" /></KeyRoute>} />
+            <Route path="/indent/ap104-install/:id" element={<KeyRoute requiredKey="indent-ap104-install"><TemplateIndentForm templateType="install" title="AP 104 DP Install Indent" /></KeyRoute>} />
 
             <Route path="/indent/acknowledgement" element={<KeyRoute requiredKey="indent-acknowledgement"><IndentAcknowledgement /></KeyRoute>} />
             <Route path="/indent/acknowledgement/new" element={<KeyRoute requiredKey="indent-acknowledgement"><AcknowledgementForm /></KeyRoute>} />
-            <Route path="/indent/reports" element={<PermissionRoute module="indent"><IndentReports /></PermissionRoute>} />
-            <Route path="/indent/notifications" element={<PermissionRoute module="indent"><IndentNotifications /></PermissionRoute>} />
+            <Route path="/indent/reports" element={<KeyRoute requiredKey="indent-reports"><IndentReports /></KeyRoute>} />
+            <Route path="/indent/notifications" element={<KeyRoute requiredKey="indent-notifications"><IndentNotifications /></KeyRoute>} />
 
 
 

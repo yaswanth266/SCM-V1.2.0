@@ -614,26 +614,8 @@ async def dashboard_kpis(db: AsyncSession, warehouse_id: Optional[int] = None) -
     approved_indents = (await db.execute(approved_indents_q)).scalar() or 0
     rejected_indents = (await db.execute(rejected_indents_q)).scalar() or 0
 
-    # Unpaid invoices
-    # BUG-FIN-124: Invoice has no warehouse_id column today, so per-warehouse
-    # scoping isn't directly possible without a schema change. We derive an
-    # approximate warehouse-scoped figure when warehouse_id is supplied by
-    # joining through PurchaseOrder.warehouse_id (purchase invoices link to a
-    # PO). Sales invoices fall back to org-wide. Document this clearly so
-    # reports don't misrepresent the figure.
-    unpaid_query = (
-        select(func.coalesce(func.sum(Invoice.balance_amount), 0))
-        .where(Invoice.status.in_(["submitted", "partially_paid", "overdue"]))
-    )
-    if warehouse_id:
-        unpaid_query = unpaid_query.where(
-            Invoice.po_id.in_(
-                select(PurchaseOrder.id).where(
-                    PurchaseOrder.warehouse_id == warehouse_id
-                )
-            )
-        )
-    unpaid_invoices = (await db.execute(unpaid_query)).scalar()
+    # Unpaid invoices - Accounts module was removed, default to 0
+    unpaid_invoices = 0.0
 
     return {
         "total_stock_value": float(stock_value or 0),

@@ -29,20 +29,37 @@ const slugify = (value) => String(value || '')
 
 const permissionKeyForTab = (moduleKey, tab) => {
   const parts = String(tab.path || '').split('?')[0].split('/').filter(Boolean);
-  if (parts.length >= 2) {
-    return `${parts[0]}-${parts[1]}`;
+  if (parts.length >= 1) {
+    return parts.join('-');
   }
   return `${moduleKey}-${slugify(tab.label)}`;
+};
+
+const flattenTabs = (tabs) => {
+  const result = [];
+  const traverse = (items) => {
+    for (const item of items) {
+      if (item.children && item.children.length > 0) {
+        result.push(item);
+        traverse(item.children);
+      } else {
+        result.push(item);
+      }
+    }
+  };
+  traverse(tabs || []);
+  return result;
 };
 
 const PERMISSION_MODULES = MODULE_ORDER.map((key) => {
   const nav = MODULE_NAVS[key];
   if (nav) {
     const seen = new Set();
+    const flatTabs = flattenTabs(nav.tabs);
     return {
       key,
       label: nav.label,
-      children: (nav.tabs || [])
+      children: flatTabs
         .map((tab) => ({
           key: permissionKeyForTab(key, tab),
           label: tab.label,
@@ -57,15 +74,149 @@ const PERMISSION_MODULES = MODULE_ORDER.map((key) => {
   return { key, label: key.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()), children: [] };
 });
 
-const PERMISSION_ROWS = PERMISSION_MODULES.flatMap((mod) => [
-  { ...mod, level: 0 },
-  ...(mod.children || []).map((child) => ({
-    ...child,
-    parentKey: mod.key,
-    moduleLabel: mod.label,
-    level: 1,
-  })),
-]);
+const CATEGORIES = [
+  { key: 'cat-dashboard', label: 'Dashboard', catName: 'dashboard' },
+  { key: 'cat-masters', label: 'Masters', catName: 'masters' },
+  { key: 'cat-transactions', label: 'Transactions', catName: 'transactions' },
+  { key: 'cat-reports', label: 'Reports', catName: 'reports' },
+  { key: 'cat-notifications', label: 'Notifications', catName: 'notifications' }
+];
+
+const getTabCategory = (moduleKey, tab) => {
+  const label = String(tab.label || '').toLowerCase();
+  const path = String(tab.path || '').toLowerCase();
+  
+  if (label === 'dashboard' || label === 'overview' || path.endsWith('/dashboard') || path.endsWith('/overview')) {
+    return 'dashboard';
+  }
+  if (label === 'masters' || label === 'master data' || label === 'master' || path.includes('/masters/') || path.includes('/master/')) {
+    return 'masters';
+  }
+  if (label === 'transactions' || path.includes('/transactions/')) {
+    return 'transactions';
+  }
+  if (label === 'reports' || path.includes('/reports')) {
+    return 'reports';
+  }
+  if (label === 'notifications' || path.includes('/notifications')) {
+    return 'notifications';
+  }
+  
+  if (path.includes('/masters') || path.includes('/master')) {
+    return 'masters';
+  }
+  if (moduleKey === 'logistics') {
+    if (label === 'overview') return 'dashboard';
+    if (label === 'master data') return 'masters';
+    return 'transactions';
+  }
+  if (moduleKey === 'approvals') {
+    if (label === 'pending') return 'transactions';
+    return 'masters';
+  }
+  if (moduleKey === 'settings') {
+    if (label === 'reports' || path.includes('/reports')) return 'reports';
+    if (label === 'masters' || path.includes('/masters')) return 'masters';
+    return 'masters';
+  }
+  if (moduleKey === 'documents') {
+    if (label === 'documents') return 'transactions';
+    return 'masters';
+  }
+  return 'transactions';
+};
+
+const collectTabsForCategory = (modKey, nav, catName) => {
+  const result = [];
+  const seen = new Set();
+  
+  const traverse = (tabs) => {
+    tabs.forEach((tab) => {
+      const tabKey = permissionKeyForTab(modKey, tab);
+      if (tabKey === modKey || seen.has(tabKey)) return;
+      seen.add(tabKey);
+      
+      const tabCat = getTabCategory(modKey, tab);
+      if (tabCat === catName) {
+        result.push(tab);
+      }
+      
+      if (tab.children && tab.children.length > 0) {
+        traverse(tab.children);
+      }
+    });
+  };
+  
+  traverse(nav.tabs || []);
+  return result;
+};
+
+const PERMISSION_ROWS = [];
+
+CATEGORIES.forEach((category) => {
+  const categoryRow = {
+    key: category.key,
+    label: category.label,
+    level: 0,
+    hasChildren: true,
+  };
+  
+  const moduleRowsForCategory = [];
+  
+  MODULE_ORDER.forEach((modKey) => {
+    const nav = MODULE_NAVS[modKey];
+    if (nav) {
+      const tabs = collectTabsForCategory(modKey, nav, category.catName);
+      if (tabs.length > 0) {
+        const moduleRowKey = `${category.key}-${modKey}`;
+        const moduleRow = {
+          key: moduleRowKey,
+          label: nav.label,
+          parentKey: category.key,
+          level: 1,
+          hasChildren: true,
+        };
+        
+        const subModuleRows = tabs.map((tab) => ({
+          key: permissionKeyForTab(modKey, tab),
+          label: tab.label,
+          parentKey: moduleRowKey,
+          level: 2,
+          hasChildren: false,
+        }));
+        
+        moduleRowsForCategory.push(moduleRow);
+        moduleRowsForCategory.push(...subModuleRows);
+      }
+    } else {
+      if (category.catName === 'transactions') {
+        const moduleRowKey = `${category.key}-${modKey}`;
+        const label = modKey.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+        const moduleRow = {
+          key: moduleRowKey,
+          label: label,
+          parentKey: category.key,
+          level: 1,
+          hasChildren: true,
+        };
+        const subModuleRow = {
+          key: modKey,
+          label: label,
+          parentKey: moduleRowKey,
+          level: 2,
+          hasChildren: false,
+        };
+        moduleRowsForCategory.push(moduleRow);
+        moduleRowsForCategory.push(subModuleRow);
+      }
+    }
+  });
+  
+  if (moduleRowsForCategory.length > 0) {
+    PERMISSION_ROWS.push(categoryRow);
+    PERMISSION_ROWS.push(...moduleRowsForCategory);
+  }
+});
 
 const PERMISSION_ACTIONS = [
   { key: 'view', label: 'View' },
@@ -98,7 +249,15 @@ const Roles = () => {
 
   const visibleRows = PERMISSION_ROWS.filter((row) => {
     if (row.level === 0) return true;
-    return !!expandedModules[row.parentKey];
+    if (row.level === 1) {
+      return !!expandedModules[row.parentKey];
+    }
+    if (row.level === 2) {
+      const parentRow = PERMISSION_ROWS.find((r) => r.key === row.parentKey);
+      if (!parentRow) return false;
+      return !!expandedModules[parentRow.parentKey] && !!expandedModules[row.parentKey];
+    }
+    return false;
   });
 
   useEffect(() => {
@@ -229,11 +388,25 @@ const Roles = () => {
     }));
   };
 
+  const getDescendantKeys = (key) => {
+    const keys = [key];
+    const queue = [key];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      PERMISSION_ROWS.forEach((row) => {
+        if (row.parentKey === current) {
+          keys.push(row.key);
+          queue.push(row.key);
+        }
+      });
+    }
+    return keys;
+  };
+
   const handleSelectAllRow = (module, checked) => {
     setPermissions((prev) => {
-      const moduleDef = PERMISSION_MODULES.find((mod) => mod.key === module);
       const updatedState = { ...prev };
-      const targetKeys = [module, ...((moduleDef?.children || []).map((child) => child.key))];
+      const targetKeys = getDescendantKeys(module);
       PERMISSION_ACTIONS.forEach((act) => {
         targetKeys.forEach((key) => {
           updatedState[key] = { ...(updatedState[key] || {}), [act.key]: checked };
@@ -254,14 +427,12 @@ const Roles = () => {
   };
 
   const isRowAllChecked = (module) => {
-    const moduleDef = PERMISSION_MODULES.find((mod) => mod.key === module);
-    const targetKeys = [module, ...((moduleDef?.children || []).map((child) => child.key))];
+    const targetKeys = getDescendantKeys(module);
     return targetKeys.every((key) => PERMISSION_ACTIONS.every((act) => permissions[key]?.[act.key]));
   };
 
   const isRowSomeChecked = (module) => {
-    const moduleDef = PERMISSION_MODULES.find((mod) => mod.key === module);
-    const targetKeys = [module, ...((moduleDef?.children || []).map((child) => child.key))];
+    const targetKeys = getDescendantKeys(module);
     return targetKeys.some((key) => PERMISSION_ACTIONS.some((act) => permissions[key]?.[act.key])) && !isRowAllChecked(module);
   };
 
@@ -617,46 +788,48 @@ const Roles = () => {
                         }
                       `}</style>
                       {visibleRows.map((mod, idx) => {
-                        const hasChildren = mod.children && mod.children.length > 0;
+                        const hasChildren = !!mod.hasChildren;
                         const isExpanded = !!expandedModules[mod.key];
                         return (
                           <tr key={mod.key} style={{ backgroundColor: mod.level === 0 ? '#f8fafc' : '#fff' }}>
                             <td
-                              className={`permissions-module-title-cell ${mod.level === 0 && hasChildren ? 'clickable' : ''}`}
-                              onClick={mod.level === 0 && hasChildren ? () => toggleModule(mod.key) : undefined}
+                              className={`permissions-module-title-cell ${hasChildren ? 'clickable' : ''}`}
+                              onClick={hasChildren ? () => toggleModule(mod.key) : undefined}
                               style={{
-                                padding: mod.level === 0 ? '14px 16px' : '10px 16px 10px 32px',
+                                padding: mod.level === 0 ? '14px 16px' : mod.level === 1 ? '10px 16px 10px 32px' : '8px 16px 8px 48px',
                                 borderBottom: '1px solid #e2e8f0',
                                 borderLeft: mod.level === 0 ? '4px solid #b70051' : '4px solid transparent',
-                                fontWeight: mod.level === 0 ? 600 : 400,
-                                color: mod.level === 0 ? '#1e293b' : '#475569',
-                                cursor: mod.level === 0 && hasChildren ? 'pointer' : 'default',
+                                fontWeight: mod.level === 0 ? 600 : mod.hasChildren ? 600 : 400,
+                                color: mod.level === 0 ? '#1e293b' : mod.hasChildren ? '#334155' : '#64748b',
+                                cursor: hasChildren ? 'pointer' : 'default',
                                 userSelect: 'none',
                                 backgroundColor: mod.level === 0 ? '#f8fafc' : '#ffffff',
                               }}
                             >
-                              {mod.level === 0 && hasChildren ? (
+                              {hasChildren ? (
                                 isExpanded ? (
                                   <DownOutlined style={{ marginRight: 8, fontSize: 10, color: '#b70051', fontWeight: 'bold', verticalAlign: 'middle' }} />
                                 ) : (
                                   <RightOutlined style={{ marginRight: 8, fontSize: 10, color: '#94a3b8', verticalAlign: 'middle' }} />
                                 )
+                              ) : mod.level > 0 ? (
+                                <span style={{ 
+                                  display: 'inline-block', 
+                                  width: 4, 
+                                  height: 4, 
+                                  borderRadius: '50%', 
+                                  backgroundColor: '#cbd5e1', 
+                                  marginRight: 8,
+                                  verticalAlign: 'middle'
+                                }} />
                               ) : null}
-                              {mod.level === 1 ? (
-                                <span style={{ display: 'inline-flex', alignItems: 'center' }}>
-                                  <span style={{ 
-                                    display: 'inline-block', 
-                                    width: 6, 
-                                    height: 6, 
-                                    borderRadius: '50%', 
-                                    backgroundColor: '#cbd5e1', 
-                                    marginRight: 8 
-                                  }} />
-                                  <span style={{ fontSize: '13px' }}>{mod.label}</span>
-                                </span>
-                              ) : (
-                                <span style={{ verticalAlign: 'middle', fontSize: '14px', letterSpacing: '0.2px' }}>{mod.label}</span>
-                              )}
+                              <span style={{ 
+                                verticalAlign: 'middle', 
+                                fontSize: mod.level === 0 ? '14px' : mod.level === 1 ? '13.5px' : '13px',
+                                letterSpacing: '0.2px' 
+                              }}>
+                                {mod.label}
+                              </span>
                             </td>
                             {PERMISSION_ACTIONS.map((act) => (
                               <td key={act.key} style={{ textAlign: 'center', padding: 0, borderBottom: '1px solid #e2e8f0', backgroundColor: mod.level === 0 ? '#f8fafc' : '#ffffff' }}>

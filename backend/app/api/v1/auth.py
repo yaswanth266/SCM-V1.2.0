@@ -336,6 +336,11 @@ async def login(
             if ri.id == user.active_role_id:
                 login_active_role = ri.code
                 break
+        if login_active_role is None:
+            active_role_res = await db.execute(
+                select(Role.code).where(Role.id == user.active_role_id)
+            )
+            login_active_role = active_role_res.scalar_one_or_none()
     if login_active_role is None and role_list:
         login_active_role = role_list[0].code
     if login_active_role is None:
@@ -434,6 +439,11 @@ async def get_me(
             if ri.id == current_user.active_role_id:
                 active_role_code = ri.code
                 break
+        if active_role_code is None:
+            active_role_res = await db.execute(
+                select(Role.code).where(Role.id == current_user.active_role_id)
+            )
+            active_role_code = active_role_res.scalar_one_or_none()
     if active_role_code is None and role_list:
         active_role_code = role_list[0].code
     if active_role_code is None:
