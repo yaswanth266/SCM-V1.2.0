@@ -692,6 +692,7 @@ async def get_indent(
     # had rows.
     from app.models.approval import ApprovalRequest, ApprovalHistory
     from app.models.user import User as UserModel
+    from app.models.settings_master import Employee, Position
     ah_rows = await db.execute(
         select(
             ApprovalHistory.id,
@@ -702,9 +703,12 @@ async def get_indent(
             UserModel.username,
             UserModel.first_name,
             UserModel.last_name,
+            Position.name,
         )
         .join(ApprovalRequest, ApprovalRequest.id == ApprovalHistory.request_id)
         .join(UserModel, UserModel.id == ApprovalHistory.action_by)
+        .outerjoin(Employee, Employee.id == UserModel.employee_id)
+        .outerjoin(Position, Position.id == Employee.position_id)
         .where(ApprovalRequest.document_type == "indent")
         .where(ApprovalRequest.document_id == indent_id)
         .order_by(ApprovalHistory.action_date.asc(), ApprovalHistory.id.asc())
@@ -717,6 +721,7 @@ async def get_indent(
             "timestamp": r[3].isoformat() if r[3] else None,
             "remarks": r[4],
             "user_name": (f"{r[6] or ''} {r[7] or ''}".strip() or r[5]),
+            "position_name": r[8],
         }
         for r in ah_rows.all()
     ]
@@ -1349,9 +1354,14 @@ async def approve_indent(
     return {"success": True, "message": " ".join(msg_parts), **summary}
 
 
+class IndentRejectPayload(BaseModel):
+    comments: Optional[str] = None
+
+
 @router.post("/{indent_id}/reject")
 async def reject_indent(
     indent_id: int,
+    payload: Optional[IndentRejectPayload] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission("indent-transactions", "approve", "indent-transactions")),
 ):
@@ -1404,12 +1414,13 @@ async def reject_indent(
     if open_req is not None:
         open_req.status = "rejected"
         open_req.completed_at = datetime.now(timezone.utc)
+        comments_val = payload.comments if (payload and payload.comments) else "Rejected via /indent/{id}/reject"
         db.add(ApprovalHistory(
             request_id=open_req.id,
             level=open_req.current_level,
             action="rejected",
             action_by=current_user.id,
-            comments="Rejected via /indent/{id}/reject",
+            comments=comments_val,
         ))
 
     # BUG-AUD-001 — audit row.
