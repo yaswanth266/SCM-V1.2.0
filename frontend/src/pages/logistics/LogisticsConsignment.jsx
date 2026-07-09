@@ -176,6 +176,137 @@ export default function LogisticsConsignment() {
     };
   };
 
+  const handleDownloadPackageDetails = (pkg) => {
+    const itemsHtml = (pkg.items || []).map(item => {
+      let serialsText = '—';
+      let assetCodesText = '—';
+      
+      if (item.serial_numbers && item.serial_numbers.length > 0) {
+        const matCode = item.material_code || '';
+        const prefix = matCode ? `${matCode}-1-` : '';
+        
+        const parsedSerials = item.serial_numbers.map(s => {
+          if (prefix && s.startsWith(prefix)) {
+            return s.slice(prefix.length);
+          }
+          if (s.startsWith('1-') && s.endsWith(`-${matCode}`)) {
+            return s.slice(2, -matCode.length - 1);
+          }
+          return s;
+        });
+        serialsText = parsedSerials.join(', ');
+        
+        const parsedAssets = item.serial_numbers.map(s => {
+          if (prefix && s.startsWith(prefix)) {
+            return s;
+          }
+          return `${prefix}${s}`;
+        });
+        assetCodesText = parsedAssets.join(', ');
+      }
+
+      return `
+        <tr>
+          <td style="border: 1px solid #e2e8f0; padding: 10px; font-family: monospace;">${item.material_code || '—'}</td>
+          <td style="border: 1px solid #e2e8f0; padding: 10px; font-weight: 500;">${item.material_name || '—'}</td>
+          <td style="border: 1px solid #e2e8f0; padding: 10px;">${item.batch_number || '—'}</td>
+          <td style="border: 1px solid #e2e8f0; padding: 10px;">${item.expiry_date || '—'}</td>
+          <td style="border: 1px solid #e2e8f0; padding: 10px; font-weight: bold; text-align: center;">${item.quantity_packed || 0}</td>
+          <td style="border: 1px solid #e2e8f0; padding: 10px; text-align: center;">${item.uom_code || '—'}</td>
+          <td style="border: 1px solid #e2e8f0; padding: 10px; text-align: center;">${item.quantity_received || '—'}</td>
+          <td style="border: 1px solid #e2e8f0; padding: 10px; text-align: center;">
+            ${item.item_condition ? `<span style="background: ${item.item_condition === 'GOOD' ? '#dcfce7' : '#fee2e2'}; color: ${item.item_condition === 'GOOD' ? '#15803d' : '#b91c1c'}; padding: 2px 6px; border-radius: 4px; font-weight: 600; font-size: 11px;">${item.item_condition}</span>` : '—'}
+          </td>
+          <td style="border: 1px solid #e2e8f0; padding: 10px; font-size: 11px; font-family: monospace;">${serialsText}</td>
+          <td style="border: 1px solid #e2e8f0; padding: 10px; font-size: 11px; font-family: monospace; color: #b45309;">${assetCodesText}</td>
+        </tr>
+      `;
+    }).join('');
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Package Manifest - ${pkg.package_number}</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 30px; color: #1e293b; background-color: #f8fafc; }
+          .container { max-width: 1100px; margin: 0 auto; background: #ffffff; padding: 30px; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 20px; margin-bottom: 20px; }
+          .title-section { display: flex; align-items: center; gap: 12px; }
+          .pkg-number { font-family: monospace; font-size: 24px; font-weight: 700; color: #0f172a; }
+          .badge { background: #e0f2fe; color: #0369a1; padding: 6px 12px; border-radius: 9999px; font-size: 12px; font-weight: bold; text-transform: uppercase; }
+          .meta-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 30px; background: #f8fafc; padding: 20px; border-radius: 8px; border: 1px solid #e2e8f0; }
+          .meta-item { display: flex; flex-direction: column; }
+          .meta-label { font-size: 11px; color: #64748b; margin-bottom: 4px; text-transform: uppercase; font-weight: 600; }
+          .meta-value { font-size: 16px; font-weight: 700; color: #0f172a; }
+          .barcode-box { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+          table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 12px; }
+          th { background: #f1f5f9; color: #475569; font-weight: 600; text-align: left; padding: 10px; border: 1px solid #e2e8f0; }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <div class="header">
+            <div class="title-section">
+              <span class="pkg-number">${pkg.package_number}</span>
+              <span class="badge">${pkg.status || 'PACKED'}</span>
+            </div>
+            <div class="barcode-box">
+              <img src="https://bwipjs-api.metafloor.com/?bcid=code128&text=${encodeURIComponent(pkg.package_number)}&scale=2&rotate=N&includetext" alt="Barcode" />
+            </div>
+          </div>
+          <div class="meta-grid">
+            <div class="meta-item">
+              <span class="meta-label">Type</span>
+              <span class="meta-value">${pkg.package_type || 'BOX'}</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">Weight</span>
+              <span class="meta-value">${pkg.gross_weight_kg ? pkg.gross_weight_kg + ' KG' : '0.5 KG'}</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">Volume</span>
+              <span class="meta-value">${pkg.volume_cft ? pkg.volume_cft.toFixed(2) + ' CFT' : '—'}</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">Items</span>
+              <span class="meta-value">${pkg.material_count || (pkg.items ? pkg.items.length : 0)}</span>
+            </div>
+          </div>
+          <h3 style="margin-top: 30px; margin-bottom: 10px; color: #0f172a;">Package Contents</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>CODE</th>
+                <th>MATERIAL</th>
+                <th>BATCH</th>
+                <th>EXPIRY</th>
+                <th style="text-align: center;">PACKED</th>
+                <th style="text-align: center;">UOM</th>
+                <th style="text-align: center;">RECEIVED</th>
+                <th style="text-align: center;">CONDITION</th>
+                <th>SERIAL NUMBERS</th>
+                <th>ASSET/CONSUMABLE CODES</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsHtml}
+            </tbody>
+          </table>
+        </div>
+      </body>
+      </html>
+    `;
+
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `package_details_${pkg.package_number}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handlePreviewConsignmentLabel = () => {
     if (!detailConsignment) return;
     setPrintLabelType('consignment');
@@ -1044,9 +1175,9 @@ export default function LogisticsConsignment() {
                       <Button size="small" icon={<PrinterOutlined />}
                         onClick={() => handlePreviewPackageLabel(pkg.id)} />
                     </Tooltip>
-                    <Tooltip title="Download Barcode">
+                    <Tooltip title="Download Package Details">
                       <Button size="small" icon={<DownloadOutlined />}
-                        onClick={() => handleDownloadBarcode(pkg.package_number)} />
+                        onClick={() => handleDownloadPackageDetails(pkg)} />
                     </Tooltip>
                   </Space>
                 }
