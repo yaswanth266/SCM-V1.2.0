@@ -20,6 +20,7 @@ async def validate_mr_allocation(
     mr_id: int,
     items_to_allocate: List[Any],
     exclude_po_id: Optional[int] = None,
+    is_amendment: bool = False,
 ) -> None:
     """Validate that the new allocation quantities do not exceed the remaining MR quantities,
     considering other active POs (draft, pending_approval, approved, accepted, received, closed)
@@ -67,21 +68,25 @@ async def validate_mr_allocation(
 
         mr_item = mr_items_map.get(item_id)
         if not mr_item:
+            if is_amendment:
+                continue
             raise HTTPException(
                 status_code=400,
                 detail=f"Item {item_id} is not requested on the linked Material Request.",
             )
 
-        allocated = allocated_map.get(item_id, Decimal("0"))
-        remaining = mr_item.qty - allocated
-        if qty > remaining:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Requested PO quantity {qty} for item ID {item_id} exceeds the "
-                    f"remaining MR quantity of {remaining} (requested: {mr_item.qty}, already allocated: {allocated})."
-                ),
-            )
+        # Skip remaining quantity validation check for PO amendments
+        if not is_amendment:
+            allocated = allocated_map.get(item_id, Decimal("0"))
+            remaining = mr_item.qty - allocated
+            if qty > remaining:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Requested PO quantity {qty} for item ID {item_id} exceeds the "
+                        f"remaining MR quantity of {remaining} (requested: {mr_item.qty}, already allocated: {allocated})."
+                    ),
+                )
 
 
 async def update_mr_ordered_qty_delta(

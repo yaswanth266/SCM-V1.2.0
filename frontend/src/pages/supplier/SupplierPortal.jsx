@@ -843,18 +843,40 @@ export default function SupplierPortal() {
     {
       title: 'Item',
       key: 'item',
-      render: (_, r) => (
-        <Space direction="vertical" size={0}>
-          <Text strong>{r.item_name || '—'}</Text>
-          <Text style={{ color: '#64748b', fontSize: '11px', fontFamily: 'monospace' }}>{r.item_code}</Text>
-        </Space>
-      ),
+      render: (_, r) => {
+        const cmp = selectedPoDetails?.comparison;
+        const isNew = cmp?.has_parent && cmp.added_item_ids?.includes(r.item_id);
+        const mod = cmp?.has_parent && cmp.modified_items?.[String(r.item_id)];
+        return (
+          <Space direction="vertical" size={2}>
+            <Space size={6} wrap>
+              <Text strong>{r.item_name || '—'}</Text>
+              {isNew && <Tag color="green" style={{ fontSize: 10, fontWeight: 700, padding: '0 6px' }}>NEW</Tag>}
+              {mod && !isNew && <Tag color="orange" style={{ fontSize: 10, fontWeight: 700, padding: '0 6px' }}>UPDATED</Tag>}
+            </Space>
+            <Text style={{ color: '#64748b', fontSize: '11px', fontFamily: 'monospace' }}>{r.item_code}</Text>
+          </Space>
+        );
+      },
     },
     {
       title: 'Ordered Qty',
       key: 'qty',
       align: 'right',
-      render: (_, r) => <Text style={{ fontFamily: 'monospace' }}>{r.qty} {r.uom_name || 'Units'}</Text>,
+      render: (_, r) => {
+        const cmp = selectedPoDetails?.comparison;
+        const mod = cmp?.has_parent && cmp.modified_items?.[String(r.item_id)];
+        const uom = r.uom_name || 'Units';
+        if (mod && mod.old_qty !== undefined && mod.old_qty !== r.qty) {
+          return (
+            <Space direction="vertical" size={0} style={{ textAlign: 'right' }}>
+              <Text strong style={{ color: '#fa8c16', fontFamily: 'monospace' }}>{r.qty} {uom}</Text>
+              <Text style={{ fontSize: '11px', color: '#8c8c8c', textDecoration: 'line-through', fontFamily: 'monospace' }}>was {mod.old_qty} {uom}</Text>
+            </Space>
+          );
+        }
+        return <Text style={{ fontFamily: 'monospace' }}>{r.qty} {uom}</Text>;
+      },
     },
     {
       title: 'Unit Rate',
@@ -897,136 +919,193 @@ export default function SupplierPortal() {
     {
       title: 'Item',
       key: 'item',
-      render: (_, r) => (
-        <Space direction="vertical" size={0}>
-          <Text strong>{r.item_name || '—'}</Text>
-          <Text style={{ color: '#64748b', fontSize: '11px', fontFamily: 'monospace' }}>{r.item_code}</Text>
-        </Space>
-      ),
+      render: (_, r) => {
+        const cmp = selectedPoDetails?.comparison;
+        const isNew = cmp?.has_parent && cmp.added_item_ids?.includes(r.item_id);
+        const mod = cmp?.has_parent && cmp.modified_items?.[String(r.item_id)];
+        return (
+          <Space direction="vertical" size={2}>
+            <Space size={6} wrap>
+              <Text strong>{r.item_name || '—'}</Text>
+              {isNew && <Tag color="green" style={{ fontSize: 10, fontWeight: 700, padding: '0 6px' }}>NEW ITEM</Tag>}
+              {mod && !isNew && <Tag color="orange" style={{ fontSize: 10, fontWeight: 700, padding: '0 6px' }}>QTY UPDATED</Tag>}
+            </Space>
+            <Text style={{ color: '#64748b', fontSize: '11px', fontFamily: 'monospace' }}>{r.item_code}</Text>
+            {isNew && (
+              <Text style={{ fontSize: '11px', color: '#16a34a' }}>⚡ Newly added in this amendment — please enter price</Text>
+            )}
+            {mod && !isNew && mod.old_qty !== r.qty && (
+              <Text style={{ fontSize: '11px', color: '#d97706' }}>Qty: {mod.old_qty} ➔ {r.qty} {r.uom_name || ''}</Text>
+            )}
+          </Space>
+        );
+      },
     },
     {
       title: 'Ordered Qty',
       key: 'qty',
       align: 'right',
-      render: (_, r) => <Text style={{ fontFamily: 'monospace' }}>{r.qty} {r.uom_name || 'Units'}</Text>,
+      render: (_, r) => {
+        const cmp = selectedPoDetails?.comparison;
+        const mod = cmp?.has_parent && cmp.modified_items?.[String(r.item_id)];
+        const uom = r.uom_name || 'Units';
+        if (mod && mod.old_qty !== undefined && mod.old_qty !== r.qty) {
+          return (
+            <Space direction="vertical" size={0} style={{ textAlign: 'right' }}>
+              <Text strong style={{ color: '#fa8c16', fontFamily: 'monospace' }}>{r.qty} {uom}</Text>
+              <Text style={{ fontSize: '11px', color: '#8c8c8c', textDecoration: 'line-through', fontFamily: 'monospace' }}>was {mod.old_qty}</Text>
+            </Space>
+          );
+        }
+        return <Text style={{ fontFamily: 'monospace' }}>{r.qty} {uom}</Text>;
+      },
     },
     {
       title: 'Unit Rate',
       key: 'rate',
       align: 'right',
       width: 130,
-      render: (_, r, idx) => (
-        <Form.Item
-          name={['items', idx, 'rate']}
-          rules={[{ required: true, message: 'Rate required' }]}
-          style={{ margin: 0 }}
-          initialValue={r.rate && r.rate > 0 ? r.rate : undefined}
-        >
-          <InputNumber
-            min={0}
-            step={0.01}
-            prefix="₹"
-            style={{ width: '100%' }}
-            placeholder="Enter rate"
-          />
-        </Form.Item>
-      ),
+      render: (_, r, idx) => {
+        const isEditable = !selectedPoDetails?.comparison?.has_parent || 
+          selectedPoDetails.comparison.added_item_ids?.includes(r.item_id) || 
+          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items);
+        return (
+          <Form.Item
+            name={['items', idx, 'rate']}
+            rules={[{ required: true, message: 'Rate required' }]}
+            style={{ margin: 0 }}
+            initialValue={r.rate && r.rate > 0 ? r.rate : undefined}
+          >
+            <InputNumber
+              min={0}
+              step={0.01}
+              prefix="₹"
+              style={{ width: '100%' }}
+              placeholder="Enter rate"
+              disabled={!isEditable}
+            />
+          </Form.Item>
+        );
+      },
     },
     {
       title: 'Discount %',
       key: 'discount_pct',
       align: 'right',
       width: 90,
-      render: (_, r, idx) => (
-        <Form.Item
-          name={['items', idx, 'discount_pct']}
-          style={{ margin: 0 }}
-          initialValue={r.discount_pct || 0}
-        >
-          <InputNumber min={0} max={100} step={0.5} style={{ width: '100%' }} />
-        </Form.Item>
-      ),
+      render: (_, r, idx) => {
+        const isEditable = !selectedPoDetails?.comparison?.has_parent || 
+          selectedPoDetails.comparison.added_item_ids?.includes(r.item_id) || 
+          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items);
+        return (
+          <Form.Item
+            name={['items', idx, 'discount_pct']}
+            style={{ margin: 0 }}
+            initialValue={r.discount_pct || 0}
+          >
+            <InputNumber min={0} max={100} step={0.5} style={{ width: '100%' }} disabled={!isEditable} />
+          </Form.Item>
+        );
+      },
     },
     {
       title: 'IGST %',
       key: 'igst_rate',
       align: 'right',
       width: 85,
-      render: (_, r, idx) => (
-        <Form.Item
-          name={['items', idx, 'igst_rate']}
-          style={{ margin: 0 }}
-          initialValue={r.igst_rate || 0}
-        >
-          <InputNumber
-            min={0}
-            max={28}
-            step={0.5}
-            style={{ width: '100%' }}
-            onChange={(val) => {
-              if (val > 0) {
-                const itemsVal = poReviewForm.getFieldValue('items') || [];
-                itemsVal[idx] = { ...itemsVal[idx], cgst_rate: 0, sgst_rate: 0 };
-                poReviewForm.setFieldsValue({ items: itemsVal });
-              }
-            }}
-          />
-        </Form.Item>
-      ),
+      render: (_, r, idx) => {
+        const isEditable = !selectedPoDetails?.comparison?.has_parent || 
+          selectedPoDetails.comparison.added_item_ids?.includes(r.item_id) || 
+          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items);
+        return (
+          <Form.Item
+            name={['items', idx, 'igst_rate']}
+            style={{ margin: 0 }}
+            initialValue={r.igst_rate || 0}
+          >
+            <InputNumber
+              min={0}
+              max={28}
+              step={0.5}
+              style={{ width: '100%' }}
+              disabled={!isEditable}
+              onChange={(val) => {
+                if (val > 0) {
+                  const itemsVal = poReviewForm.getFieldValue('items') || [];
+                  itemsVal[idx] = { ...itemsVal[idx], cgst_rate: 0, sgst_rate: 0 };
+                  poReviewForm.setFieldsValue({ items: itemsVal });
+                }
+              }}
+            />
+          </Form.Item>
+        );
+      },
     },
     {
       title: 'CGST %',
       key: 'cgst_rate',
       align: 'right',
       width: 85,
-      render: (_, r, idx) => (
-        <Form.Item
-          name={['items', idx, 'cgst_rate']}
-          style={{ margin: 0 }}
-          initialValue={r.cgst_rate || 0}
-        >
-          <InputNumber
-            min={0}
-            max={14}
-            step={0.5}
-            style={{ width: '100%' }}
-            onChange={(val) => {
-              if (val > 0) {
-                const itemsVal = poReviewForm.getFieldValue('items') || [];
-                itemsVal[idx] = { ...itemsVal[idx], igst_rate: 0 };
-                poReviewForm.setFieldsValue({ items: itemsVal });
-              }
-            }}
-          />
-        </Form.Item>
-      ),
+      render: (_, r, idx) => {
+        const isEditable = !selectedPoDetails?.comparison?.has_parent || 
+          selectedPoDetails.comparison.added_item_ids?.includes(r.item_id) || 
+          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items);
+        return (
+          <Form.Item
+            name={['items', idx, 'cgst_rate']}
+            style={{ margin: 0 }}
+            initialValue={r.cgst_rate || 0}
+          >
+            <InputNumber
+              min={0}
+              max={14}
+              step={0.5}
+              style={{ width: '100%' }}
+              disabled={!isEditable}
+              onChange={(val) => {
+                if (val > 0) {
+                  const itemsVal = poReviewForm.getFieldValue('items') || [];
+                  itemsVal[idx] = { ...itemsVal[idx], igst_rate: 0 };
+                  poReviewForm.setFieldsValue({ items: itemsVal });
+                }
+              }}
+            />
+          </Form.Item>
+        );
+      },
     },
     {
       title: 'SGST %',
       key: 'sgst_rate',
       align: 'right',
       width: 85,
-      render: (_, r, idx) => (
-        <Form.Item
-          name={['items', idx, 'sgst_rate']}
-          style={{ margin: 0 }}
-          initialValue={r.sgst_rate || 0}
-        >
-          <InputNumber
-            min={0}
-            max={14}
-            step={0.5}
-            style={{ width: '100%' }}
-            onChange={(val) => {
-              if (val > 0) {
-                const itemsVal = poReviewForm.getFieldValue('items') || [];
-                itemsVal[idx] = { ...itemsVal[idx], igst_rate: 0 };
-                poReviewForm.setFieldsValue({ items: itemsVal });
-              }
-            }}
-          />
-        </Form.Item>
-      ),
+      render: (_, r, idx) => {
+        const isEditable = !selectedPoDetails?.comparison?.has_parent || 
+          selectedPoDetails.comparison.added_item_ids?.includes(r.item_id) || 
+          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items);
+        return (
+          <Form.Item
+            name={['items', idx, 'sgst_rate']}
+            style={{ margin: 0 }}
+            initialValue={r.sgst_rate || 0}
+          >
+            <InputNumber
+              min={0}
+              max={14}
+              step={0.5}
+              style={{ width: '100%' }}
+              disabled={!isEditable}
+              onChange={(val) => {
+                if (val > 0) {
+                  const itemsVal = poReviewForm.getFieldValue('items') || [];
+                  itemsVal[idx] = { ...itemsVal[idx], igst_rate: 0 };
+                  poReviewForm.setFieldsValue({ items: itemsVal });
+                }
+              }}
+            />
+          </Form.Item>
+        );
+      },
     },
     {
       title: 'Line Total',
@@ -1733,13 +1812,43 @@ export default function SupplierPortal() {
                 />
               )}
 
+              {selectedPoDetails.comparison?.has_parent && (() => {
+                const cmp = selectedPoDetails.comparison;
+                const newCount = cmp.added_item_ids?.length || 0;
+                const modCount = Object.keys(cmp.modified_items || {}).length;
+                const removedCount = cmp.removed_items?.length || 0;
+                const parts = [];
+                if (newCount > 0) parts.push(`${newCount} newly added item${newCount > 1 ? 's' : ''}`);
+                if (modCount > 0) parts.push(`${modCount} item${modCount > 1 ? 's' : ''} with updated quantity`);
+                if (removedCount > 0) parts.push(`${removedCount} item${removedCount > 1 ? 's' : ''} removed`);
+                if (parts.length === 0) return null;
+                return (
+                  <Alert
+                    type="warning"
+                    showIcon
+                    style={{ marginBottom: 16 }}
+                    message={<strong>Amendment from Version {cmp.parent_version}</strong>}
+                    description={
+                      <div style={{ fontSize: '13px', marginTop: 4 }}>
+                        <div>This version includes: <strong>{parts.join(', ')}</strong>.</div>
+                        {(newCount > 0 || modCount > 0) && (
+                          <div style={{ marginTop: 4, color: '#92400e' }}>
+                            ⚠️ Items marked <strong>NEW ITEM</strong> or <strong>QTY UPDATED</strong> require your pricing. Other items retain previously accepted pricing.
+                          </div>
+                        )}
+                      </div>
+                    }
+                  />
+                );
+              })()}
+
               <Text strong style={{ color: '#475569', fontSize: '13px', display: 'block', marginBottom: 8 }}>
                 ORDERED ITEMS BREAKDOWN
               </Text>
               
               <Table
                 dataSource={selectedPoDetails.items || []}
-                columns={poItemColumns}
+                columns={selectedPoDetails.supplier_acknowledgement === 'pending' ? poReviewItemColumns : poItemColumns}
                 rowKey="id"
                 pagination={false}
                 size="small"
@@ -1894,13 +2003,23 @@ export default function SupplierPortal() {
                               content: `By accepting, you commit to fulfilling this order under the specified quantities, pricing, and your committed delivery date of ${committedDeliveryDate.format('DD/MM/YYYY')}.`,
                               okText: 'Accept PO',
                               okButtonProps: { style: { background: '#16a34a', borderColor: '#16a34a' } },
-                              onOk: () => handleAcknowledgePO(
-                                selectedPoDetails.id,
-                                'accept',
-                                '',
-                                committedDeliveryDate.format('YYYY-MM-DD'),
-                                selectedPoDetails.items
-                              ),
+                              onOk: () => {
+                                // Read form values (supplier-entered prices) and merge with original items
+                                const formValues = poReviewForm.getFieldsValue();
+                                const formItems = formValues.items || [];
+                                const submittedItems = (selectedPoDetails.items || []).map((orig, idx) => ({
+                                  ...orig,
+                                  ...formItems[idx],
+                                  item_id: orig.item_id,
+                                }));
+                                handleAcknowledgePO(
+                                  selectedPoDetails.id,
+                                  'accept',
+                                  '',
+                                  committedDeliveryDate.format('YYYY-MM-DD'),
+                                  submittedItems
+                                );
+                              },
                             });
                           }}
                         >

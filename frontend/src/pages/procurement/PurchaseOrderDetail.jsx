@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import {
   Button, Card, Descriptions, Tabs, Table, Spin, Space, message,
   Tag, Empty, Typography, Divider, Progress, Popconfirm, Steps, Timeline,
-  Row, Col, Tooltip, Select, Modal, Input,
+  Row, Col, Tooltip, Select, Modal, Input, Alert,
 } from 'antd';
 import {
   ArrowLeftOutlined, PrinterOutlined, CheckOutlined,
@@ -312,12 +312,18 @@ const PurchaseOrderDetail = () => {
             </Button>
           )}
           {['approved', 'accepted', 'rejected'].includes(po.status) && (
-            <Tooltip title={isAmendLocked ? "Cannot amend: amendments are locked within 2 days of supplier delivery date" : "Amend this PO to create a new version"}>
+            <Tooltip title={
+              isAmendLocked
+                ? "Cannot amend: amendments are locked within 2 days of supplier delivery date"
+                : po.supplier_acknowledgement !== 'accepted'
+                  ? "Cannot amend: amendments are only allowed after the supplier has acknowledged and accepted the current version"
+                  : "Amend this PO to create a new version"
+            }>
               <Button
                 type="default"
                 danger
                 icon={<PlusOutlined />}
-                disabled={isAmendLocked}
+                disabled={isAmendLocked || po.supplier_acknowledgement !== 'accepted'}
                 onClick={handleAmendPO}
                 loading={actionLoading}
               >
@@ -486,6 +492,33 @@ const PurchaseOrderDetail = () => {
               ),
               children: (
                 <div>
+                  {po.comparison?.has_parent && (() => {
+                    const cmp = po.comparison;
+                    const newCount = cmp.added_item_ids?.length || 0;
+                    const modCount = Object.keys(cmp.modified_items || {}).length;
+                    const removedCount = cmp.removed_items?.length || 0;
+                    const parts = [];
+                    if (newCount > 0) parts.push(`${newCount} newly added item${newCount > 1 ? 's' : ''}`);
+                    if (modCount > 0) parts.push(`${modCount} item${modCount > 1 ? 's' : ''} with updated quantity`);
+                    if (removedCount > 0) parts.push(`${removedCount} item${removedCount > 1 ? 's' : ''} removed`);
+                    if (parts.length === 0) return null;
+                    return (
+                      <Alert
+                        type="warning"
+                        showIcon
+                        style={{ marginBottom: 12 }}
+                        message={<strong>Amendment from Version {cmp.parent_version}</strong>}
+                        description={
+                          <span style={{ fontSize: '13px' }}>
+                            Changes in this version: <strong>{parts.join(', ')}</strong>.
+                            Items marked <Tag color="green" style={{ fontSize: 10, fontWeight: 700, padding: '0 5px', margin: '0 2px' }}>NEW</Tag>
+                            were added; items marked <Tag color="orange" style={{ fontSize: 10, fontWeight: 700, padding: '0 5px', margin: '0 2px' }}>UPDATED</Tag>
+                            had their quantity changed.
+                          </span>
+                        }
+                      />
+                    );
+                  })()}
                   <Table
                     dataSource={poItems}
                     rowKey={(r) => r.id || r.item_id}

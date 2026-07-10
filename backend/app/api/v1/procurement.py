@@ -1144,6 +1144,19 @@ async def create_purchase_order(
     if not payload.items:
         raise HTTPException(status_code=422, detail="At least one item is required")
 
+    seen_item_ids = set()
+    for item in payload.items:
+        if item.item_id:
+            if item.item_id in seen_item_ids:
+                from app.models.master import Item as _ItemModel
+                item_row = (await db.execute(select(_ItemModel).where(_ItemModel.id == item.item_id))).scalar_one_or_none()
+                item_name = item_row.name if item_row else "Selected item"
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Just update the quantity of {item_name}, it already exists in the PO.",
+                )
+            seen_item_ids.add(item.item_id)
+
     # BUG-PRO-012 fix: refuse PO creation against an inactive vendor.
     from app.models.master import Vendor as _Vendor, Item as _Item
     vendor_row = (await db.execute(
@@ -1411,10 +1424,24 @@ async def update_purchase_order(
         from app.models.procurement import PurchaseOrderItem
         from sqlalchemy import delete
         
+        seen_item_ids = set()
+        for item in payload.items:
+            if item.item_id:
+                if item.item_id in seen_item_ids:
+                    from app.models.master import Item as _ItemModel
+                    item_row = (await db.execute(select(_ItemModel).where(_ItemModel.id == item.item_id))).scalar_one_or_none()
+                    item_name = item_row.name if item_row else "Selected item"
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Just update the quantity of {item_name}, it already exists in the PO.",
+                    )
+                seen_item_ids.add(item.item_id)
+        
         # If PO is linked to an MR, validate remaining quantities (excluding current PO)
         if po.mr_id:
             from app.services.procurement_service import validate_mr_allocation
-            await validate_mr_allocation(db, po.mr_id, payload.items, exclude_po_id=po.id)
+            is_amend = po.parent_po_id is not None
+            await validate_mr_allocation(db, po.mr_id, payload.items, exclude_po_id=po.id, is_amendment=is_amend)
 
         # Delete existing items of this PO
         await db.execute(
@@ -2034,15 +2061,15 @@ async def amend_purchase_order(
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
 
-    # BUG-AMEND fix: only approved or accepted POs can be amended.
-    # Rejected POs (supplier rejected) cannot be amended — a new PO must be created.
-    if po.status not in ("approved", "accepted"):
+    # Only allow amendment if the current version has been supplier-acknowledged/accepted.
+    # If the supplier has not acknowledged the PO yet, it cannot be amended.
+    if po.status not in ("approved", "accepted") or po.supplier_acknowledgement != "accepted":
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Only approved or supplier-accepted Purchase Orders can be amended. "
-                f"Current status: '{po.status}'. "
-                f"If the supplier rejected this PO, create a new PO instead."
+                f"Purchase Order cannot be amended because it has not been acknowledged and accepted by the supplier. "
+                f"Current status: '{po.status}', Acknowledgment: '{po.supplier_acknowledgement}'. "
+                f"Amendments are only allowed after the supplier has acknowledged and priced the current version."
             )
         )
 

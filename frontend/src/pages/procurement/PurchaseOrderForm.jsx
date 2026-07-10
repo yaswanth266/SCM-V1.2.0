@@ -510,6 +510,14 @@ const PurchaseOrderForm = () => {
           <ItemSelector
             value={val}
             onChange={(itemId, item) => {
+              if (itemId) {
+                const exists = poItems.some(i => i.item_id === itemId && i.key !== record.key);
+                if (exists) {
+                  const name = item?.item_name || item?.name || 'Selected item';
+                  message.warning(`Just update the quantity of ${name}, it already exists in the PO.`);
+                  return;
+                }
+              }
               updatePoItem(record.key, 'item_id', itemId);
               if (item) {
                 updatePoItem(record.key, 'item_name', item.item_name || item.name || '');

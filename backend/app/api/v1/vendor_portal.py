@@ -50,6 +50,7 @@ async def supplier_list_rfqs(
         select(Quotation)
         .where(Quotation.vendor_id == vendor_id)
         .options(
+            selectinload(Quotation.rfq),
             selectinload(Quotation.material_request).selectinload(MaterialRequest.items)
                 .selectinload(MaterialRequestItem.item),
             selectinload(Quotation.material_request).selectinload(MaterialRequest.items)
@@ -157,6 +158,7 @@ async def supplier_list_rfqs(
             "terms_url": q.terms_url,
             "my_quote": my_quote,
             "can_edit": _can_modify_quotation(q),
+            "rfq_with_vehicle": q.rfq.with_vehicle if q.rfq else False,
         })
 
     return output
@@ -480,6 +482,50 @@ async def supplier_get_purchase_order(
             "amount": float(poi.amount or 0),
         })
         
+    # Load comparison details for amendments
+    comparison = None
+    if po.parent_po_id:
+        parent_result = await db.execute(
+            select(PurchaseOrder)
+            .options(selectinload(PurchaseOrder.items))
+            .where(PurchaseOrder.id == po.parent_po_id)
+        )
+        parent_po = parent_result.scalar_one_or_none()
+        if parent_po:
+            curr_items = {item.item_id: item for item in po.items}
+            par_items = {item.item_id: item for item in parent_po.items}
+
+            modified_items = {}
+            added_item_ids = []
+            removed_items = []
+
+            for item_id, c_item in curr_items.items():
+                if item_id not in par_items:
+                    added_item_ids.append(item_id)
+                else:
+                    p_item = par_items[item_id]
+                    if c_item.qty != p_item.qty or c_item.rate != p_item.rate:
+                        modified_items[item_id] = {
+                            "old_qty": float(p_item.qty or 0),
+                            "old_rate": float(p_item.rate or 0)
+                        }
+
+            for item_id, p_item in par_items.items():
+                if item_id not in curr_items:
+                    removed_items.append({
+                        "item_id": item_id,
+                        "qty": float(p_item.qty or 0),
+                        "rate": float(p_item.rate or 0),
+                    })
+
+            comparison = {
+                "has_parent": True,
+                "parent_version": parent_po.version_number,
+                "modified_items": {str(k): v for k, v in modified_items.items()},
+                "added_item_ids": added_item_ids,
+                "removed_items": removed_items
+            }
+
     return {
         "id": po.id,
         "po_number": po.po_number,
@@ -498,6 +544,7 @@ async def supplier_get_purchase_order(
         "version_number": po.version_number,
         "supplier_delivery_date": po.supplier_delivery_date.isoformat() if po.supplier_delivery_date else None,
         "items": items_list,
+        "comparison": comparison,
     }
 
 
