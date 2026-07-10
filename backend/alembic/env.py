@@ -21,7 +21,7 @@ from app.config import settings
 # Import Base and ALL models so metadata is populated
 from app.database import Base
 import app.models  # noqa: F401 — triggers __init__.py which imports all models
-from app.models.healthcare import *  # noqa: F401,F403 — healthcare models
+
 
 config = context.config
 

@@ -20,13 +20,12 @@ SCHEMA_MODULES = [
     "app.schemas.auth", "app.schemas.master", "app.schemas.indent",
     "app.schemas.procurement", "app.schemas.warehouse", "app.schemas.inventory",
     "app.schemas.logistics", "app.schemas.accounts", "app.schemas.consumption",
-    "app.schemas.healthcare",
 ]
 MODEL_MODULES = [
     "app.models.user", "app.models.master", "app.models.indent",
     "app.models.procurement", "app.models.warehouse", "app.models.grn",
     "app.models.stock", "app.models.transfer", "app.models.logistics",
-    "app.models.accounts", "app.models.consumption", "app.models.healthcare",
+    "app.models.accounts", "app.models.consumption", "app.models.compliance",
     "app.models.asset", "app.models.audit", "app.models.returns",
     "app.models.outbound", "app.models.dispatch", "app.models.issue",
     "app.models.approval", "app.models.barcode", "app.models.system",
