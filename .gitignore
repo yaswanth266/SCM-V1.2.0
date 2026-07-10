@@ -37,7 +37,7 @@ ENV/
 
 # Environment Variables & Sensitive Data
 backend/.env.*
-!backend/.env
+backend/.env
 !backend/.env.example
 
 # Local SQLite databases or test DBs
