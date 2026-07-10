@@ -384,7 +384,7 @@ const ItemDetail = () => {
           </Col>
           <Col xs={24} md={8} style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: 16 }}>
             <BarcodeDisplay
-              value={item.barcode_value || item.barcode || item.item_code}
+              value={`${item.barcode_value || item.barcode || item.item_code} - ${item.name}`}
               type={barcodeFormat}
               label={item.name}
               subtitle={item.item_code}

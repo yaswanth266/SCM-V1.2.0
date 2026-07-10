@@ -20,14 +20,11 @@ import { downloadExcel } from '../../utils/helpers';
 const { RangePicker } = DatePicker;
 
 const REPORT_TYPES = [
-  { label: 'Requisition Volume by Project', value: 'project_volume' },
-  { label: 'Turnaround Time (TAT) SLA Analysis', value: 'tat_sla' },
-  { label: 'Line-Item Fill Rate Analysis', value: 'fill_rate' },
-  { label: 'Emergency vs Routine Indents', value: 'emergency_trend' },
+  { label: 'Indent KPIs Report', value: 'indent_kpis' },
 ];
 
 const IndentReports = () => {
-  const [reportType, setReportType] = useState('project_volume');
+  const [reportType, setReportType] = useState('indent_kpis');
   const [dateRange, setDateRange] = useState(null);
   const [project, setProject] = useState(undefined);
   const [projects, setProjects] = useState([]);
@@ -55,7 +52,7 @@ const IndentReports = () => {
     try {
       const res = await api.get('/indent/indents', { params: { page_size: 200 } });
       const indents = res.data?.items || res.data || [];
-      
+
       let filtered = indents;
       if (project) {
         filtered = filtered.filter(ind => Number(ind.project_id) === Number(project));
@@ -77,6 +74,7 @@ const IndentReports = () => {
         return;
       }
 
+<<<<<<< HEAD
       if (reportType === 'project_volume') {
         // Group by project
         const projMap = {};
@@ -96,26 +94,31 @@ const IndentReports = () => {
           const monthStr = date.toLocaleString('default', { month: 'short', year: 'numeric' });
           if (!monthMap[monthStr]) {
             monthMap[monthStr] = { month: monthStr, raiseToApproveSum: 0, raiseToApproveCount: 0, approveToIssueSum: 0, approveToIssueCount: 0 };
+=======
+      if (reportType === 'indent_kpis') {
+        const officeMap = {};
+        indents.forEach(ind => {
+          const officeName = ind.office_name || 'CENTRAL';
+          if (!officeMap[officeName]) {
+            officeMap[officeName] = {
+              name: officeName,
+              total: 0,
+              pending: 0,
+              approved: 0,
+              rejected: 0,
+            };
+>>>>>>> e135500 (feat: implement dynamic barcode/QR mode switching, swap name/code layouts, and fix indent detail scoping bug)
           }
-          
-          if (ind.approved_date) {
-            const raiseTime = new Date(ind.indent_date).getTime();
-            const approveTime = new Date(ind.approved_date).getTime();
-            const diffDays = Math.max(0, (approveTime - raiseTime) / (1000 * 3600 * 24));
-            monthMap[monthStr].raiseToApproveSum += diffDays;
-            monthMap[monthStr].raiseToApproveCount += 1;
-          }
-
-          if (ind.status === 'fulfilled' || ind.status === 'partially_fulfilled') {
-            if (ind.approved_date && ind.updated_at) {
-              const approveTime = new Date(ind.approved_date).getTime();
-              const issueTime = new Date(ind.updated_at).getTime();
-              const diffDays = Math.max(0, (issueTime - approveTime) / (1000 * 3600 * 24));
-              monthMap[monthStr].approveToIssueSum += diffDays;
-              monthMap[monthStr].approveToIssueCount += 1;
-            }
+          officeMap[officeName].total += 1;
+          if (['draft', 'pending_approval'].includes(ind.status)) {
+            officeMap[officeName].pending += 1;
+          } else if (['approved', 'partially_fulfilled', 'fulfilled'].includes(ind.status)) {
+            officeMap[officeName].approved += 1;
+          } else if (['rejected', 'cancelled'].includes(ind.status)) {
+            officeMap[officeName].rejected += 1;
           }
         });
+<<<<<<< HEAD
         const list = Object.values(monthMap).map(m => ({
           month: m.month,
           raiseToApprove: m.raiseToApproveCount > 0 ? parseFloat((m.raiseToApproveSum / m.raiseToApproveCount).toFixed(1)) : 0,
@@ -152,6 +155,11 @@ const IndentReports = () => {
           }
         });
         setData(Object.values(monthMap));
+=======
+        setData(Object.values(officeMap));
+      } else {
+        setData([]);
+>>>>>>> e135500 (feat: implement dynamic barcode/QR mode switching, swap name/code layouts, and fix indent detail scoping bug)
       }
     } catch (e) {
       console.error('Failed to load indent reports:', e);
@@ -167,40 +175,16 @@ const IndentReports = () => {
   };
 
   const getColumns = () => {
-    if (reportType === 'project_volume') {
+    if (reportType === 'indent_kpis') {
       return [
-        { title: 'Project / Cost-Center', dataIndex: 'name', key: 'name' },
-        { title: 'Total Indents Raised', dataIndex: 'count', key: 'count', align: 'right' },
-        { title: 'Total Line Items Requested', dataIndex: 'itemsCount', key: 'itemsCount', align: 'right' },
-      ];
-    } else if (reportType === 'tat_sla') {
-      return [
-        { title: 'Month', dataIndex: 'month', key: 'month' },
-        { title: 'Avg Approval Time (Days)', dataIndex: 'raiseToApprove', key: 'raiseToApprove', align: 'right', render: (v) => `${v} days` },
-        { title: 'Avg Warehouse Issue Time (Days)', dataIndex: 'approveToIssue', key: 'approveToIssue', align: 'right', render: (v) => `${v} days` },
-        { title: 'SLA Target limit', dataIndex: 'slaTarget', key: 'slaTarget', align: 'right', render: (v) => `${v} days` },
-      ];
-    } else if (reportType === 'fill_rate') {
-      return [
-        { title: 'Material Category', dataIndex: 'category', key: 'category' },
-        { title: 'Requested Qty', dataIndex: 'requested', key: 'requested', align: 'right' },
-        { title: 'Issued Qty', dataIndex: 'issued', key: 'issued', align: 'right' },
-        { 
-          title: 'Fill Rate (%)', 
-          key: 'pct', 
-          align: 'right',
-          render: (_, r) => {
-            const pct = ((r.issued / r.requested) * 100).toFixed(1);
-            return <span style={{ fontWeight: 600, color: pct > 90 ? '#52c41a' : '#fa8c16' }}>{pct}%</span>;
-          }
-        },
+        { title: 'Office', dataIndex: 'name', key: 'name' },
+        { title: 'Total Indents', dataIndex: 'total', key: 'total', align: 'right' },
+        { title: 'Pending Approval', dataIndex: 'pending', key: 'pending', align: 'right' },
+        { title: 'Approved & Active', dataIndex: 'approved', key: 'approved', align: 'right' },
+        { title: 'Rejected / Cancelled', dataIndex: 'rejected', key: 'rejected', align: 'right' },
       ];
     } else {
-      return [
-        { title: 'Month', dataIndex: 'month', key: 'month' },
-        { title: 'Routine Indents', dataIndex: 'routine', key: 'routine', align: 'right' },
-        { title: 'Emergency Indents', dataIndex: 'emergency', key: 'emergency', align: 'right' },
-      ];
+      return [];
     }
   };
 
@@ -244,10 +228,10 @@ const IndentReports = () => {
             />
           </Col>
           <Col xs={24} md={4}>
-            <Button 
-              type="primary" 
-              icon={<FilterOutlined />} 
-              onClick={loadReportData} 
+            <Button
+              type="primary"
+              icon={<FilterOutlined />}
+              onClick={loadReportData}
               block
               style={{ background: '#481890', borderColor: '#481890', borderRadius: '6px' }}
             >
@@ -259,62 +243,35 @@ const IndentReports = () => {
 
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: '100px' }}>
-          <Spin size="large" tip="Aggregating report data..." />
+          <Spin size="large" tip="Aggregating report data...">
+            <div style={{ minWidth: '150px' }} />
+          </Spin>
         </div>
       ) : (
         <>
           {/* Recharts Graphical Analysis */}
           <Card style={{ marginBottom: 24, borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-           <div style={{ height: '350px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-             {data.length > 0 ? (
-               <ResponsiveContainer width="100%" height="100%">
-                 {reportType === 'project_volume' ? (
-                   <BarChart data={data}>
-                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                     <XAxis dataKey="name" tickLine={false} />
-                     <YAxis tickLine={false} />
-                     <Tooltip />
-                     <Legend />
-                     <Bar dataKey="count" name="Total Indents Raised" fill="#481890" radius={[4, 4, 0, 0]} />
-                     <Bar dataKey="itemsCount" name="Total Items Requested" fill="#fa8c16" radius={[4, 4, 0, 0]} />
-                   </BarChart>
-                 ) : reportType === 'tat_sla' ? (
-                   <LineChart data={data}>
-                     <CartesianGrid strokeDasharray="3 3" />
-                     <XAxis dataKey="month" />
-                     <YAxis />
-                     <Tooltip />
-                     <Legend />
-                     <Line type="monotone" dataKey="raiseToApprove" name="Approval Delay (Days)" stroke="#fa8c16" strokeWidth={2} activeDot={{ r: 8 }} />
-                     <Line type="monotone" dataKey="approveToIssue" name="Issuance Delay (Days)" stroke="#481890" strokeWidth={2} />
-                     <Line type="monotone" dataKey="slaTarget" name="SLA Target Limit (Days)" stroke="#f5222d" strokeDasharray="5 5" />
-                   </LineChart>
-                 ) : reportType === 'fill_rate' ? (
-                   <BarChart data={data}>
-                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                     <XAxis dataKey="category" tickLine={false} />
-                     <YAxis tickLine={false} />
-                     <Tooltip />
-                     <Legend />
-                     <Bar dataKey="requested" name="Requested Qty" fill="#fa8c16" radius={[4, 4, 0, 0]} />
-                     <Bar dataKey="issued" name="Issued Qty" fill="#52c41a" radius={[4, 4, 0, 0]} />
-                   </BarChart>
-                 ) : (
-                   <BarChart data={data} stackOffset="expand">
-                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                     <XAxis dataKey="month" tickLine={false} />
-                     <YAxis tickLine={false} />
-                     <Tooltip />
-                     <Legend />
-                     <Bar dataKey="routine" name="Routine Indents" stackId="a" fill="#481890" />
-                     <Bar dataKey="emergency" name="Emergency Indents" stackId="a" fill="#f5222d" />
-                   </BarChart>
-                 )}
-               </ResponsiveContainer>
-             ) : (
-               <Empty description="No report metrics available for the selected filters" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-             )}
-           </div>
+            <div style={{ height: '350px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+              {data.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  {reportType === 'indent_kpis' ? (
+                    <BarChart data={data}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                      <XAxis dataKey="name" tickLine={false} />
+                      <YAxis tickLine={false} />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="total" name="Total Indents" fill="#481890" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="pending" name="Pending Approval" fill="#fa8c16" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="approved" name="Approved & Active" fill="#52c41a" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="rejected" name="Rejected / Cancelled" fill="#f5222d" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  ) : null}
+                </ResponsiveContainer>
+              ) : (
+                <Empty description="No report metrics available for the selected filters" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
+            </div>
           </Card>
 
           {/* Tabular Details */}

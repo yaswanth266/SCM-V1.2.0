@@ -3050,6 +3050,10 @@ async def list_vendors(
         query = query.where(Vendor.is_active == active_val)
         count_query = count_query.where(Vendor.is_active == active_val)
 
+    # Filter out transport/logistics vendors in the procurement module
+    query = query.where((Vendor.is_transport_vendor == False) | (Vendor.is_transport_vendor.is_(None)))
+    count_query = count_query.where((Vendor.is_transport_vendor == False) | (Vendor.is_transport_vendor.is_(None)))
+
     query = apply_search_filter(query, Vendor, search, ["vendor_code", "name", "city", "gst_number"])
     count_query = apply_search_filter(count_query, Vendor, search, ["vendor_code", "name", "city", "gst_number"])
 

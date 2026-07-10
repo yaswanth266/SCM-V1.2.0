@@ -1,7 +1,7 @@
 from decimal import Decimal
 from datetime import date, datetime
 from typing import Optional, List, Dict, Any
-from sqlalchemy import select, func, and_, case, text
+from sqlalchemy import select, func, and_, or_, case, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.stock import StockBalance, StockLedger
 from app.models.master import Item, Vendor, Customer, ItemCategory
@@ -104,7 +104,17 @@ async def stock_movement_report(
     date_to: Optional[date] = None,
 ) -> List[Dict]:
     """Stock movement (in/out) report from ledger."""
-    query = select(StockLedger).order_by(StockLedger.posting_date.desc(), StockLedger.id.desc())
+    query = (
+        select(
+            StockLedger,
+            Item.item_code,
+            Item.name.label("item_name"),
+            Warehouse.name.label("warehouse_name")
+        )
+        .outerjoin(Item, StockLedger.item_id == Item.id)
+        .outerjoin(Warehouse, StockLedger.warehouse_id == Warehouse.id)
+        .order_by(StockLedger.posting_date.desc(), StockLedger.id.desc())
+    )
     conditions = []
     if item_id:
         conditions.append(StockLedger.item_id == item_id)
@@ -130,24 +140,99 @@ async def stock_movement_report(
     # BUG-FIN-086: previously hard-capped at 1000 rows with silent truncation.
     # Lifted to 50000 — callers should narrow by date/item to keep results tight.
     result = await db.execute(query.limit(50000))
-    rows = result.scalars().all()
+    rows = result.all()
+
+    # Resolve document reference numbers in bulk
+    ref_map = {}
+    for r in rows:
+        ref_type = r[0].reference_type
+        ref_id = r[0].reference_id
+        if ref_type and ref_id:
+            ref_map.setdefault(ref_type.lower(), set()).add(ref_id)
+
+    resolved_refs = {}
+    for ref_type, ids in ref_map.items():
+        id_list = list(ids)
+        if ref_type in ("purchase_order", "po"):
+            from app.models.procurement import PurchaseOrder
+            res_po = await db.execute(
+                select(PurchaseOrder.id, PurchaseOrder.po_number).where(PurchaseOrder.id.in_(id_list))
+            )
+            for po_id, po_num in res_po.all():
+                resolved_refs[(ref_type, po_id)] = po_num
+                resolved_refs[("po" if ref_type == "purchase_order" else "purchase_order", po_id)] = po_num
+
+        elif ref_type in ("goods_receipt_note", "grn", "purchase_receipt"):
+            from app.models.grn import GoodsReceiptNote
+            res_grn = await db.execute(
+                select(GoodsReceiptNote.id, GoodsReceiptNote.grn_number).where(GoodsReceiptNote.id.in_(id_list))
+            )
+            for g_id, g_num in res_grn.all():
+                resolved_refs[(ref_type, g_id)] = g_num
+                resolved_refs[("goods_receipt_note", g_id)] = g_num
+                resolved_refs[("grn", g_id)] = g_num
+                resolved_refs[("purchase_receipt", g_id)] = g_num
+
+        elif ref_type in ("dispatch_order", "dispatch", "dispatch_acknowledgement", "sdo_final_delivery"):
+            from app.models.dispatch import DispatchOrder
+            res_do = await db.execute(
+                select(DispatchOrder.id, DispatchOrder.dispatch_number).where(DispatchOrder.id.in_(id_list))
+            )
+            for d_id, d_num in res_do.all():
+                resolved_refs[(ref_type, d_id)] = d_num
+                resolved_refs[("dispatch_order", d_id)] = d_num
+                resolved_refs[("dispatch", d_id)] = d_num
+                resolved_refs[("dispatch_acknowledgement", d_id)] = d_num
+                resolved_refs[("sdo_final_delivery", d_id)] = d_num
+
+        elif ref_type in ("material_issue", "issue", "material_issue_acknowledge"):
+            from app.models.issue import MaterialIssue
+            res_mi = await db.execute(
+                select(MaterialIssue.id, MaterialIssue.issue_number).where(MaterialIssue.id.in_(id_list))
+            )
+            for m_id, m_num in res_mi.all():
+                resolved_refs[(ref_type, m_id)] = m_num
+                resolved_refs[("material_issue", m_id)] = m_num
+                resolved_refs[("issue", m_id)] = m_num
+                resolved_refs[("material_issue_acknowledge", m_id)] = m_num
+
+        elif ref_type == "issue_return":
+            from app.models.issue import IssueReturn
+            res_ir = await db.execute(
+                select(IssueReturn.id, IssueReturn.return_number).where(IssueReturn.id.in_(id_list))
+            )
+            for ir_id, ir_num in res_ir.all():
+                resolved_refs[(ref_type, ir_id)] = ir_num
+
+        elif ref_type == "purchase_return":
+            from app.models.returns import PurchaseReturn
+            res_pr = await db.execute(
+                select(PurchaseReturn.id, PurchaseReturn.return_number).where(PurchaseReturn.id.in_(id_list))
+            )
+            for pr_id, pr_num in res_pr.all():
+                resolved_refs[(ref_type, pr_id)] = pr_num
+
     from datetime import timezone
     return [{
-        "id": r.id,
-        "item_id": r.item_id,
-        "warehouse_id": r.warehouse_id,
-        "transaction_type": r.transaction_type,
-        "qty_in": float(r.qty_in or 0),
-        "qty_out": float(r.qty_out or 0),
-        "balance_qty": float(r.balance_qty or 0),
-        "rate": float(r.rate or 0),
+        "id": r[0].id,
+        "item_id": r[0].item_id,
+        "item_code": r[1],
+        "item_name": r[2],
+        "warehouse_id": r[0].warehouse_id,
+        "warehouse_name": r[3],
+        "transaction_type": r[0].transaction_type,
+        "qty_in": float(r[0].qty_in or 0),
+        "qty_out": float(r[0].qty_out or 0),
+        "balance_qty": float(r[0].balance_qty or 0),
+        "rate": float(r[0].rate or 0),
         "posting_date": (
-            datetime.combine(r.posting_date, r.posting_time).replace(tzinfo=timezone.utc).isoformat()
-            if r.posting_date and r.posting_time
-            else (r.posting_date.isoformat() if r.posting_date else None)
+            datetime.combine(r[0].posting_date, r[0].posting_time).replace(tzinfo=timezone.utc).isoformat()
+            if r[0].posting_date and r[0].posting_time
+            else (r[0].posting_date.isoformat() if r[0].posting_date else None)
         ),
-        "reference_type": r.reference_type,
-        "reference_id": r.reference_id,
+        "reference_type": r[0].reference_type,
+        "reference_id": r[0].reference_id,
+        "reference_number": resolved_refs.get((r[0].reference_type.lower() if r[0].reference_type else "", r[0].reference_id)) or str(r[0].reference_id or ""),
     } for r in rows]
 
 
@@ -295,6 +380,7 @@ async def po_summary_report(
             PurchaseOrder.status, Vendor.name.label("vendor_name"),
         )
         .outerjoin(Vendor, PurchaseOrder.vendor_id == Vendor.id)
+        .where(or_(Vendor.is_transport_vendor == False, Vendor.is_transport_vendor.is_(None)))
         .order_by(PurchaseOrder.po_date.desc())
     )
     conditions = []
@@ -327,6 +413,7 @@ async def vendor_performance_report(db: AsyncSession, vendor_id: Optional[int] =
             func.sum(PurchaseOrder.grand_total).label("total_amount"),
         )
         .outerjoin(PurchaseOrder, PurchaseOrder.vendor_id == Vendor.id)
+        .where(or_(Vendor.is_transport_vendor == False, Vendor.is_transport_vendor.is_(None)))
         .group_by(Vendor.id)
         .order_by(Vendor.rating.desc())
     )
@@ -376,7 +463,10 @@ async def pending_po_report(db: AsyncSession) -> List[Dict]:
             PurchaseOrder.status, Vendor.name.label("vendor_name"),
         )
         .join(Vendor, PurchaseOrder.vendor_id == Vendor.id)
-        .where(PurchaseOrder.status.in_(["approved", "accepted", "partially_received"]))
+        .where(
+            PurchaseOrder.status.in_(["approved", "accepted", "partially_received"]),
+            or_(Vendor.is_transport_vendor == False, Vendor.is_transport_vendor.is_(None))
+        )
         .order_by(PurchaseOrder.expected_delivery_date.asc())
     )
     result = await db.execute(query)

@@ -10,6 +10,8 @@ import {
   BarChartOutlined, UnorderedListOutlined, PlusOutlined,
 } from '@ant-design/icons';
 import useAuthStore from '../../store/authStore';
+import BarcodeDisplay from '../../components/BarcodeDisplay';
+import { BarcodeOutlined, QrcodeOutlined } from '@ant-design/icons';
 import ItemSelector from '../../components/ItemSelector';
 import dayjs from 'dayjs';
 import PageHeader from '../../components/PageHeader';
@@ -216,6 +218,12 @@ const StockBalance = () => {
   const [drillDownData, setDrillDownData] = useState([]);
   const [drillDownLoading, setDrillDownLoading] = useState(false);
   const [breakdownViewMode, setBreakdownViewMode] = useState('tree');
+
+  // Barcode / QR display states
+  const [barcodeDisplayOpen, setBarcodeDisplayOpen] = useState(false);
+  const [barcodeDisplayVal, setBarcodeDisplayVal] = useState('');
+  const [barcodeDisplayLabel, setBarcodeDisplayLabel] = useState('');
+  const [barcodeDisplaySub, setBarcodeDisplaySub] = useState('');
 
   // Load lookups
   useEffect(() => {
@@ -499,12 +507,17 @@ const StockBalance = () => {
                   style={{ padding: '2px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
                   <Tag color={isAsset ? "cyan" : "orange"}>{code}</Tag>
-                  <Tooltip title="Download QR Code">
+                  <Tooltip title="View Barcode / QR Code">
                     <Button 
                       type="text" 
                       size="small" 
-                      icon={<DownloadOutlined />} 
-                      onClick={() => handleDownloadQRCode(code, record)} 
+                      icon={<BarcodeOutlined style={{ color: '#1890ff' }} />} 
+                      onClick={() => {
+                        setBarcodeDisplayVal(code);
+                        setBarcodeDisplayLabel(record.item_name || '');
+                        setBarcodeDisplaySub(`${record.item_code || ''} | Batch: ${record.batch_number || record.batch_name || '-'}`);
+                        setBarcodeDisplayOpen(true);
+                      }} 
                     />
                   </Tooltip>
                 </List.Item>
@@ -698,12 +711,17 @@ const StockBalance = () => {
                   style={{ padding: '2px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
                 >
                   <Tag color={isAsset ? "cyan" : "orange"}>{code}</Tag>
-                  <Tooltip title="Download QR Code">
+                  <Tooltip title="View Barcode / QR Code">
                     <Button 
                       type="text" 
                       size="small" 
-                      icon={<DownloadOutlined />} 
-                      onClick={() => handleDownloadQRCode(code, record)} 
+                      icon={<BarcodeOutlined style={{ color: '#1890ff' }} />} 
+                      onClick={() => {
+                        setBarcodeDisplayVal(code);
+                        setBarcodeDisplayLabel(record.item_name || '');
+                        setBarcodeDisplaySub(`${record.item_code || ''} | Batch: ${record.batch_number || record.batch_name || '-'}`);
+                        setBarcodeDisplayOpen(true);
+                      }} 
                     />
                   </Tooltip>
                 </List.Item>
@@ -978,7 +996,14 @@ const StockBalance = () => {
                                                 border: '1px solid #e8e8e8',
                                                 backgroundColor: '#fff',
                                                 justifyContent: 'space-between',
-                                                boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
+                                                boxShadow: '0 1px 3px rgba(0,0,0,0.02)',
+                                                cursor: 'pointer'
+                                              }}
+                                              onClick={() => {
+                                                setBarcodeDisplayVal(code);
+                                                setBarcodeDisplayLabel(drillDownItem?.item_name || '');
+                                                setBarcodeDisplaySub(`${drillDownItem?.item_code || ''} | Batch: ${batch.batch_number || '-'}`);
+                                                setBarcodeDisplayOpen(true);
                                               }}
                                             >
                                               <Space direction="vertical" size={2}>
@@ -999,13 +1024,19 @@ const StockBalance = () => {
                                                   }} 
                                                 />
                                               </Space>
-                                              <Tooltip title="Download QR Label">
+                                              <Tooltip title="View Barcode / QR Code">
                                                 <Button 
                                                   type="primary" 
                                                   shape="circle" 
-                                                  icon={<DownloadOutlined />} 
+                                                  icon={<BarcodeOutlined />} 
                                                   size="small" 
-                                                  onClick={() => handleDownloadQRCode(code, batch.rowRef)} 
+                                                  onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setBarcodeDisplayVal(code);
+                                                    setBarcodeDisplayLabel(drillDownItem?.item_name || '');
+                                                    setBarcodeDisplaySub(`${drillDownItem?.item_code || ''} | Batch: ${batch.batch_number || '-'}`);
+                                                    setBarcodeDisplayOpen(true);
+                                                  }} 
                                                 />
                                               </Tooltip>
                                             </div>
@@ -1371,6 +1402,30 @@ const StockBalance = () => {
             </Col>
           </Row>
         </Form>
+      </Modal>
+
+      {/* Barcode / QR Code Viewer Modal */}
+      <Modal
+        title="Barcode / QR Code Viewer"
+        open={barcodeDisplayOpen}
+        onCancel={() => setBarcodeDisplayOpen(false)}
+        footer={[
+          <Button key="close" onClick={() => setBarcodeDisplayOpen(false)}>Close</Button>
+        ]}
+        width={360}
+        centered
+        destroyOnClose
+      >
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '20px 0' }}>
+          <BarcodeDisplay
+            value={barcodeDisplayVal}
+            type="CODE128"
+            label={barcodeDisplayLabel}
+            subtitle={barcodeDisplaySub}
+            height={80}
+            qrSize={140}
+          />
+        </div>
       </Modal>
 
       <style>{`

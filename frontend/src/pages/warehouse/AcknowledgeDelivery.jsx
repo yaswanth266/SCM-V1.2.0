@@ -132,6 +132,9 @@ const AcknowledgeDelivery = () => {
     setScannedItemInfo(null);
 
     let parsedCode = code.trim();
+    if (parsedCode.includes(' - ')) {
+      parsedCode = parsedCode.split(' - ')[0].trim();
+    }
     if (parsedCode.includes('\n')) {
       const lines = parsedCode.split('\n');
       const codeLine = lines.find(l => l.trim().startsWith('Code:'));

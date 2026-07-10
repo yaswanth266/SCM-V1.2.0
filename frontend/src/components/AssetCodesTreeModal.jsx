@@ -330,9 +330,21 @@ const AssetCodesTreeModal = ({
       const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(payload)}`;
       return `
         <div class="label-card">
-          <div class="label-title">${itemName} (${itemCode})</div>
-          <div class="label-code">${code}</div>
-          <img class="label-qr" src="${qrUrl}" alt="QR" />
+          <!-- Top: Code -->
+          <div class="label-code">${code} <span style="font-size: 10px; font-weight: normal; color: #475569;">(${itemCode})</span></div>
+          
+          <!-- Middle: QR or Barcode -->
+          <div class="qr-container">
+            <img class="label-qr" src="${qrUrl}" alt="QR" />
+          </div>
+          
+          <div class="barcode-container" style="display: none; padding: 10px 0;">
+            <svg class="barcode-svg" data-code="${code}"></svg>
+          </div>
+          
+          <!-- Bottom: Name -->
+          <div class="label-title" style="white-space: normal; height: auto; max-height: 40px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">${itemName}</div>
+          
           <div class="label-footer">
             <div>Batch: ${meta.batch}</div>
             <div>Loc: ${meta.location} / Bin: ${meta.bin}</div>
@@ -344,7 +356,7 @@ const AssetCodesTreeModal = ({
     printWindow.document.write(`
       <html>
         <head>
-          <title>Print QR Labels - ${itemName}</title>
+          <title>Print QR/Barcode Labels - ${itemName}</title>
           <style>
             body {
               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -354,6 +366,13 @@ const AssetCodesTreeModal = ({
             }
             .no-print {
               margin-bottom: 20px;
+              display: flex;
+              align-items: center;
+              gap: 15px;
+              background: #f8fafc;
+              padding: 12px 16px;
+              border-radius: 8px;
+              border: 1px solid #e2e8f0;
             }
             .grid-container {
               display: grid;
@@ -381,7 +400,6 @@ const AssetCodesTreeModal = ({
               width: 100%;
               overflow: hidden;
               text-overflow: ellipsis;
-              white-space: nowrap;
             }
             .label-code {
               font-size: 13px;
@@ -390,9 +408,17 @@ const AssetCodesTreeModal = ({
               margin: 4px 0;
               color: #000000;
             }
-            .label-qr {
+            .label-qr, .barcode-svg {
               width: 110px;
               height: 110px;
+              image-rendering: -moz-crisp-edges !important;
+              image-rendering: -webkit-crisp-edges !important;
+              image-rendering: pixelated !important;
+              image-rendering: crisp-edges !important;
+            }
+            .barcode-svg {
+              max-width: 100%;
+              height: 48px;
             }
             .label-footer {
               font-size: 9px;
@@ -418,16 +444,57 @@ const AssetCodesTreeModal = ({
         <body>
           <div class="no-print">
             <button onclick="window.print()" style="padding: 8px 16px; background: #2563eb; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px;">Print Labels</button>
-            <span style="margin-left: 10px; color: #64748b; font-size: 12px;">(Select Save as PDF or your Label Printer in the print dialog)</span>
+            <div style="display: flex; align-items: center; gap: 12px; font-size: 13px; font-weight: 600;">
+              <span style="color: #475569;">Format:</span>
+              <label style="cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                <input type="radio" name="label_type" value="qr" checked onchange="toggleFormat('qr')" /> QR Code
+              </label>
+              <label style="cursor: pointer; display: flex; align-items: center; gap: 4px;">
+                <input type="radio" name="label_type" value="barcode" onchange="toggleFormat('barcode')" /> Barcode (128)
+              </label>
+            </div>
+            <span style="color: #64748b; font-size: 12px;">(Select Save as PDF or your Label Printer in the print dialog)</span>
           </div>
           <div class="grid-container">
             ${labelsHTML}
           </div>
+          <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
           <script>
+            function initBarcodes() {
+              const svgs = document.querySelectorAll('.barcode-svg');
+              svgs.forEach(svg => {
+                const code = svg.getAttribute('data-code');
+                try {
+                  JsBarcode(svg, code, {
+                    format: "CODE128",
+                    width: 1.5,
+                    height: 48,
+                    displayValue: false,
+                    margin: 0
+                  });
+                } catch (e) {
+                  console.error('JsBarcode error:', e);
+                }
+              });
+            }
+
+            function toggleFormat(type) {
+              const qrs = document.querySelectorAll('.qr-container');
+              const barcodes = document.querySelectorAll('.barcode-container');
+              if (type === 'qr') {
+                qrs.forEach(el => el.style.display = 'block');
+                barcodes.forEach(el => el.style.display = 'none');
+              } else {
+                qrs.forEach(el => el.style.display = 'none');
+                barcodes.forEach(el => el.style.display = 'block');
+              }
+            }
+
             window.onload = function() {
+              initBarcodes();
               setTimeout(function() {
                 window.print();
-              }, 500);
+              }, 600);
             };
           </script>
         </body>

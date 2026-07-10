@@ -20,6 +20,7 @@ import dayjs from 'dayjs';
 import { formatNumber, formatDate } from '../../utils/helpers';
 import ParentPackagingModal from './ParentPackagingModal';
 import AssetCodesTreeModal from '../../components/AssetCodesTreeModal';
+import BarcodeDisplay from '../../components/BarcodeDisplay';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
@@ -408,7 +409,13 @@ export default function LogisticsConsignment() {
         .header h2 { font-size: 14px; text-transform: uppercase; letter-spacing: 1px; }
         .header .type { font-size: 12px; font-weight: bold; text-transform: uppercase; }
         .barcode-section { text-align: center; margin: 8px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
-        .barcode-section svg { max-width: 100%; }
+        .barcode-section svg {
+          max-width: 100%;
+          image-rendering: -moz-crisp-edges !important;
+          image-rendering: -webkit-crisp-edges !important;
+          image-rendering: pixelated !important;
+          image-rendering: crisp-edges !important;
+        }
         .info-grid { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; font-size: 11px; }
         .info-grid div { display: flex; justify-content: space-between; border-bottom: 1px dotted #ccc; padding-bottom: 2px; }
         .info-grid .label-text { font-weight: bold; color: #333; }
@@ -1203,12 +1210,16 @@ export default function LogisticsConsignment() {
                       </Col>
                     </Row>
                   </Col>
-                  <Col xs={24} md={6} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderLeft: '1px solid #f1f5f9', paddingLeft: '16px', gap: '4px' }}>
-                    <Barcode value={pkg.package_number} width={1.2} height={42} fontSize={11} />
-                    <Space size="middle">
-                      <Button type="link" size="small" icon={<PrinterOutlined />} onClick={() => handlePreviewPackageLabel(pkg.id)}>Print</Button>
-                      <Button type="link" size="small" icon={<DownloadOutlined />} onClick={() => handleDownloadBarcode(pkg.package_number)}>Download</Button>
-                    </Space>
+                  <Col xs={24} md={6} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', borderLeft: '1px solid #f1f5f9', paddingLeft: '16px', gap: '8px' }}>
+                    <BarcodeDisplay
+                      value={pkg.package_number}
+                      type="CODE128"
+                      height={42}
+                      qrSize={96}
+                    />
+                    <Button type="link" size="small" icon={<PrinterOutlined />} onClick={() => handlePreviewPackageLabel(pkg.id)}>
+                      Print Label
+                    </Button>
                   </Col>
                 </Row>
 
@@ -1334,7 +1345,12 @@ export default function LogisticsConsignment() {
                   <strong style={{ fontSize: 14 }}>{printLabelData.number}</strong>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '8px 0', gap: 8 }}>
-                  <Barcode value={printLabelData.number} width={1.2} height={40} fontSize={10} />
+                  <BarcodeDisplay
+                    value={printLabelData.number}
+                    type="CODE128"
+                    height={40}
+                    qrSize={80}
+                  />
                 </div>
                 <Divider style={{ margin: '8px 0', borderBlockStart: '1px solid #000' }} />
                 {printLabelData.details.map((d, i) => (

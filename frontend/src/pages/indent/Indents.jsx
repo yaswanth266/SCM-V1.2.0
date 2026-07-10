@@ -53,7 +53,7 @@ const Indents = () => {
   const [refreshKey, setRefreshKey] = useState(0);
   const [filterStatus, setFilterStatus] = useState(undefined);
   const [filterType, setFilterType] = useState(undefined);
-  const [filterWarehouse, setFilterWarehouse] = useState(currentUser?.warehouse_id || undefined);
+  const [filterWarehouse, setFilterWarehouse] = useState(undefined);
   const [filterProject, setFilterProject] = useState(undefined);
   const [warehouses, setWarehouses] = useState([]);
   const [projects, setProjects] = useState([]);

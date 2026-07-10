@@ -105,9 +105,12 @@ const AcknowledgementForm = () => {
     setScannedItems((prev) => [...prev, scanResult]);
     message.success(`Scanned: ${scanResult.value}`);
 
-    const matchedIdx = ackItems.findIndex(
-      (item) => (item.item?.barcode === scanResult.value) || (item.item?.item_code === scanResult.value) || (item.item_code === scanResult.value)
-    );
+    const matchedIdx = ackItems.findIndex((item) => {
+      const scannedVal = (scanResult.value || '').toLowerCase();
+      const barcodeVal = (item.item?.barcode || '').toLowerCase();
+      const codeVal = (item.item?.item_code || item.item_code || '').toLowerCase();
+      return (barcodeVal && scannedVal.includes(barcodeVal)) || (codeVal && scannedVal.includes(codeVal));
+    });
     if (matchedIdx >= 0) {
       setAckItems((prev) =>
         prev.map((item, idx) =>

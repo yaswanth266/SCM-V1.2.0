@@ -12,6 +12,7 @@ from app.models.user import User
 from app.models.indent import Indent, IndentItem, IndentAcknowledgement, IndentAcknowledgementItem
 from app.models.master import BOM
 from app.models.system import FileAttachment
+from app.models.settings_master import Employee, Position
 
 # Per MoM 2026-04-19 §6: max 3 indents per requester per rolling 30-day window.
 # Drafts don't count — only submitted/onward statuses.
@@ -74,7 +75,7 @@ async def list_indents(
         selectinload(Indent.source_bom),
         # Bug fix BUG_0042: include project so we can return project_name
         selectinload(Indent.project),
-        selectinload(Indent.position),
+        selectinload(Indent.position).selectinload(Position.office),
     )
     count_query = select(func.count(Indent.id))
 
@@ -194,7 +195,6 @@ async def list_indents(
 
     has_all_visibility = is_super_or_admin or is_mapped_to_central
 
-    from app.models.settings_master import Employee, Position
     from app.models.approval import ProjectWorkflowConfig
     from app.models.user import User as UserModel
     from app.services.approval_service import get_position_descendants
@@ -429,6 +429,7 @@ async def list_indents(
         data["position_id"] = ind.position_id
         data["position_name"] = ind.position.name if ind.position else None
         data["position_code"] = ind.position.code if ind.position else None
+        data["office_name"] = ind.position.office.name if (ind.position and ind.position.office) else "CENTRAL"
         # Workflow gating fields (None when no workflow / not pending).
         # `can_approve_now` defaults to False when workflow_meta is missing —
         # absence means we have no ApprovalRequest row to check the user
@@ -469,7 +470,7 @@ async def get_indent(
             selectinload(Indent.warehouse),
             selectinload(Indent.source_bom),
             selectinload(Indent.project),
-            selectinload(Indent.position),
+            selectinload(Indent.position).selectinload(Position.office),
         )
         .where(Indent.id == indent_id)
     )
@@ -479,7 +480,6 @@ async def get_indent(
 
     # Bug fix R-004 — originator must ALWAYS be able to see their own indent,
     # regardless of role/warehouse. Check that first before any other gates.
-    from app.models.settings_master import Employee, Position
     from app.models.approval import ProjectWorkflowConfig
     from app.models.user import User as UserModel
     from app.services.approval_service import get_position_descendants
@@ -593,6 +593,7 @@ async def get_indent(
     data["position_id"] = indent.position_id
     data["position_name"] = indent.position.name if indent.position else None
     data["position_code"] = indent.position.code if indent.position else None
+    data["office_name"] = indent.position.office.name if (indent.position and indent.position.office) else "CENTRAL"
 
     # Resolve user display names for raised_by / approved_by so the UI shows
     # "Murali" instead of "2". Fetch both in one query.
@@ -760,7 +761,6 @@ async def get_indent(
     # had rows.
     from app.models.approval import ApprovalRequest, ApprovalHistory
     from app.models.user import User as UserModel
-    from app.models.settings_master import Employee, Position
     ah_rows = await db.execute(
         select(
             ApprovalHistory.id,

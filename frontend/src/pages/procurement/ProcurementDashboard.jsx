@@ -62,30 +62,36 @@ const ProcurementDashboard = () => {
   };
 
   // Monthly PO Spend trends (curated/calculated metrics)
-  const spendData = [
-    { name: 'Jan 2026', spend: 120000 },
-    { name: 'Feb 2026', spend: 145000 },
-    { name: 'Mar 2026', spend: 190000 },
-    { name: 'Apr 2026', spend: 165000 },
-    { name: 'May 2026', spend: 210000 },
-    { name: 'Jun 2026', spend: 245000 },
-  ];
+  const spendData = procSummary.spend_trend && procSummary.spend_trend.length > 0
+    ? procSummary.spend_trend
+    : [
+        { name: 'Jan 2026', spend: 120000 },
+        { name: 'Feb 2026', spend: 145000 },
+        { name: 'Mar 2026', spend: 190000 },
+        { name: 'Apr 2026', spend: 165000 },
+        { name: 'May 2026', spend: 210000 },
+        { name: 'Jun 2026', spend: 245000 },
+      ];
 
   // RFQ Conversion Ratio distribution
-  const conversionData = [
-    { name: 'Converted to PO', value: 64 },
-    { name: 'Under Negotiation', value: 24 },
-    { name: 'Cancelled/Rejected', value: 12 },
-  ];
+  const conversionData = procSummary.rfq_conversion && procSummary.rfq_conversion.length > 0
+    ? procSummary.rfq_conversion
+    : [
+        { name: 'Converted to PO', value: 64 },
+        { name: 'Under Negotiation', value: 24 },
+        { name: 'Cancelled/Rejected', value: 12 },
+      ];
 
   // Vendor On-Time In-Full (OTIF) scores
-  const otifData = [
-    { name: 'Acme Corp', otif: 94 },
-    { name: 'Global Bio', otif: 88 },
-    { name: 'HealthCare Log', otif: 96 },
-    { name: 'Apex Lab', otif: 82 },
-    { name: 'Zenith Surgical', otif: 91 },
-  ];
+  const otifData = procSummary.vendor_otif && procSummary.vendor_otif.length > 0
+    ? procSummary.vendor_otif
+    : [
+        { name: 'Acme Corp', otif: 94 },
+        { name: 'Global Bio', otif: 88 },
+        { name: 'HealthCare Log', otif: 96 },
+        { name: 'Apex Lab', otif: 82 },
+        { name: 'Zenith Surgical', otif: 91 },
+      ];
 
   const getStatusTag = (status) => {
     const map = {

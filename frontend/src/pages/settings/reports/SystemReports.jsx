@@ -12,12 +12,7 @@ import { DATE_FORMAT } from '../../../utils/constants';
 const { RangePicker } = DatePicker;
 
 const REPORT_TYPES = [
-  { label: 'Activity Logs & Audit Trail', value: 'activity_logs' },
-  { label: 'System Mails', value: 'system_mails' },
-  { label: 'Portal Activities', value: 'portal_activities' },
-  { label: 'API Usage', value: 'api_usage' },
-  { label: 'Pending Inventory Valuations', value: 'pending_valuations' },
-  { label: 'Scheduled Workflow Rules/Actions', value: 'scheduled_workflows' },
+  { label: 'Activity Logs', value: 'activity_logs' },
 ];
 
 const ACTION_COLORS = {
@@ -210,75 +205,6 @@ const SystemReports = () => {
           { title: 'Entity', dataIndex: 'entity_type', key: 'entity', width: 130 },
           { title: 'Description', dataIndex: 'description', key: 'description', width: 300, ellipsis: true },
           { title: 'IP Address', dataIndex: 'ip_address', key: 'ip', width: 130 },
-        ];
-
-      case 'system_mails':
-        return [
-          { title: 'Sent At', dataIndex: 'sent_at', key: 'sent_at', width: 170, render: (v) => formatDateTime(v), sorter: true },
-          { title: 'From', dataIndex: 'from_email', key: 'from', width: 180 },
-          { title: 'To', dataIndex: 'to_email', key: 'to', width: 200 },
-          { title: 'Subject', dataIndex: 'subject', key: 'subject', width: 300, ellipsis: true },
-          { title: 'Template', dataIndex: 'template', key: 'template', width: 140 },
-          { title: 'Status', dataIndex: 'status', key: 'status', width: 100, render: (v) => {
-            const color = v === 'sent' ? 'green' : v === 'failed' ? 'red' : v === 'queued' ? 'orange' : 'default';
-            return <Tag color={color}>{v ? v.charAt(0).toUpperCase() + v.slice(1) : '-'}</Tag>;
-          }},
-          { title: 'Error', dataIndex: 'error_message', key: 'error', width: 200, ellipsis: true, render: (v) => v || '-' },
-        ];
-
-      case 'portal_activities':
-        return [
-          { title: 'Timestamp', dataIndex: 'timestamp', key: 'timestamp', width: 170, render: (v) => formatDateTime(v), sorter: true },
-          { title: 'User', dataIndex: 'user_name', key: 'user', width: 150 },
-          { title: 'Portal', dataIndex: 'portal_type', key: 'portal', width: 120 },
-          { title: 'Action', dataIndex: 'action', key: 'action', width: 120, render: (v) => <Tag color={ACTION_COLORS[v] || 'default'}>{v || '-'}</Tag> },
-          { title: 'Page', dataIndex: 'page', key: 'page', width: 180, ellipsis: true },
-          { title: 'Description', dataIndex: 'description', key: 'description', width: 300, ellipsis: true },
-          { title: 'IP Address', dataIndex: 'ip_address', key: 'ip', width: 130 },
-          { title: 'Browser', dataIndex: 'user_agent', key: 'browser', width: 200, ellipsis: true },
-        ];
-
-      case 'api_usage':
-        return [
-          { title: 'Endpoint', dataIndex: 'endpoint', key: 'endpoint', width: 250, ellipsis: true },
-          { title: 'Method', dataIndex: 'method', key: 'method', width: 80, render: (v) => {
-            const colorMap = { GET: 'green', POST: 'blue', PUT: 'orange', DELETE: 'red', PATCH: 'purple' };
-            return <Tag color={colorMap[v] || 'default'}>{v}</Tag>;
-          }},
-          { title: 'Total Calls', dataIndex: 'total_calls', key: 'calls', width: 110, align: 'right', sorter: true },
-          { title: 'Avg Response (ms)', dataIndex: 'avg_response_time', key: 'avg_time', width: 150, align: 'right', render: (v) => v != null ? `${Number(v).toFixed(0)} ms` : '-' },
-          { title: 'Error Rate', dataIndex: 'error_rate', key: 'error_rate', width: 110, align: 'right', render: (v) => {
-            const color = v > 5 ? '#f5222d' : v > 1 ? '#fa8c16' : '#52c41a';
-            return <span style={{ color, fontWeight: 600 }}>{Number(v).toFixed(1)}%</span>;
-          }},
-          { title: 'Last Called', dataIndex: 'last_called', key: 'last_called', width: 170, render: (v) => formatDateTime(v) },
-        ];
-
-      case 'pending_valuations':
-        return [
-          { title: 'Item Code', dataIndex: 'item_code', key: 'item_code', width: 130 },
-          { title: 'Item Name', dataIndex: 'item_name', key: 'item_name', width: 200, ellipsis: true },
-          { title: 'Warehouse', dataIndex: 'warehouse_name', key: 'warehouse', width: 150 },
-          { title: 'Transaction Type', dataIndex: 'transaction_type', key: 'type', width: 140 },
-          { title: 'Qty', dataIndex: 'qty', key: 'qty', width: 80, align: 'right' },
-          { title: 'Pending Since', dataIndex: 'pending_since', key: 'since', width: 170, render: (v) => formatDateTime(v), sorter: true },
-          { title: 'Reference', dataIndex: 'reference', key: 'ref', width: 150 },
-          { title: 'Status', dataIndex: 'status', key: 'status', width: 110, render: (v) => <Tag color="orange">{v || 'Pending'}</Tag> },
-        ];
-
-      case 'scheduled_workflows':
-        return [
-          { title: 'Rule Name', dataIndex: 'rule_name', key: 'rule', width: 200, ellipsis: true },
-          { title: 'Module', dataIndex: 'module', key: 'module', width: 120, render: (v) => <Tag>{v || '-'}</Tag> },
-          { title: 'Trigger', dataIndex: 'trigger_type', key: 'trigger', width: 130 },
-          { title: 'Schedule', dataIndex: 'schedule', key: 'schedule', width: 150 },
-          { title: 'Next Run', dataIndex: 'next_run', key: 'next_run', width: 170, render: (v) => formatDateTime(v), sorter: true },
-          { title: 'Last Run', dataIndex: 'last_run', key: 'last_run', width: 170, render: (v) => formatDateTime(v) },
-          { title: 'Last Result', dataIndex: 'last_result', key: 'result', width: 110, render: (v) => {
-            const color = v === 'success' ? 'green' : v === 'failed' ? 'red' : 'default';
-            return <Tag color={color}>{v ? v.charAt(0).toUpperCase() + v.slice(1) : '-'}</Tag>;
-          }},
-          { title: 'Active', dataIndex: 'is_active', key: 'active', width: 80, render: (v) => v ? <Tag color="green">Yes</Tag> : <Tag>No</Tag> },
         ];
 
       default:

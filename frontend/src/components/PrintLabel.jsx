@@ -1,9 +1,8 @@
 import React, { useRef } from 'react';
-import { Button, Space } from 'antd';
+import { Button } from 'antd';
 import { PrinterOutlined } from '@ant-design/icons';
 import { useReactToPrint } from 'react-to-print';
-import Barcode from 'react-barcode';
-import { QRCodeSVG } from 'qrcode.react';
+import BarcodeDisplay from './BarcodeDisplay';
 
 const PrintLabel = ({
   value,
@@ -27,8 +26,6 @@ const PrintLabel = ({
     return null;
   }
 
-  const isQR = type === 'QR' || type === 'QRCODE';
-
   const renderLabel = () => (
     <div
       className="print-label-container"
@@ -36,25 +33,22 @@ const PrintLabel = ({
         width: labelWidth,
         minHeight: labelHeight,
         pageBreakAfter: 'always',
+        display: 'inline-flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '8px',
+        background: '#ffffff'
       }}
     >
-      {title && <div className="print-label-title">{title}</div>}
-      {isQR ? (
-        <QRCodeSVG value={value} size={80} level="M" includeMargin={false} />
-      ) : (
-        <Barcode
-          value={value}
-          format={type}
-          width={1.5}
-          height={40}
-          displayValue={true}
-          fontSize={10}
-          margin={2}
-          background="#ffffff"
-          lineColor="#000000"
-        />
-      )}
-      {subtitle && <div className="print-label-subtitle">{subtitle}</div>}
+      <BarcodeDisplay
+        value={value}
+        type={type}
+        label={title}
+        subtitle={subtitle}
+        height={40}
+        qrSize={80}
+      />
       {children}
     </div>
   );
