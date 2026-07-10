@@ -34,14 +34,14 @@ const IndentReports = () => {
   useEffect(() => {
     fetchProjects();
     loadReportData();
-  }, [reportType, project, dateRange]);
+  }, [reportType]);
 
   const fetchProjects = async () => {
     try {
       const res = await api.get('/procurement/material-requests', { params: { page_size: 500 } });
       const items = res.data?.items || [];
       const uniqProj = Array.from(new Set(items.map(i => i.project_id).filter(Boolean)));
-      setProjects(uniqProj.map((id) => ({ label: `Project ${id}`, value: id })));
+      setProjects(uniqProj.map((id, index) => ({ label: `Project ${id}`, value: id })));
     } catch {
       // silent
     }
@@ -52,49 +52,13 @@ const IndentReports = () => {
     try {
       const res = await api.get('/indent/indents', { params: { page_size: 200 } });
       const indents = res.data?.items || res.data || [];
-
-      let filtered = indents;
-      if (project) {
-        filtered = filtered.filter(ind => Number(ind.project_id) === Number(project));
-      }
-      if (dateRange && dateRange[0] && dateRange[1]) {
-        const start = dateRange[0].startOf('day').toDate();
-        const end = dateRange[1].endOf('day').toDate();
-        filtered = filtered.filter(ind => {
-          const dateVal = ind.indent_date || ind.created_at;
-          if (!dateVal) return false;
-          const d = new Date(dateVal);
-          return d >= start && d <= end;
-        });
-      }
-
-      if (filtered.length === 0) {
+      
+      if (indents.length === 0) {
         setData([]);
         setLoading(false);
         return;
       }
 
-<<<<<<< HEAD
-      if (reportType === 'project_volume') {
-        // Group by project
-        const projMap = {};
-        filtered.forEach(ind => {
-          const pName = ind.project?.name || ind.project_name || `Project ${ind.project_id || 'Unknown'}`;
-          if (!projMap[pName]) projMap[pName] = { name: pName, count: 0, itemsCount: 0 };
-          projMap[pName].count += 1;
-          projMap[pName].itemsCount += (ind.items?.length || 0);
-        });
-        setData(Object.values(projMap));
-      } else if (reportType === 'tat_sla') {
-        // Average TAT trend per month
-        const monthMap = {};
-        filtered.forEach(ind => {
-          if (!ind.indent_date) return;
-          const date = new Date(ind.indent_date);
-          const monthStr = date.toLocaleString('default', { month: 'short', year: 'numeric' });
-          if (!monthMap[monthStr]) {
-            monthMap[monthStr] = { month: monthStr, raiseToApproveSum: 0, raiseToApproveCount: 0, approveToIssueSum: 0, approveToIssueCount: 0 };
-=======
       if (reportType === 'indent_kpis') {
         const officeMap = {};
         indents.forEach(ind => {
@@ -107,7 +71,6 @@ const IndentReports = () => {
               approved: 0,
               rejected: 0,
             };
->>>>>>> e135500 (feat: implement dynamic barcode/QR mode switching, swap name/code layouts, and fix indent detail scoping bug)
           }
           officeMap[officeName].total += 1;
           if (['draft', 'pending_approval'].includes(ind.status)) {
@@ -118,48 +81,9 @@ const IndentReports = () => {
             officeMap[officeName].rejected += 1;
           }
         });
-<<<<<<< HEAD
-        const list = Object.values(monthMap).map(m => ({
-          month: m.month,
-          raiseToApprove: m.raiseToApproveCount > 0 ? parseFloat((m.raiseToApproveSum / m.raiseToApproveCount).toFixed(1)) : 0,
-          approveToIssue: m.approveToIssueCount > 0 ? parseFloat((m.approveToIssueSum / m.approveToIssueCount).toFixed(1)) : 0,
-          slaTarget: 3.0
-        }));
-        setData(list);
-      } else if (reportType === 'fill_rate') {
-        // Item category fill rates
-        const catMap = {};
-        filtered.forEach(ind => {
-          (ind.items || []).forEach(item => {
-            const catName = item.item?.category?.name || 'Consumables';
-            if (!catMap[catName]) catMap[catName] = { category: catName, requested: 0, issued: 0 };
-            catMap[catName].requested += parseFloat(item.requested_qty || 0);
-            catMap[catName].issued += parseFloat(item.issued_qty || 0);
-          });
-        });
-        setData(Object.values(catMap));
-      } else {
-        // Emergency trend
-        const monthMap = {};
-        filtered.forEach(ind => {
-          if (!ind.indent_date) return;
-          const date = new Date(ind.indent_date);
-          const monthStr = date.toLocaleString('default', { month: 'short', year: 'numeric' });
-          if (!monthMap[monthStr]) {
-            monthMap[monthStr] = { month: monthStr, routine: 0, emergency: 0 };
-          }
-          if (ind.indent_type === 'urgent') {
-            monthMap[monthStr].emergency += 1;
-          } else {
-            monthMap[monthStr].routine += 1;
-          }
-        });
-        setData(Object.values(monthMap));
-=======
         setData(Object.values(officeMap));
       } else {
         setData([]);
->>>>>>> e135500 (feat: implement dynamic barcode/QR mode switching, swap name/code layouts, and fix indent detail scoping bug)
       }
     } catch (e) {
       console.error('Failed to load indent reports:', e);
@@ -228,10 +152,10 @@ const IndentReports = () => {
             />
           </Col>
           <Col xs={24} md={4}>
-            <Button
-              type="primary"
-              icon={<FilterOutlined />}
-              onClick={loadReportData}
+            <Button 
+              type="primary" 
+              icon={<FilterOutlined />} 
+              onClick={loadReportData} 
               block
               style={{ background: '#481890', borderColor: '#481890', borderRadius: '6px' }}
             >
@@ -251,8 +175,8 @@ const IndentReports = () => {
         <>
           {/* Recharts Graphical Analysis */}
           <Card style={{ marginBottom: 24, borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
-            <div style={{ height: '350px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-              {data.length > 0 ? (
+           <div style={{ height: '350px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+             {data.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   {reportType === 'indent_kpis' ? (
                     <BarChart data={data}>
@@ -268,10 +192,10 @@ const IndentReports = () => {
                     </BarChart>
                   ) : null}
                 </ResponsiveContainer>
-              ) : (
-                <Empty description="No report metrics available for the selected filters" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              )}
-            </div>
+             ) : (
+               <Empty description="No report metrics available for the selected filters" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+             )}
+           </div>
           </Card>
 
           {/* Tabular Details */}
