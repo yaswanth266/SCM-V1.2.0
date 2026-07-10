@@ -166,6 +166,7 @@ class IndentResponse(BaseModel):
     position_name: Optional[str] = None
     position_code: Optional[str] = None
     created_at: Optional[datetime] = None
+    pending_at: Optional[str] = None
     items: List[IndentItemResponse] = []
     model_config = {"from_attributes": True}
 

@@ -741,6 +741,15 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
   // --- Actions ---
   const handleIssue = async () => {
     try {
+      const items = recordData?.items || [];
+      const invalidItems = items.filter(
+        (i) => (i.has_serial || i.item_type === 'asset' || i.item_type === 'consumable') &&
+               (!i.serial_numbers || i.serial_numbers.length !== Math.round(Number(i.qty)))
+      );
+      if (invalidItems.length > 0) {
+        message.error('For asset, consumable, or serial-tracked items, selected codes count must equal the quantity. Please edit the issue to select codes.');
+        return;
+      }
       await api.post(`/warehouse/material-issues/${id}/issue`);
       message.success('Material issued successfully, stock reserved');
       fetchRecord();
@@ -917,10 +926,11 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
       }
 
       const invalidSerials = validItems.filter(
-        (i) => i.has_serial && (!i.serial_numbers || i.serial_numbers.length !== Math.round(Number(i.qty)))
+        (i) => (i.has_serial || i.item_type === 'asset' || i.item_type === 'consumable') && 
+               (!i.serial_numbers || i.serial_numbers.length !== Math.round(Number(i.qty)))
       );
       if (invalidSerials.length > 0) {
-        message.error('For serial-tracked items, selected serial numbers count must equal the quantity');
+        message.error('For asset, consumable, or serial-tracked items, selected serial numbers / asset codes count must equal the quantity');
         return;
       }
 

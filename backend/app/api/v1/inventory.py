@@ -33,7 +33,7 @@ router = APIRouter()
 @router.get("/balance")
 async def get_stock_balances(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(50, ge=1, le=10000),
     item_id: str = Query(None, description="Single ID or comma-separated IDs (e.g., '1,2,3')"),
     warehouse_id: int = Query(None),
     batch_id: int = Query(None),
@@ -530,12 +530,13 @@ async def get_stock_balances(
 @router.get("/ledger")
 async def get_stock_ledger(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(50, ge=1, le=10000),
     item_id: int = Query(None),
     warehouse_id: int = Query(None),
     transaction_type: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -553,6 +554,8 @@ async def get_stock_ledger(
         date_from = None
     if not isinstance(date_to, str):
         date_to = None
+    if not isinstance(search, str):
+        search = None
 
     offset, limit = paginate_params(page, page_size)
     # BUG-INV-124: pin a deterministic order on (posting_date desc, id desc)
@@ -591,6 +594,29 @@ async def get_stock_ledger(
     if transaction_type:
         query = query.where(StockLedger.transaction_type == transaction_type)
         count_query = count_query.where(StockLedger.transaction_type == transaction_type)
+    if search:
+        from app.models.master import Item as _ItemSearch
+        from app.models.warehouse import Warehouse as _WhSearch
+        from sqlalchemy import or_, cast, String as SqlString
+        search_term = f"%{search.strip()}%"
+        query = query.join(StockLedger.item).join(StockLedger.warehouse).where(
+            or_(
+                _ItemSearch.item_code.ilike(search_term),
+                _ItemSearch.name.ilike(search_term),
+                _WhSearch.name.ilike(search_term),
+                StockLedger.transaction_type.ilike(search_term),
+                cast(StockLedger.reference_id, SqlString).ilike(search_term)
+            )
+        )
+        count_query = count_query.join(StockLedger.item).join(StockLedger.warehouse).where(
+            or_(
+                _ItemSearch.item_code.ilike(search_term),
+                _ItemSearch.name.ilike(search_term),
+                _WhSearch.name.ilike(search_term),
+                StockLedger.transaction_type.ilike(search_term),
+                cast(StockLedger.reference_id, SqlString).ilike(search_term)
+            )
+        )
     if date_from:
         # BUG-INV-120: validate date_from input — bad strings raised 500.
         try:
@@ -1491,7 +1517,7 @@ async def manual_stock_entry(
 @router.get("/stock-balance")
 async def get_stock_balance_alias(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(50, ge=1, le=10000),
     item_id: str = Query(None),
     warehouse_id: int = Query(None),
     batch_id: int = Query(None),
@@ -1515,17 +1541,18 @@ async def get_stock_balance_alias(
 @router.get("/stock-ledger")
 async def get_stock_ledger_alias(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(50, ge=1, le=10000),
     item_id: int = Query(None),
     warehouse_id: int = Query(None),
     transaction_type: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
+    search: str = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Alias: GET /inventory/stock-ledger -> delegates to /inventory/ledger."""
-    return await get_stock_ledger(page=page, page_size=page_size, item_id=item_id, warehouse_id=warehouse_id, transaction_type=transaction_type, date_from=date_from, date_to=date_to, db=db, current_user=current_user)
+    return await get_stock_ledger(page=page, page_size=page_size, item_id=item_id, warehouse_id=warehouse_id, transaction_type=transaction_type, date_from=date_from, date_to=date_to, search=search, db=db, current_user=current_user)
 
 
 @router.get("/stock-transfers")

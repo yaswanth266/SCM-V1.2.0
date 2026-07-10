@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Button, Select, Space, Popconfirm, message, InputNumber,
@@ -7,13 +7,16 @@ import {
 import {
   PlusOutlined, EditOutlined, EyeOutlined,
   SendOutlined, CheckCircleOutlined, StopOutlined, ExportOutlined,
+  PrinterOutlined,
 } from '@ant-design/icons';
+import { useReactToPrint } from 'react-to-print';
 import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
 import StatusTag from '../../components/StatusTag';
 import api from '../../config/api';
 import { formatDate, formatNumber, getErrorMessage } from '../../utils/helpers';
 import useAuthStore from '../../store/authStore';
+import { IndentPrint } from '../../components/PrintTemplates';
 
 const { Text } = Typography;
 
@@ -60,6 +63,31 @@ const Indents = () => {
   const [approveTarget, setApproveTarget] = useState(null);
   const [approveItems, setApproveItems] = useState([]);
   const [approving, setApproving] = useState(false);
+
+  // Print support
+  const [printData, setPrintData] = useState(null);
+  const printRef = useRef(null);
+  const handlePrint = useReactToPrint({
+    content: () => printRef.current,
+    onAfterPrint: () => setPrintData(null),
+  });
+
+  const handlePrintClick = async (id) => {
+    try {
+      message.loading({ content: 'Loading indent details...', key: 'printIndent' });
+      const res = await api.get(`/indent/indents/${id}`);
+      setPrintData(res.data);
+      message.destroy('printIndent');
+    } catch (err) {
+      message.error({ content: getErrorMessage(err), key: 'printIndent' });
+    }
+  };
+
+  useEffect(() => {
+    if (printData) {
+      handlePrint();
+    }
+  }, [printData, handlePrint]);
 
   const loadLookups = useCallback(async () => {
     try {
@@ -188,15 +216,22 @@ const Indents = () => {
         );
       }
     },
-    { title: 'Status', dataIndex: 'status', key: 'status', width: 150, render: (s) => <StatusTag status={s} /> },
+    { title: 'Status', dataIndex: 'status', key: 'status', width: 150, render: (s, record) => <StatusTag status={s} record={record} /> },
     {
       title: 'Actions',
       key: 'actions',
-      width: 200,
+      width: 240,
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
           <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/indent/indents/${record.id}`)} />
+          <Button
+            type="link"
+            size="small"
+            icon={<PrinterOutlined />}
+            title="Print Indent"
+            onClick={() => handlePrintClick(record.id)}
+          />
           {record.status === 'draft' && (
             <>
               <Button type="link" size="small" icon={<EditOutlined />} onClick={() => navigate(`/indent/indents/${record.id}`)} />
@@ -370,6 +405,10 @@ const Indents = () => {
           ]}
         />
       </Modal>
+
+      <div style={{ display: 'none' }}>
+        <IndentPrint ref={printRef} data={printData} />
+      </div>
     </div>
   );
 };

@@ -1290,6 +1290,8 @@ async def create_purchase_order(
         billing_address=payload.billing_address,
         shipping_address=payload.shipping_address,
         payment_terms_days=payload.payment_terms_days,
+        payment_terms=payload.payment_terms,
+        currency=payload.currency or "INR",
         remarks=payload.remarks,
         # BUG-PRO-008 fix: schema accepted attachment_url but the constructor
         # never persisted it, so PO uploads were silently dropped.
@@ -1397,6 +1399,9 @@ async def update_purchase_order(
         "remarks",
         "discount_type",
         "discount_value",
+        "payment_terms",
+        "currency",
+        "payment_terms_days",
     }
     for k, v in payload.model_dump(exclude_unset=True).items():
         if k in _PO_PUT_ALLOWED:
@@ -2958,7 +2963,7 @@ async def delete_vendor_type(
 @router.get("/vendors")
 async def list_vendors(
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=1000),
+    page_size: int = Query(20, ge=1, le=10000),
     search: str = Query(None),
     vendor_type: str = Query(None),
     vendor_category_id: int = Query(None),

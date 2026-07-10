@@ -244,7 +244,6 @@ const filterModuleTabs = (tabs, allowedSet, useServerKeys, userRoleCodes = []) =
       const PUBLIC_BYPASS_KEYS = new Set([
         'settings-profile',
         'settings-change-password',
-        'settings-delegations',
       ]);
       if (PUBLIC_BYPASS_KEYS.has(derivedKey)) return t;
 
@@ -263,6 +262,9 @@ const filterModuleTabs = (tabs, allowedSet, useServerKeys, userRoleCodes = []) =
           legacyKey === 'masters-organization-structure' &&
           (allowedSet.has('settings-users') || allowedSet.has('masters-user-groups'))
         ) {
+          return t;
+        }
+        if (parts[2] === 'kanban' && allowedSet.has(`${parts[0]}-${parts[1]}`)) {
           return t;
         }
         return null; // Do NOT fall back to checking parent key like 'inventory-masters'

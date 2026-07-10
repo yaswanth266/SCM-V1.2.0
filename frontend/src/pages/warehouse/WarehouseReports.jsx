@@ -45,7 +45,7 @@ const WarehouseReports = () => {
   useEffect(() => {
     fetchWarehouses();
     loadReportData();
-  }, [reportType]);
+  }, [reportType, warehouse, dateRange]);
 
   const fetchWarehouses = async () => {
     try {

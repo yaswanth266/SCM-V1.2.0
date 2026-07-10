@@ -327,10 +327,9 @@ const StockLedger = () => {
           columns={columns}
           fetchFunction={fetchStockLedger}
           rowKey="id"
-          searchPlaceholder="Search by item, reference, warehouse..."
+          showSearch={false}
           exportFileName="Stock_Ledger"
           showExport={false}
-          toolbar={filterToolbar}
           scroll={{ x: 2000 }}
         />
       </Card>

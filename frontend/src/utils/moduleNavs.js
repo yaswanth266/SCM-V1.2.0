@@ -173,7 +173,6 @@ export const MODULE_NAVS = {
     tabs: [
       { label: 'Profile', path: '/settings/profile' },
       { label: 'Change Password', path: '/settings/change-password' },
-      { label: 'Delegations', path: '/settings/delegations' },
       { label: 'Users', path: '/settings/users' },
       { label: 'Roles', path: '/settings/roles' },
       { label: 'System Settings', path: '/settings/system' },

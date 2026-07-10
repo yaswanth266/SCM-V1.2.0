@@ -566,7 +566,7 @@ const IndentForm = () => {
             <Descriptions.Item label="Vehicle Code">{indent.vehicle_code || '-'}</Descriptions.Item>
             <Descriptions.Item label="Vehicle Number">{indent.vehicle_number || '-'}</Descriptions.Item>
             <Descriptions.Item label="Service Code">{indent.service_code || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Status"><StatusTag status={indent.status} /></Descriptions.Item>
+            <Descriptions.Item label="Status"><StatusTag status={indent.status} record={indent} /></Descriptions.Item>
             <Descriptions.Item label="Created By">{indent.created_by_name || indent.requested_by_name || indent.raised_by_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="Raising Position">
               {indent.position_name ? (

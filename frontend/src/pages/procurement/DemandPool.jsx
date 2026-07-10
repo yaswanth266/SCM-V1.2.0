@@ -8,6 +8,7 @@ import {
 import {
   ReloadOutlined, CheckCircleOutlined, FundOutlined, ExportOutlined,
   ClockCircleOutlined, CheckOutlined, SyncOutlined, HourglassOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import PageHeader from '../../components/PageHeader';
 import api from '../../config/api';
@@ -123,6 +124,7 @@ const DemandPool = () => {
   const [selectedKeys, setSelectedKeys] = useState([]);
   const [submitting, setSubmitting] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [searchText, setSearchText] = useState('');
 
   const loadWarehouses = async () => {
     try {
@@ -150,6 +152,19 @@ const DemandPool = () => {
 
   useEffect(() => { loadWarehouses(); }, []);
   useEffect(() => { fetchPool(); }, [filterWh]);
+
+  const filteredGroups = useMemo(() => {
+    if (!searchText) return groups;
+    const term = searchText.toLowerCase().trim();
+    return groups.filter((g) => {
+      const matchItemName = String(g.item_name || '').toLowerCase().includes(term);
+      const matchItemCode = String(g.item_code || '').toLowerCase().includes(term);
+      const matchIndentNum = (g.sources || []).some((s) =>
+        String(s.indent_number || '').toLowerCase().includes(term)
+      );
+      return matchItemName || matchItemCode || matchIndentNum;
+    });
+  }, [groups, searchText]);
 
   const selectedRows = useMemo(
     () => groups.filter((g) => selectedKeys.includes(g.key)),
@@ -345,6 +360,14 @@ const DemandPool = () => {
         subtitle="Outstanding indent demand — indents stay here until the raiser acknowledges full receipt"
       >
         <Space>
+          <Input
+            placeholder="Search items or indents..."
+            allowClear
+            prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />}
+            style={{ width: 280 }}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
           <Select
             placeholder="Filter by warehouse"
             allowClear
@@ -398,7 +421,7 @@ const DemandPool = () => {
       <Table
         rowKey="key"
         columns={columns}
-        dataSource={groups}
+        dataSource={filteredGroups}
         loading={loading}
         size="small"
         pagination={{ pageSize: 20, showSizeChanger: true }}

@@ -18,21 +18,13 @@ const { RangePicker } = DatePicker;
 const REPORT_TYPES = [
   { label: 'Stock Summary', value: 'stock_summary' },
   { label: 'Stock Detail', value: 'stock_detail' },
-  { label: 'Inventory Aging Summary', value: 'inventory_aging' },
   { label: 'Inventory Valuation Summary', value: 'inventory_valuation' },
-  { label: 'Inventory Turnover By Qty', value: 'turnover_qty' },
-  { label: 'Inventory Turnover By Amount', value: 'turnover_amount' },
-  { label: 'FIFO Cost Lot Tracking', value: 'fifo_cost' },
-  { label: 'ABC Classification', value: 'abc_classification' },
   { label: 'Batch Details', value: 'batch_details' },
   { label: 'Serial Number Details', value: 'serial_details' },
   { label: 'Warehouse-wise Balance', value: 'warehouse_balance' },
   { label: 'Category-wise Balance per Project', value: 'category_project_balance' },
   { label: 'Reorder Level Report', value: 'reorder_level' },
   { label: 'Expiry / FEFO Report', value: 'expiry_fefo' },
-  { label: 'Dead Stock', value: 'dead_stock' },
-  { label: 'Inventory Adjustment Summary', value: 'adjustment_summary' },
-  { label: 'Transit Stock Details', value: 'committed_stock' },
 ];
 
 const InventoryReports = () => {
@@ -48,6 +40,9 @@ const InventoryReports = () => {
   const [categories, setCategories] = useState([]);
   const [items, setItems] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [rawWarehouses, setRawWarehouses] = useState([]);
+  const [rawCategories, setRawCategories] = useState([]);
+  const [rawItems, setRawItems] = useState([]);
 
   useEffect(() => {
     fetchLookups();
@@ -62,24 +57,111 @@ const InventoryReports = () => {
       ]);
       if (wRes.status === 'fulfilled') {
         const d = wRes.value.data;
-        setWarehouses((d.items || d.data || d || []).map((w) => ({ label: w.name, value: w.id })));
+        const list = d.items || d.data || d || [];
+        setRawWarehouses(list);
+        setWarehouses(list.map((w) => ({ label: w.name, value: w.id })));
       }
       if (cRes.status === 'fulfilled') {
         const d = cRes.value.data;
-        setCategories((d.items || d.data || d || []).map((c) => ({ label: c.name, value: c.id })));
+        const list = d.items || d.data || d || [];
+        setRawCategories(list);
+        setCategories(list.map((c) => ({ label: c.name, value: c.id })));
       }
       if (iRes.status === 'fulfilled') {
         const d = iRes.value.data;
-        setItems((d.items || d.data || d || []).map((i) => ({ label: `${i.item_code} - ${i.name}`, value: i.id })));
+        const list = d.items || d.data || d || [];
+        setRawItems(list);
+        setItems(list.map((i) => ({ label: `${i.item_code} - ${i.name}`, value: i.id })));
       }
     } catch {
       // silent
     }
   };
 
+  const mapInventoryReportData = useCallback(
+    (rows, type) => {
+      const list = Array.isArray(rows) ? rows : [];
+      return list.map((r, index) => {
+        const itemLookup = rawItems.find((i) => i.id === (r.item_id || r.id));
+        const categoryLookup = rawCategories.find((c) => c.id === (itemLookup?.category_id || r.category_id));
+        const warehouseLookup = rawWarehouses.find((w) => w.id === (r.warehouse_id || warehouse));
+
+        const mapped = {
+          ...r,
+          key: r.id || index,
+          item_code: r.item_code || itemLookup?.item_code || 'N/A',
+          item_name: r.item_name || r.name || itemLookup?.name || 'N/A',
+          category_name: r.category_name || categoryLookup?.name || 'N/A',
+          warehouse_name: r.warehouse_name || warehouseLookup?.name || 'All Warehouses',
+          uom: r.uom || r.uom_name || r.uom_abbreviation || itemLookup?.primary_uom_name || itemLookup?.primary_uom?.abbreviation || itemLookup?.primary_uom?.name || 'N/A',
+          qty: r.qty !== undefined ? r.qty : (r.total_qty !== undefined ? r.total_qty : (r.available_qty !== undefined ? r.available_qty : 0)),
+          value: r.value !== undefined ? r.value : (r.stock_value !== undefined ? r.stock_value : (r.total_value !== undefined ? r.total_value : 0)),
+          reorder_level: r.reorder_level !== undefined ? r.reorder_level : (itemLookup?.reorder_level || 0),
+          safety_stock: r.safety_stock !== undefined ? r.safety_stock : (itemLookup?.safety_stock || 0),
+          reorder_qty: r.reorder_qty !== undefined ? r.reorder_qty : (itemLookup?.reorder_qty || 0),
+        };
+
+        if (type === 'expiry_fefo') {
+          const days = r.expiry_date ? Math.ceil((new Date(r.expiry_date) - new Date()) / (1000 * 60 * 60 * 24)) : null;
+          mapped.days_to_expiry = days;
+          mapped.qty = r.available_qty !== undefined ? r.available_qty : r.qty;
+        } else if (type === 'reorder_level') {
+          mapped.current_qty = r.available_qty !== undefined ? r.available_qty : r.qty;
+        } else if (type === 'dead_stock') {
+          mapped.days_idle = r.days_idle !== undefined ? r.days_idle : 90;
+        } else if (type === 'inventory_valuation') {
+          mapped.avg_cost = mapped.qty > 0 ? (mapped.value / mapped.qty) : 0;
+          mapped.total_value = mapped.value;
+        } else if (type === 'abc_classification') {
+          mapped.annual_value = r.total_value !== undefined ? r.total_value : mapped.value;
+          mapped.classification = r.class || 'C';
+        } else if (type === 'fifo_cost') {
+          mapped.lot_number = r.batch_number || 'N/A';
+          mapped.receipt_date = r.received_date;
+          mapped.unit_cost = r.rate !== undefined ? r.rate : 0;
+          mapped.total_cost = r.total_value !== undefined ? r.total_value : mapped.value;
+        } else if (type === 'batch_details') {
+          mapped.mfg_date = r.manufacturing_date;
+          mapped.qty = r.available_qty !== undefined ? r.available_qty : r.qty;
+        } else if (type === 'serial_details') {
+          mapped.serial_number = r.serial_number || `S/N-${r.id}`;
+          mapped.status = r.status || 'active';
+          mapped.received_date = r.received_date || r.created_at;
+        }
+
+        return mapped;
+      });
+    },
+    [rawItems, rawWarehouses, rawCategories, warehouse]
+  );
+
   const fetchReport = useCallback(
     async (params) => {
-      const queryParams = { ...params, report_type: reportType };
+      let url = '/inventory/reports';
+      let backendReportType = reportType;
+      const queryParams = { ...params };
+
+      if (reportType === 'inventory_valuation') {
+        backendReportType = 'valuation';
+      } else if (reportType === 'turnover_qty' || reportType === 'turnover_amount') {
+        backendReportType = 'turnover';
+      } else if (reportType === 'fifo_cost') {
+        backendReportType = 'fifo_cost_tracking';
+      } else if (reportType === 'reorder_level') {
+        backendReportType = 'low_stock';
+      } else if (reportType === 'expiry_fefo') {
+        backendReportType = 'expiry';
+      } else if (reportType === 'warehouse_balance') {
+        backendReportType = 'stock_summary';
+        queryParams.group_by_warehouse = true;
+      } else if (reportType === 'batch_details') {
+        backendReportType = 'stock_detail';
+      } else if (reportType === 'category_project_balance') {
+        url = '/inventory/category-wise';
+      }
+
+      queryParams.report_type = backendReportType;
+
       if (warehouse) queryParams.warehouse_id = warehouse;
       if (category) queryParams.category_id = category;
       if (item) queryParams.item_id = item;
@@ -88,15 +170,50 @@ const InventoryReports = () => {
         queryParams.date_from = formatDateForAPI(dateRange[0]);
         queryParams.date_to = formatDateForAPI(dateRange[1]);
       }
-      const res = await api.get('/inventory/reports', { params: queryParams });
+      const res = await api.get(url, { params: queryParams });
+      if (res && res.data) {
+        const rawRows = res.data.items || res.data.data || res.data || [];
+        const mappedRows = mapInventoryReportData(rawRows, reportType);
+        if (Array.isArray(res.data)) {
+          res.data = mappedRows;
+        } else if (res.data.items) {
+          res.data.items = mappedRows;
+        } else if (res.data.data) {
+          res.data.data = mappedRows;
+        }
+      }
       return res;
     },
-    [reportType, warehouse, category, item, project, dateRange]
+    [reportType, warehouse, category, item, project, dateRange, mapInventoryReportData]
   );
 
   const handleExport = async () => {
     try {
-      const queryParams = { report_type: reportType, page_size: 50000 };
+      let url = '/inventory/reports';
+      let backendReportType = reportType;
+      const queryParams = { page_size: 50000 };
+
+      if (reportType === 'inventory_valuation') {
+        backendReportType = 'valuation';
+      } else if (reportType === 'turnover_qty' || reportType === 'turnover_amount') {
+        backendReportType = 'turnover';
+      } else if (reportType === 'fifo_cost') {
+        backendReportType = 'fifo_cost_tracking';
+      } else if (reportType === 'reorder_level') {
+        backendReportType = 'low_stock';
+      } else if (reportType === 'expiry_fefo') {
+        backendReportType = 'expiry';
+      } else if (reportType === 'warehouse_balance') {
+        backendReportType = 'stock_summary';
+        queryParams.group_by_warehouse = true;
+      } else if (reportType === 'batch_details') {
+        backendReportType = 'stock_detail';
+      } else if (reportType === 'category_project_balance') {
+        url = '/inventory/category-wise';
+      }
+
+      queryParams.report_type = backendReportType;
+
       if (warehouse) queryParams.warehouse_id = warehouse;
       if (category) queryParams.category_id = category;
       if (item) queryParams.item_id = item;
@@ -105,9 +222,10 @@ const InventoryReports = () => {
         queryParams.date_from = formatDateForAPI(dateRange[0]);
         queryParams.date_to = formatDateForAPI(dateRange[1]);
       }
-      const res = await api.get('/inventory/reports', { params: queryParams });
+      const res = await api.get(url, { params: queryParams });
       const data = res.data;
-      const rows = data.items || data.data || data || [];
+      const rawRows = data.items || data.data || data || [];
+      const rows = mapInventoryReportData(rawRows, reportType);
       const cols = getColumns();
       const exportData = rows.map((row) => {
         const exp = {};

@@ -361,15 +361,7 @@ const QuotationForm = () => {
         <PageHeader title={quotation.quotation_number} subtitle="Quotation Detail">
           <Space>
             {(quotation.status === 'draft' || quotation.status === 'pending') && (
-              <>
-                <Button icon={<EditOutlined />} onClick={() => setEditMode(true)}>Edit</Button>
-                <Popconfirm title="Accept this quotation?" onConfirm={handleAccept}>
-                  <Button type="primary" icon={<CheckOutlined />}>Accept</Button>
-                </Popconfirm>
-                <Popconfirm title="Reject this quotation?" onConfirm={handleReject} okButtonProps={{ danger: true }}>
-                  <Button danger icon={<CloseOutlined />}>Reject</Button>
-                </Popconfirm>
-              </>
+              <Button icon={<EditOutlined />} onClick={() => setEditMode(true)}>Edit</Button>
             )}
             {quotation.status === 'accepted' && (
               <Popconfirm title="Create PO from this quotation?" onConfirm={handleCreatePO}>

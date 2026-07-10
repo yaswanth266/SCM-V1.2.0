@@ -37,14 +37,14 @@ const IndentReports = () => {
   useEffect(() => {
     fetchProjects();
     loadReportData();
-  }, [reportType]);
+  }, [reportType, project, dateRange]);
 
   const fetchProjects = async () => {
     try {
       const res = await api.get('/procurement/material-requests', { params: { page_size: 500 } });
       const items = res.data?.items || [];
       const uniqProj = Array.from(new Set(items.map(i => i.project_id).filter(Boolean)));
-      setProjects(uniqProj.map((id, index) => ({ label: `Project ${id}`, value: id })));
+      setProjects(uniqProj.map((id) => ({ label: `Project ${id}`, value: id })));
     } catch {
       // silent
     }
@@ -56,7 +56,22 @@ const IndentReports = () => {
       const res = await api.get('/indent/indents', { params: { page_size: 200 } });
       const indents = res.data?.items || res.data || [];
       
-      if (indents.length === 0) {
+      let filtered = indents;
+      if (project) {
+        filtered = filtered.filter(ind => Number(ind.project_id) === Number(project));
+      }
+      if (dateRange && dateRange[0] && dateRange[1]) {
+        const start = dateRange[0].startOf('day').toDate();
+        const end = dateRange[1].endOf('day').toDate();
+        filtered = filtered.filter(ind => {
+          const dateVal = ind.indent_date || ind.created_at;
+          if (!dateVal) return false;
+          const d = new Date(dateVal);
+          return d >= start && d <= end;
+        });
+      }
+
+      if (filtered.length === 0) {
         setData([]);
         setLoading(false);
         return;
@@ -65,7 +80,7 @@ const IndentReports = () => {
       if (reportType === 'project_volume') {
         // Group by project
         const projMap = {};
-        indents.forEach(ind => {
+        filtered.forEach(ind => {
           const pName = ind.project?.name || ind.project_name || `Project ${ind.project_id || 'Unknown'}`;
           if (!projMap[pName]) projMap[pName] = { name: pName, count: 0, itemsCount: 0 };
           projMap[pName].count += 1;
@@ -75,7 +90,7 @@ const IndentReports = () => {
       } else if (reportType === 'tat_sla') {
         // Average TAT trend per month
         const monthMap = {};
-        indents.forEach(ind => {
+        filtered.forEach(ind => {
           if (!ind.indent_date) return;
           const date = new Date(ind.indent_date);
           const monthStr = date.toLocaleString('default', { month: 'short', year: 'numeric' });
@@ -111,7 +126,7 @@ const IndentReports = () => {
       } else if (reportType === 'fill_rate') {
         // Item category fill rates
         const catMap = {};
-        indents.forEach(ind => {
+        filtered.forEach(ind => {
           (ind.items || []).forEach(item => {
             const catName = item.item?.category?.name || 'Consumables';
             if (!catMap[catName]) catMap[catName] = { category: catName, requested: 0, issued: 0 };
@@ -123,7 +138,7 @@ const IndentReports = () => {
       } else {
         // Emergency trend
         const monthMap = {};
-        indents.forEach(ind => {
+        filtered.forEach(ind => {
           if (!ind.indent_date) return;
           const date = new Date(ind.indent_date);
           const monthStr = date.toLocaleString('default', { month: 'short', year: 'numeric' });

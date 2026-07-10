@@ -245,6 +245,7 @@ class QuotationResponse(BaseModel):
     with_vehicle: Optional[bool] = False
     status: str
     remarks: Optional[str] = None
+    payment_terms: Optional[str] = None
     terms_url: Optional[str] = None
     created_at: Optional[datetime] = None
     items: List[QuotationItemResponse] = []
@@ -408,6 +409,9 @@ class POUpdate(BaseModel):
     shipping_address: Optional[str] = None
     discount_type: Optional[str] = None
     discount_value: Optional[Decimal] = None
+    payment_terms: Optional[str] = None
+    currency: Optional[str] = None
+    payment_terms_days: Optional[int] = None
     items: Optional[List[POItemCreate]] = None
 
 class POItemResponse(BaseModel):

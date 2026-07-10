@@ -2951,50 +2951,51 @@ async def validate_material_issue_items_flow(
                 )
 
         # 3. Serial/Asset Validation
-        has_serial = bool(m.has_serial)
+        item_type = str(m.item_type).lower() if m.item_type else ""
+        is_asset_or_consumable_or_serial = bool(m.has_serial) or (item_type in ("asset", "consumable"))
         
         # Clean serial numbers
         cleaned_sns = await clean_serial_numbers(db, it.item_id, it.serial_numbers)
         
         qty_val = it.qty or Decimal("0")
         
-        # If has_serial is True, serial numbers are mandatory and length must match qty
-        if has_serial:
+        # If is_asset_or_consumable_or_serial is True, serial/asset codes are mandatory and length must match qty
+        if is_asset_or_consumable_or_serial:
             if qty_val % 1 != 0:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Item {m.name} is serial-tracked, so quantity must be a whole number, but got {qty_val}."
+                    detail=f"Item {m.name} is serial/asset-tracked, so quantity must be a whole number, but got {qty_val}."
                 )
             qty_int = int(qty_val)
             if not cleaned_sns:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Item {m.name} requires serial numbers, but none were provided."
+                    detail=f"Item {m.name} requires serial/asset codes, but none were provided."
                 )
             if len(cleaned_sns) != qty_int:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Item {m.name} requires {qty_int} serial numbers, but got {len(cleaned_sns)}."
+                    detail=f"Item {m.name} requires {qty_int} serial/asset codes, but got {len(cleaned_sns)}."
                 )
         # If any serial numbers are present, validate that len(cleaned_sns) == qty
         elif cleaned_sns:
             if qty_val % 1 != 0:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Item {m.name} has serial numbers specified, so quantity must be a whole number, but got {qty_val}."
+                    detail=f"Item {m.name} has serial/asset codes specified, so quantity must be a whole number, but got {qty_val}."
                 )
             qty_int = int(qty_val)
             if len(cleaned_sns) != qty_int:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Item {m.name} has {len(cleaned_sns)} serial numbers specified, but quantity is {qty_int}."
+                    detail=f"Item {m.name} has {len(cleaned_sns)} serial/asset codes specified, but quantity is {qty_int}."
                 )
                 
         # Validate no duplicate serials in the line
         if cleaned_sns and len(cleaned_sns) != len(set(cleaned_sns)):
             raise HTTPException(
                 status_code=400,
-                detail=f"Duplicate serial numbers provided for item {m.name}."
+                detail=f"Duplicate serial/asset codes provided for item {m.name}."
             )
 
 
@@ -4106,15 +4107,18 @@ async def issue_material(
     # Validate serial numbers for serial-tracked items
     serials_to_issue = []
     for item in mi.items:
+        item_type = str(item.item.item_type).lower() if (item.item and item.item.item_type) else ""
         has_serial = bool(item.item.has_serial) if item.item else False
-        if has_serial:
+        is_asset_or_consumable_or_serial = has_serial or (item_type in ("asset", "consumable"))
+        
+        if is_asset_or_consumable_or_serial:
             cleaned_sns = await clean_serial_numbers(db, item.item_id, item.serial_numbers)
             item.serial_numbers = cleaned_sns
             qty_int = int(item.qty)
             if not item.serial_numbers or len(item.serial_numbers) != qty_int:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Item {item.item.name if item.item else item.item_id} requires {qty_int} serial numbers, but got {len(item.serial_numbers) if item.serial_numbers else 0}."
+                    detail=f"Item {item.item.name if item.item else item.item_id} requires {qty_int} serial/asset codes, but got {len(item.serial_numbers) if item.serial_numbers else 0}."
                 )
             if len(item.serial_numbers) != len(set(item.serial_numbers)):
                 raise HTTPException(

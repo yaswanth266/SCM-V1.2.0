@@ -542,7 +542,7 @@ async def inventory_turnover_report(
 
 # ==================== SYSTEM / DASHBOARD KPIs ====================
 
-async def dashboard_kpis(db: AsyncSession, warehouse_id: Optional[int] = None) -> Dict:
+async def dashboard_kpis(db: AsyncSession, warehouse_id: Optional[int] = None, user_id: Optional[int] = None) -> Dict:
     """Get dashboard KPI data."""
     # Total stock value
     sv_query = select(func.coalesce(func.sum(StockBalance.stock_value), 0))
@@ -627,10 +627,14 @@ async def dashboard_kpis(db: AsyncSession, warehouse_id: Optional[int] = None) -
         "pending_grn": pending_grn or 0,
         "pending_grns": pending_grn or 0,
         "low_stock_items": low_stock,
-        "pending_approvals": (await db.execute(
-            select(func.count(ApprovalRequest.id))
-            .where(ApprovalRequest.status == "pending")
-        )).scalar() or 0,
+        "pending_approvals": (
+            len(await __import__("app.services.approval_service", fromlist=["get_pending_approvals"]).get_pending_approvals(db, user_id, include_on_hold=False))
+            if user_id else
+            (await db.execute(
+                select(func.count(ApprovalRequest.id))
+                .where(ApprovalRequest.status == "pending")
+            )).scalar() or 0
+        ),
         "pending_indents": pending_indents,
         "total_indents": total_indents,
         "approved_indents": approved_indents,

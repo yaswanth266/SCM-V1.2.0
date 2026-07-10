@@ -733,11 +733,11 @@ async def process_approval_action(
     request = result.scalar_one_or_none()
     if request is None:
         raise HTTPException(status_code=404, detail="Approval request not found")
-    if request.status != "pending":
+    if request.status not in ("pending", "on_hold"):
         raise HTTPException(
             status_code=409,
             detail=(
-                f"Approval request is no longer pending "
+                f"Approval request is not in pending or on_hold status "
                 f"(current status: {request.status})"
             ),
         )
@@ -889,7 +889,7 @@ async def can_user_approve(
         select(ApprovalRequest).where(ApprovalRequest.id == request_id)
     )
     request = result.scalar_one_or_none()
-    if not request or request.status != "pending":
+    if not request or request.status not in ("pending", "on_hold"):
         return False
 
     # BUG-APR-024 / BUG-IND-006 — separation of duties. The requester can

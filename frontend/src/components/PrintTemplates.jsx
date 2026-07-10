@@ -462,8 +462,92 @@ export const SupplierQuotationPrint = React.forwardRef(({ data }, ref) => {
   );
 });
 
+/* ─────────────────── MATERIAL INDENT ─────────────────── */
+export const IndentPrint = React.forwardRef(({ data }, ref) => {
+  if (!data) return null;
+  const items = data.items || [];
+
+  return (
+    <div ref={ref} className="print-document" style={{ position: 'relative' }}>
+      <style>{printStyles}</style>
+      {data.status === 'draft' && <div className="draft-watermark">DRAFT</div>}
+
+      <div className="doc-header">
+        <div className="company-info">
+          <div><strong>{COMPANY.name}</strong></div>
+          <div>{COMPANY.address.split(',').slice(0, 2).join(', ')}</div>
+          <div>{COMPANY.address.split(',').slice(2).join(', ')}</div>
+          <div>{COMPANY.phone} | {COMPANY.email}</div>
+        </div>
+        <div>
+          <div className="doc-title" style={{ color: '#1a4b8c' }}>MATERIAL INDENT</div>
+          <div className="doc-subtitle">Date: <strong>{formatDate(data.indent_date || data.created_at)}</strong></div>
+          <div className="doc-subtitle">Indent No: <strong>{data.indent_number || `Indent #${data.id}`}</strong></div>
+        </div>
+      </div>
+
+      <div className="section-header" style={{ background: '#1a4b8c' }}>INDENT DETAILS</div>
+      <div className="info-grid">
+        <div className="info-row"><span className="info-label">PROJECT</span><span className="info-value">{data.project_name || data.project || '-'}</span></div>
+        <div className="info-row"><span className="info-label">WAREHOUSE</span><span className="info-value">{data.warehouse_name || data.warehouse || '-'}</span></div>
+        <div className="info-row"><span className="info-label">DEPARTMENT</span><span className="info-value">{data.department || data.department_name || '-'}</span></div>
+        <div className="info-row"><span className="info-label">REQUIRED DATE</span><span className="info-value">{formatDate(data.required_date)}</span></div>
+        <div className="info-row"><span className="info-label">INDENT TYPE</span><span className="info-value" style={{ textTransform: 'capitalize' }}>{data.indent_type || '-'}</span></div>
+        <div className="info-row"><span className="info-label">STATUS</span><span className="info-value" style={{ textTransform: 'capitalize' }}>{(data.status || '').replace(/_/g, ' ')}</span></div>
+        <div className="info-row"><span className="info-label">RAISED BY</span><span className="info-value">{data.created_by_name || data.requested_by_name || data.raised_by_name || '-'}</span></div>
+        <div className="info-row"><span className="info-label">RAISING POSITION</span><span className="info-value">{data.position_name ? `${data.position_name} ${data.position_code ? `(${data.position_code})` : ''}` : '-'}</span></div>
+        {data.vehicle_code && <div className="info-row"><span className="info-label">VEHICLE CODE</span><span className="info-value">{data.vehicle_code}</span></div>}
+        {data.vehicle_number && <div className="info-row"><span className="info-label">VEHICLE NUMBER</span><span className="info-value">{data.vehicle_number}</span></div>}
+        {data.service_code && <div className="info-row"><span className="info-label">SERVICE CODE</span><span className="info-value">{data.service_code}</span></div>}
+        {data.source_bom_code && <div className="info-row"><span className="info-label">SOURCE BOM</span><span className="info-value">{data.source_bom_code}</span></div>}
+      </div>
+
+      <div className="section-header" style={{ background: '#1a4b8c' }}>ITEMS REQUESTED</div>
+      <table>
+        <thead>
+          <tr>
+            <th style={{ width: 40 }}>SNo</th>
+            <th style={{ width: 120 }}>Item Code</th>
+            <th>Item Name</th>
+            <th style={{ width: 100, textAlign: 'right' }}>Requested Qty</th>
+            <th style={{ width: 80 }}>UOM</th>
+            <th style={{ width: 100, textAlign: 'right' }}>Approved Qty</th>
+            <th>Remarks</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((item, i) => (
+            <tr key={i}>
+              <td>{i + 1}</td>
+              <td>{item.item_code || (item.item && item.item.item_code) || '-'}</td>
+              <td>{item.item_name || (item.item && (item.item.item_name || item.item.name)) || '-'}</td>
+              <td style={{ textAlign: 'right' }}>{item.requested_qty || item.qty || 0}</td>
+              <td>{item.uom || item.unit || '-'}</td>
+              <td style={{ textAlign: 'right' }}>{item.approved_qty != null ? item.approved_qty : '-'}</td>
+              <td>{item.remarks || '-'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {data.remarks && (
+        <div style={{ marginTop: 12 }}>
+          <div className="notes-label" style={{ color: '#1a4b8c' }}>Remarks:</div>
+          <div className="notes-section">{data.remarks}</div>
+        </div>
+      )}
+
+      <div className="signature-section">
+        <div className="signature-box"><div className="signature-line">Prepared By</div></div>
+        <div className="signature-box"><div className="signature-line">Approved By</div></div>
+      </div>
+    </div>
+  );
+});
+
 PurchaseOrderPrint.displayName = 'PurchaseOrderPrint';
 RFQPrint.displayName = 'RFQPrint';
 PurchaseReceiptPrint.displayName = 'PurchaseReceiptPrint';
 DeliveryChallanPrint.displayName = 'DeliveryChallanPrint';
 SupplierQuotationPrint.displayName = 'SupplierQuotationPrint';
+IndentPrint.displayName = 'IndentPrint';

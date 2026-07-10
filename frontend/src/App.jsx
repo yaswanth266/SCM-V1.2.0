@@ -212,7 +212,6 @@ const RoleForm = lazy(() => import('./pages/settings/RoleForm'));
 const SystemSettings = lazy(() => import('./pages/settings/SystemSettings'));
 const Profile = lazy(() => import('./pages/settings/Profile'));
 const ChangePassword = lazy(() => import('./pages/settings/ChangePassword'));
-const Delegations = lazy(() => import('./pages/settings/Delegations'));
 const ApiKeys = lazy(() => import('./pages/settings/ApiKeys'));
 
 
@@ -708,7 +707,6 @@ const App = () => {
 
             {/* Settings (gated by 'settings' permission; profile/change-password/delegations always allowed) */}
             <Route path="/settings" element={<Navigate to="/settings/profile" replace />} />
-            <Route path="/settings/delegations" element={<Delegations />} />
             <Route path="/settings/users" element={<KeyRoute requiredKey="settings-users"><Users /></KeyRoute>} />
             <Route path="/settings/users/new" element={<PermissionRoute module="settings"><UserForm /></PermissionRoute>} />
             <Route path="/settings/users/:id" element={<PermissionRoute module="settings"><UserForm /></PermissionRoute>} />

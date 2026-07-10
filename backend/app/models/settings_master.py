@@ -1,4 +1,4 @@
-from sqlalchemy import Column, BigInteger, String, Text, Boolean, DateTime, Date, ForeignKey, Integer, JSON
+from sqlalchemy import Column, BigInteger, String, Text, Boolean, DateTime, Date, ForeignKey, Integer, JSON, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from app.database import Base
@@ -75,6 +75,10 @@ class Office(Base):
 
 class Position(Base):
     __tablename__ = "positions"
+
+    __table_args__ = (
+        UniqueConstraint('employee_id', 'role_id', 'office_id', name='uq_position_employee_role_office'),
+    )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     name = Column(String(255), nullable=False)

@@ -48,12 +48,29 @@ const StockBalance = () => {
 
   // Filters
   const [filterWarehouse, setFilterWarehouse] = useState(user?.warehouse_id || undefined);
+  const [searchInput, setSearchInput] = useState('');
   const [filterItem, setFilterItem] = useState('');
   const [filterCategory, setFilterCategory] = useState(undefined);
+  const [batchInput, setBatchInput] = useState('');
   const [filterBatch, setFilterBatch] = useState('');
   const [showZeroStock, setShowZeroStock] = useState(false);
   const [groupBy, setGroupBy] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Debounce search input and batch input to avoid excessive network requests on typing
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setFilterItem(searchInput);
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [searchInput]);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setFilterBatch(batchInput);
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [batchInput]);
 
   // Lookups
   const [warehouses, setWarehouses] = useState([]);
@@ -238,21 +255,15 @@ const StockBalance = () => {
       }
     };
     loadLookups();
-  }, [refreshKey]);
+  }, [refreshKey, filterWarehouse, filterCategory, filterBatch, showZeroStock, filterItem]);
 
   // Fetch stock balance
   const fetchStockBalance = useCallback(
     async (params) => {
       const qp = { ...params };
-      if (filterWarehouse) qp.warehouse_id = filterWarehouse;
-      if (filterItem) qp.search = filterItem;
-      if (filterCategory) qp.category = filterCategory;
-      if (filterBatch) qp.batch = filterBatch;
-      if (showZeroStock) qp.show_zero_stock = true;
-      if (groupBy) qp.group_by = groupBy;
       return await api.get('/inventory/stock-balance', { params: qp });
     },
-    [filterWarehouse, filterItem, filterCategory, filterBatch, showZeroStock, groupBy]
+    []
   );
 
   // Drill-down
@@ -775,14 +786,8 @@ const StockBalance = () => {
     <Space wrap size="small" style={{ marginLeft: 12 }}>
       <Input
         placeholder="Search items by code or name..."
-        value={filterItem}
-        onChange={(e) => {
-          setFilterItem(e.target.value);
-          if (!e.target.value) {
-            setRefreshKey((k) => k + 1);
-          }
-        }}
-        onPressEnter={() => setRefreshKey((k) => k + 1)}
+        value={searchInput}
+        onChange={(e) => setSearchInput(e.target.value)}
         allowClear
         style={{ width: 220 }}
         size="middle"
@@ -791,7 +796,7 @@ const StockBalance = () => {
         placeholder="Warehouse"
         options={warehouses}
         value={filterWarehouse}
-        onChange={(val) => { setFilterWarehouse(val); setRefreshKey((k) => k + 1); }}
+        onChange={(val) => setFilterWarehouse(val)}
         allowClear
         style={{ width: 160 }}
         size="middle"
@@ -802,33 +807,24 @@ const StockBalance = () => {
         placeholder="Category"
         options={CATEGORY_OPTIONS}
         value={filterCategory}
-        onChange={(val) => { setFilterCategory(val); setRefreshKey((k) => k + 1); }}
+        onChange={(val) => setFilterCategory(val)}
         allowClear
         style={{ width: 140 }}
         size="middle"
       />
       <Input
         placeholder="Batch..."
-        value={filterBatch}
-        onChange={(e) => setFilterBatch(e.target.value)}
-        onPressEnter={() => setRefreshKey((k) => k + 1)}
+        value={batchInput}
+        onChange={(e) => setBatchInput(e.target.value)}
         allowClear
         style={{ width: 120 }}
-        size="middle"
-      />
-      <Select
-        placeholder="Group By"
-        options={GROUP_BY_OPTIONS}
-        value={groupBy}
-        onChange={(val) => { setGroupBy(val); setRefreshKey((k) => k + 1); }}
-        style={{ width: 130 }}
         size="middle"
       />
       <Space size="small">
         <Text type="secondary" style={{ fontSize: 12 }}>Zero Stock</Text>
         <Switch
           checked={showZeroStock}
-          onChange={(val) => { setShowZeroStock(val); setRefreshKey((k) => k + 1); }}
+          onChange={(val) => setShowZeroStock(val)}
           size="small"
         />
       </Space>
@@ -1094,9 +1090,16 @@ const StockBalance = () => {
       {/* Data Table */}
       <Card styles={{ body: { padding: 0 } }}>
         <DataTable
-          key={refreshKey}
           columns={columns}
           fetchFunction={fetchStockBalance}
+          extraParams={{
+            warehouse_id: filterWarehouse,
+            category: filterCategory,
+            batch: filterBatch,
+            show_zero_stock: showZeroStock || undefined,
+            group_by: groupBy || undefined,
+            search: filterItem || undefined,
+          }}
           rowKey="id"
           showSearch={false}
           exportFileName="Stock_Balance"

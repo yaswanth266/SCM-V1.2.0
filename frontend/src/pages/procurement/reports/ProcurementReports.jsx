@@ -21,7 +21,6 @@ const REPORT_TYPES = [
   { label: 'Receive History', value: 'receive_history' },
   { label: 'GRN Details', value: 'grn_details' },
   { label: 'Vendor Balance Summary', value: 'vendor_balance' },
-  { label: 'Payments Made', value: 'payments_made' },
 ];
 
 const ProcurementReports = () => {
@@ -43,30 +42,243 @@ const ProcurementReports = () => {
     } catch { /* silent */ }
   };
 
+  const mapProcurementReportData = useCallback(
+    (response, type) => {
+      const data = response?.data || response || {};
+      const rawRows = data.items || data.data || (Array.isArray(data) ? data : []);
+
+      if (type === 'po_details') {
+        const flattened = [];
+        rawRows.forEach((po) => {
+          const items = po.items || [];
+          items.forEach((item) => {
+            flattened.push({
+              id: item.id || po.id,
+              po_number: po.po_number,
+              po_date: po.po_date,
+              vendor_name: po.vendor_name || po.vendor?.name || 'N/A',
+              item_name: item.item_name || item.item?.name || 'N/A',
+              qty: item.qty || 0,
+              rate: item.rate || 0,
+              amount: (item.qty || 0) * (item.rate || 0),
+              tax_amount: item.tax_amount || 0,
+              total_amount: ((item.qty || 0) * (item.rate || 0)) + (item.tax_amount || 0),
+              status: po.status,
+            });
+          });
+        });
+        return flattened;
+      }
+
+      if (type === 'po_by_vendor') {
+        return rawRows.map((r) => ({
+          id: r.id,
+          vendor_name: r.name || r.vendor_name || 'N/A',
+          total_pos: r.total_pos || 0,
+          total_amount: r.total_amount || 0,
+          paid_amount: r.total_amount || 0,
+          balance: 0,
+          last_po_date: null,
+        }));
+      }
+
+      if (type === 'active_pos') {
+        return rawRows.map((r) => ({
+          id: r.id,
+          po_number: r.po_number,
+          vendor_name: r.vendor_name,
+          po_date: r.po_date,
+          total_amount: r.grand_total,
+          received_pct: r.status === 'partially_received' ? 50 : 0,
+          status: r.status,
+          expected_date: r.expected_delivery_date,
+        }));
+      }
+
+      if (type === 'purchases_by_item') {
+        const itemMap = {};
+        rawRows.forEach((po) => {
+          (po.items || []).forEach((it) => {
+            const key = it.item_id;
+            if (!itemMap[key]) {
+              itemMap[key] = {
+                id: key,
+                item_code: it.item_code || it.item?.item_code || 'N/A',
+                item_name: it.item_name || it.item?.name || 'N/A',
+                total_qty: 0,
+                total_amount: 0,
+                vendor_count: new Set(),
+                rates: [],
+              };
+            }
+            itemMap[key].total_qty += it.qty || 0;
+            itemMap[key].total_amount += (it.qty || 0) * (it.rate || 0);
+            itemMap[key].vendor_count.add(po.vendor_name || po.vendor?.name);
+            itemMap[key].rates.push(it.rate || 0);
+          });
+        });
+        return Object.values(itemMap).map((m) => ({
+          ...m,
+          avg_rate: m.rates.length ? (m.rates.reduce((s, r) => s + r, 0) / m.rates.length) : 0,
+          vendor_count: m.vendor_count.size,
+        }));
+      }
+
+      if (type === 'purchases_by_category') {
+        const catMap = {};
+        let grandTotal = 0;
+        rawRows.forEach((po) => {
+          (po.items || []).forEach((it) => {
+            const categoryName = it.item?.category?.name || 'Uncategorized';
+            if (!catMap[categoryName]) {
+              catMap[categoryName] = {
+                category_name: categoryName,
+                item_count: new Set(),
+                total_qty: 0,
+                total_amount: 0,
+              };
+            }
+            catMap[categoryName].item_count.add(it.item_id);
+            catMap[categoryName].total_qty += it.qty || 0;
+            const amt = (it.qty || 0) * (it.rate || 0);
+            catMap[categoryName].total_amount += amt;
+            grandTotal += amt;
+          });
+        });
+        return Object.values(catMap).map((m, idx) => ({
+          id: idx,
+          category_name: m.category_name,
+          item_count: m.item_count.size,
+          total_qty: m.total_qty,
+          total_amount: m.total_amount,
+          pct_of_total: grandTotal > 0 ? ((m.total_amount / grandTotal) * 100) : 0,
+        }));
+      }
+
+      if (type === 'receive_history') {
+        const flattened = [];
+        rawRows.forEach((grn) => {
+          (grn.items || []).forEach((it) => {
+            flattened.push({
+              id: it.id || grn.id,
+              grn_number: grn.grn_number,
+              po_number: grn.po_number,
+              vendor_name: grn.vendor_name,
+              received_date: grn.grn_date,
+              item_name: it.item_name,
+              ordered_qty: it.ordered_qty || 0,
+              received_qty: it.received_qty || 0,
+              status: grn.status,
+            });
+          });
+        });
+        return flattened;
+      }
+
+      if (type === 'grn_details') {
+        const flattened = [];
+        rawRows.forEach((grn) => {
+          (grn.items || []).forEach((it) => {
+            flattened.push({
+              id: it.id || grn.id,
+              grn_number: grn.grn_number,
+              grn_date: grn.grn_date,
+              po_number: grn.po_number,
+              vendor_name: grn.vendor_name,
+              warehouse_name: grn.warehouse_name,
+              item_name: it.item_name,
+              qty: it.received_qty || 0,
+              amount: (it.received_qty || 0) * (it.rate || 0),
+              status: grn.status,
+            });
+          });
+        });
+        return flattened;
+      }
+
+      if (type === 'vendor_balance') {
+        return rawRows.map((r) => ({
+          id: r.id,
+          vendor_name: r.name || r.vendor_name || 'N/A',
+          total_billed: r.total_amount || 0,
+          total_paid: r.total_amount || 0,
+          balance_due: 0,
+          overdue_amount: 0,
+          credit_limit: 0,
+        }));
+      }
+
+      return [];
+    },
+    []
+  );
+
   const fetchReport = useCallback(
     async (params) => {
-      const queryParams = { ...params, report_type: reportType };
+      let url = '/procurement/reports';
+      let backendReportType = reportType;
+      const queryParams = { ...params };
+
+      if (reportType === 'po_details' || reportType === 'purchases_by_item' || reportType === 'purchases_by_category') {
+        url = '/procurement/purchase-orders';
+      } else if (reportType === 'po_by_vendor' || reportType === 'vendor_balance') {
+        backendReportType = 'vendor_performance';
+      } else if (reportType === 'active_pos') {
+        backendReportType = 'pending_po';
+      } else if (reportType === 'receive_history' || reportType === 'grn_details') {
+        url = '/warehouse/grn';
+      }
+
+      queryParams.report_type = backendReportType;
+
       if (vendor) queryParams.vendor_id = vendor;
       if (dateRange && dateRange[0]) {
         queryParams.date_from = formatDateForAPI(dateRange[0]);
         queryParams.date_to = formatDateForAPI(dateRange[1]);
       }
-      return await api.get('/procurement/reports', { params: queryParams });
+
+      const res = await api.get(url, { params: queryParams });
+      if (res && res.data) {
+        const mappedRows = mapProcurementReportData(res.data, reportType);
+        if (Array.isArray(res.data)) {
+          res.data = mappedRows;
+        } else if (res.data.items) {
+          res.data.items = mappedRows;
+        } else if (res.data.data) {
+          res.data.data = mappedRows;
+        }
+      }
+      return res;
     },
-    [reportType, vendor, dateRange]
+    [reportType, vendor, dateRange, mapProcurementReportData]
   );
 
   const handleExport = async () => {
     try {
-      const queryParams = { report_type: reportType, page_size: 50000 };
+      let url = '/procurement/reports';
+      let backendReportType = reportType;
+      const queryParams = { page_size: 50000 };
+
+      if (reportType === 'po_details' || reportType === 'purchases_by_item' || reportType === 'purchases_by_category') {
+        url = '/procurement/purchase-orders';
+      } else if (reportType === 'po_by_vendor' || reportType === 'vendor_balance') {
+        backendReportType = 'vendor_performance';
+      } else if (reportType === 'active_pos') {
+        backendReportType = 'pending_po';
+      } else if (reportType === 'receive_history' || reportType === 'grn_details') {
+        url = '/warehouse/grn';
+      }
+
+      queryParams.report_type = backendReportType;
+
       if (vendor) queryParams.vendor_id = vendor;
       if (dateRange && dateRange[0]) {
         queryParams.date_from = formatDateForAPI(dateRange[0]);
         queryParams.date_to = formatDateForAPI(dateRange[1]);
       }
-      const res = await api.get('/procurement/reports', { params: queryParams });
-      const data = res.data;
-      const rows = data.items || data.data || data || [];
+
+      const res = await api.get(url, { params: queryParams });
+      const rows = mapProcurementReportData(res.data, reportType);
       const cols = getColumns();
       const exportData = rows.map((row) => {
         const exp = {};

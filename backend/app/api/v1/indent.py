@@ -354,7 +354,8 @@ async def list_indents(
             # Build a quick lookup of raised_by per indent so we can deny
             # the originator (admin overrides keep the original behavior).
             indent_raisers = {ind.id: ind.raised_by for ind in indents}
-            from app.services.approval_service import can_user_approve
+            from app.services.approval_service import can_user_approve, get_hierarchical_active_position
+            from app.models.user import Role as RoleModel
             for ar in ars:
                 can_now = await can_user_approve(db, ar.id, current_user.id)
                 # Raiser cannot approve their own indent, even if their
@@ -364,10 +365,39 @@ async def list_indents(
                     and indent_raisers.get(ar.document_id) == current_user.id
                 ):
                     can_now = False
+                
+                pending_at = None
+                role_code = ""
+                pos_code = ""
+                pos_name = ""
+                pos = await get_hierarchical_active_position(db, ar, ar.current_level)
+                if pos:
+                    pos_code = pos.code or ""
+                    pos_name = pos.name or ""
+                    if pos.role_id:
+                        role_q = await db.execute(select(RoleModel).where(RoleModel.id == pos.role_id))
+                        role_obj = role_q.scalar_one_or_none()
+                        if role_obj:
+                            role_code = role_obj.code or ""
+                else:
+                    lvl = lvl_by_key.get((ar.workflow_id, ar.current_level))
+                    if lvl and lvl.approver_role_id:
+                        role_q = await db.execute(select(RoleModel).where(RoleModel.id == lvl.approver_role_id))
+                        role_obj = role_q.scalar_one_or_none()
+                        if role_obj:
+                            role_code = role_obj.code or ""
+                
+                target = (role_code + " " + pos_code + " " + pos_name).upper()
+                if "OE" in target:
+                    pending_at = "oe"
+                elif "DM" in target or "DISTRICT" in target or "MANAGER" in target:
+                    pending_at = "dm"
+
                 workflow_meta[ar.document_id] = {
                     "current_workflow_level": ar.current_level,
                     "total_workflow_levels": ar.total_levels,
                     "can_approve_now": bool(can_now),
+                    "pending_at": pending_at,
                 }
 
     # Resolve user display names for raised_by / approved_by in bulk
@@ -410,6 +440,7 @@ async def list_indents(
         data["current_workflow_level"] = meta.get("current_workflow_level")
         data["total_workflow_levels"] = meta.get("total_workflow_levels")
         data["can_approve_now"] = bool(meta.get("can_approve_now", False))
+        data["pending_at"] = meta.get("pending_at")
         for i, item in enumerate(ind.items):
             if i < len(data.get("items", [])):
                 if item.item:
@@ -613,13 +644,48 @@ async def get_indent(
             data["total_workflow_levels"] = ar.total_levels
             user_role_codes = set(await get_user_role_codes(db, current_user.id))
             is_admin_bypass = bool({"super_admin", "admin"} & user_role_codes)
-            from app.services.approval_service import can_user_approve
+            from app.services.approval_service import can_user_approve, get_hierarchical_active_position
+            from app.models.user import Role as RoleModel
             can_now = await can_user_approve(db, ar.id, current_user.id)
             # Never allow the raiser to approve their own indent, even if
             # their position or role has authority.
             if indent.raised_by == current_user.id and not is_admin_bypass:
                 can_now = False
             data["can_approve_now"] = bool(can_now)
+            
+            pending_at = None
+            role_code = ""
+            pos_code = ""
+            pos_name = ""
+            pos = await get_hierarchical_active_position(db, ar, ar.current_level)
+            if pos:
+                pos_code = pos.code or ""
+                pos_name = pos.name or ""
+                if pos.role_id:
+                    role_q = await db.execute(select(RoleModel).where(RoleModel.id == pos.role_id))
+                    role_obj = role_q.scalar_one_or_none()
+                    if role_obj:
+                        role_code = role_obj.code or ""
+            else:
+                ar_lvl_row = await db.execute(
+                    select(ApprovalLevel)
+                    .where(ApprovalLevel.workflow_id == ar.workflow_id)
+                    .where(ApprovalLevel.level == ar.current_level)
+                    .limit(1)
+                )
+                lvl = ar_lvl_row.scalar_one_or_none()
+                if lvl and lvl.approver_role_id:
+                    role_q = await db.execute(select(RoleModel).where(RoleModel.id == lvl.approver_role_id))
+                    role_obj = role_q.scalar_one_or_none()
+                    if role_obj:
+                        role_code = role_obj.code or ""
+            
+            target = (role_code + " " + pos_code + " " + pos_name).upper()
+            if "OE" in target:
+                pending_at = "oe"
+            elif "DM" in target or "DISTRICT" in target or "MANAGER" in target:
+                pending_at = "dm"
+            data["pending_at"] = pending_at
 
     for i, item in enumerate(indent.items):
         if i < len(data.get("items", [])):

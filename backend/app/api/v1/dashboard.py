@@ -70,7 +70,7 @@ async def get_dashboard_stats(
 
     import logging as _logging
     try:
-        return await dashboard_kpis(db, warehouse_id)
+        return await dashboard_kpis(db, warehouse_id, user_id=current_user.id)
     except Exception:
         _logging.getLogger(__name__).exception(
             "dashboard_kpis failed (warehouse_id=%s)", warehouse_id
