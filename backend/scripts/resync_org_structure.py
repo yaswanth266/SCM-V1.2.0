@@ -73,6 +73,71 @@ def _pos_base_url():
     return base.replace("employees", "positions")
 
 
+def normalize_position_key(text_val: str) -> str:
+    if not text_val:
+        return ""
+    import re
+    # Convert to uppercase
+    val = text_val.upper()
+    # Replace symbols
+    val = val.replace("@", "-").replace("_", "-").replace(" ", "-")
+    # Split into words
+    words = [w.strip() for w in val.split("-") if w.strip()]
+    
+    # Normalize roles
+    has_district = "DISTRICT" in words
+    has_manager = "MANAGER" in words
+    has_regional = "REGIONAL" in words
+    has_office = "OFFICE" in words
+    has_executive = "EXECUTIVE" in words
+    has_lab = "LAB" in words
+    has_technician = "TECHNICIAN" in words
+    has_store = "STORE" in words
+    has_keeper = "KEEPER" in words
+    has_state = "STATE" in words
+    has_project = "PROJECT" in words
+    has_head = "HEAD" in words
+    
+    # Reconstruct words list with normalized roles
+    new_words = []
+    # Check roles first
+    if (has_district and has_manager) or "DM" in words:
+        new_words.append("DM")
+    elif (has_regional and has_manager) or "RM" in words:
+        new_words.append("RM")
+    elif (has_office and has_executive) or "OE" in words:
+        new_words.append("OE")
+    elif (has_lab and has_technician) or "LT" in words:
+        new_words.append("LT")
+    elif (has_store and has_keeper) or "STOREKEEPER" in words or "SK" in words:
+        new_words.append("SK")
+    elif (has_state and has_project and has_head) or "SPH" in words:
+        new_words.append("SPH")
+    
+    # Filter words and add location parts
+    filler = {
+        "AP", "104", "MMU", "MMUS", "SERVICES", "MANAGER", "DISTRICT", "REGIONAL",
+        "OFFICE", "EXECUTIVE", "LAB", "TECHNICIAN", "STORE", "KEEPER", "STOREKEEPER",
+        "STATE", "PROJECT", "HEAD", "DM", "RM", "OE", "LT", "SK", "SPH", "CO", "COO"
+    }
+    
+    # Spell correction map
+    spellings = {
+        "VIJAYWADA": "VIJAYAWADA",
+        "CHITTO0R": "CHITTOOR",
+        "TIRUPATHI": "TIRUPATI",
+        "KANDUKUR": "KANDUKURU",
+        "MARKAPUR": "MARKAPURAM",
+    }
+    
+    for w in words:
+        if w not in filler:
+            corrected = spellings.get(w, w)
+            new_words.append(corrected)
+            
+    return "-".join(new_words)
+
+
 # ---------------------------------------------------------------------------
 # Step 1 — DROP & re-CREATE tables
 # ---------------------------------------------------------------------------
@@ -253,7 +318,7 @@ async def sync_all(db, employee_rows, position_rows, org_id):
 
     # ---- POSITIONS (from employee data) ----
     position_map = {}
-    parent_refs = []
+    parent_relations = []
 
     for row in employee_rows:
         pos = row.get("position") or {}
@@ -267,9 +332,8 @@ async def sync_all(db, employee_rows, position_rows, org_id):
         project_id = project_map.get(project_code)
         office_id = office_map.get(office_name)
 
+        # Collect parent relationship to resolve later
         reporting_to = pos.get("reporting_to") or []
-        parent_code = None
-        parent_id = None
         if reporting_to and isinstance(reporting_to, list) and len(reporting_to) > 0:
             rt = reporting_to[0]
             if isinstance(rt, dict):
@@ -281,112 +345,13 @@ async def sync_all(db, employee_rows, position_rows, org_id):
                 else:
                     parent_code = (parent_code or "").upper()
                 
-                if parent_code:
-                    parent_id = position_map.get(parent_code)
-                    if not parent_id:
-                        parent_id = (await db.execute(
-                            text("SELECT id FROM positions WHERE code = :code"),
-                            {"code": parent_code}
-                        )).scalar_one_or_none()
-                    
-                    if not parent_id:
-                        # Ensure parent office exists
-                        parent_office_id = _int(rt.get("office_id"))
-                        parent_office_name = rt.get("office_name")
-                        if parent_office_id or parent_office_name:
-                            off_exists = None
-                            if parent_office_id:
-                                off_exists = (await db.execute(
-                                    text("SELECT id FROM offices WHERE id = :oid LIMIT 1"),
-                                    {"oid": parent_office_id}
-                                )).scalar()
-                            if not off_exists and parent_office_name:
-                                off_exists = (await db.execute(
-                                    text("SELECT id FROM offices WHERE LOWER(name) = :name LIMIT 1"),
-                                    {"name": parent_office_name.lower().strip()}
-                                )).scalar()
-                            
-                            if not off_exists:
-                                print(f"  Creating parent office: {parent_office_name} (ID: {parent_office_id})")
-                                r_off = await db.execute(
-                                    text("""INSERT INTO offices
-                                            (id, name, level, created_at, updated_at)
-                                            VALUES (:id, :name, :level, NOW(), NOW())"""),
-                                    {"id": parent_office_id, "name": parent_office_name, "level": rt.get("office_level") or "CIRCLE OFFICE"}
-                                )
-                                parent_office_id = parent_office_id or r_off.lastrowid
-                                office_map[parent_office_name.lower().strip()] = parent_office_id
-                            else:
-                                parent_office_id = off_exists
-                        else:
-                            parent_office_id = None
-
-                        role_name = rt.get("role_name")
-                        role_id = None
-                        if role_name:
-                            role_id = (await db.execute(
-                                text("SELECT id FROM roles WHERE LOWER(name) = :name AND is_active = 1 LIMIT 1"),
-                                {"name": role_name.lower()}
-                            )).scalar()
-                        
-                        r_parent = await db.execute(
-                            text("""INSERT INTO positions
-                                    (name, code, role_name, role_id, level_name, level_rank,
-                                     department, section, office_id, status, created_at, updated_at)
-                                    VALUES (:name, :code, :role_name, :role_id, :level_name, :level_rank,
-                                            :department, :section, :office_id, 'active', NOW(), NOW())"""),
-                            {"name": parent_name, "code": parent_code, "role_name": role_name, "role_id": role_id,
-                             "level_name": rt.get("level_name"), "level_rank": _int(rt.get("level_rank")),
-                             "department": rt.get("department"), "section": rt.get("section"), "office_id": parent_office_id}
-                        )
-                        parent_id = r_parent.lastrowid
-                        position_map[parent_code] = parent_id
-                        stats["positions"] += 1
-
-                    # Create parent employee if not exists
-                    parent_emp_id = _int(rt.get("employee_id"))
-                    if parent_emp_id:
-                        if parent_emp_id in created_parent_employees:
-                            emp_exists = True
-                        else:
-                            emp_exists = (await db.execute(
-                                text("SELECT id FROM employees WHERE id = :eid LIMIT 1"),
-                                {"eid": parent_emp_id}
-                            )).scalar()
-                        
-                        if not emp_exists:
-                            created_parent_employees.add(parent_emp_id)
-                            emp_name = rt.get("employee_name") or parent_name
-                            emp_code = f"HR-EMP-{parent_emp_id}"
-                            await db.execute(
-                                text("""INSERT IGNORE INTO employees
-                                        (id, employee_code, name, status, position_id, created_at, updated_at)
-                                        VALUES (:id, :code, :name, 'Active', :pos_id, NOW(), NOW())"""),
-                                {"id": parent_emp_id, "code": emp_code, "name": emp_name, "pos_id": parent_id}
-                            )
-                            # INSERT IGNORE may skip if employee_code already exists on a different id.
-                            # Always look up the actual employee id by code for the UPDATE.
-                            actual_emp_id = (await db.execute(
-                                text("SELECT id FROM employees WHERE employee_code = :code LIMIT 1"),
-                                {"code": emp_code}
-                            )).scalar() or parent_emp_id
-                            # Update position employee_id using resolved id
-                            await db.execute(
-                                text("UPDATE positions SET employee_id = :eid WHERE id = :pid"),
-                                {"eid": actual_emp_id, "pid": parent_id}
-                            )
-                        else:
-                            # emp already exists by id - but resolve actual id by code to be safe
-                            emp_code = f"HR-EMP-{parent_emp_id}"
-                            actual_emp_id = (await db.execute(
-                                text("SELECT id FROM employees WHERE employee_code = :code LIMIT 1"),
-                                {"code": emp_code}
-                            )).scalar() or parent_emp_id
-                            # Update positions employee_id
-                            await db.execute(
-                                text("UPDATE positions SET employee_id = :eid WHERE id = :pid AND employee_id IS NULL"),
-                                {"eid": actual_emp_id, "pid": parent_id}
-                            )
+                if parent_code or parent_name:
+                    parent_relations.append({
+                        "child_code": code,
+                        "parent_code": parent_code,
+                        "parent_name": parent_name,
+                        "parent_details": rt
+                    })
 
         existing = (await db.execute(
             text("SELECT id FROM positions WHERE code = :code LIMIT 1"),
@@ -425,29 +390,39 @@ async def sync_all(db, employee_rows, position_rows, org_id):
                 )
                 position_map[code] = r.lastrowid
                 stats["positions"] += 1
-                if parent_code:
-                    parent_refs.append((code, parent_code))
             except Exception as e:
                 print(f"  WARN: Could not create position {code}: {e}")
-
-    # Parent links
-    for child_code, parent_code in parent_refs:
-        child_id = position_map.get(child_code)
-        parent_id = position_map.get(parent_code)
-        if child_id and parent_id and child_id != parent_id:
-            try:
-                await db.execute(
-                    text("UPDATE positions SET parent_position_id = :pid WHERE id = :cid AND parent_position_id IS NULL"),
-                    {"cid": child_id, "pid": parent_id}
-                )
-            except Exception:
-                pass
 
     # Positions from positions API for missed ones
     for pos_row in position_rows:
         code = (_text(pos_row, "code") or "").upper()
-        if not code or code in position_map:
+        if not code:
             continue
+        
+        # Collect parent relationship to resolve later
+        reporting_to = pos_row.get("reporting_to") or []
+        if reporting_to and isinstance(reporting_to, list) and len(reporting_to) > 0:
+            rt = reporting_to[0]
+            if isinstance(rt, dict):
+                import re
+                parent_name = rt.get("position_name") or rt.get("name") or ""
+                parent_code = rt.get("code") or rt.get("position_code")
+                if not parent_code and parent_name:
+                    parent_code = re.sub(r"[^a-zA-Z0-9]+", "-", parent_name).strip("-").upper()
+                else:
+                    parent_code = (parent_code or "").upper()
+                
+                if parent_code or parent_name:
+                    parent_relations.append({
+                        "child_code": code,
+                        "parent_code": parent_code,
+                        "parent_name": parent_name,
+                        "parent_details": rt
+                    })
+
+        if code in position_map:
+            continue
+            
         name = _text(pos_row, "name") or code
         role_details = pos_row.get("role_details") or {}
         try:
@@ -477,6 +452,157 @@ async def sync_all(db, employee_rows, position_rows, org_id):
             stats["positions"] += 1
         except Exception as e:
             print(f"  WARN: Could not insert position {code}: {e}")
+
+    await db.commit()
+
+    # ---- HIERARCHY RESOLUTION AND LINKING (Pass 2) ----
+    print("  Resolving position hierarchy using normalized key matching...")
+    normalized_to_id = {}
+    for pos_code, db_id in position_map.items():
+        norm_key = normalize_position_key(pos_code)
+        if norm_key:
+            normalized_to_id[norm_key] = db_id
+
+    for rel in parent_relations:
+        child_code = rel["child_code"]
+        parent_code = rel["parent_code"]
+        parent_name = rel["parent_name"]
+        rt = rel["parent_details"]
+
+        child_id = position_map.get(child_code)
+        if not child_id:
+            continue
+
+        parent_id = None
+
+        # 1. Try exact code match in position_map
+        if parent_code:
+            parent_id = position_map.get(parent_code)
+
+        # 2. Try normalized match by parent_code
+        if not parent_id and parent_code:
+            norm_parent_code = normalize_position_key(parent_code)
+            parent_id = normalized_to_id.get(norm_parent_code)
+
+        # 3. Try normalized match by parent_name
+        if not parent_id and parent_name:
+            norm_parent_name = normalize_position_key(parent_name)
+            parent_id = normalized_to_id.get(norm_parent_name)
+
+        # 4. Fallback: Create parent stub position if genuinely missing
+        if not parent_id:
+            print(f"  Parent not found for {child_code} (Parent name: '{parent_name}', code: '{parent_code}'). Creating stub...")
+            
+            # Ensure parent office exists
+            parent_office_id = _int(rt.get("office_id"))
+            parent_office_name = rt.get("office_name")
+            if parent_office_id or parent_office_name:
+                off_exists = None
+                if parent_office_id:
+                    off_exists = (await db.execute(
+                        text("SELECT id FROM offices WHERE id = :oid LIMIT 1"),
+                        {"oid": parent_office_id}
+                    )).scalar()
+                if not off_exists and parent_office_name:
+                    off_exists = (await db.execute(
+                        text("SELECT id FROM offices WHERE LOWER(name) = :name LIMIT 1"),
+                        {"name": parent_office_name.lower().strip()}
+                    )).scalar()
+                
+                if not off_exists:
+                    print(f"  Creating parent office: {parent_office_name} (ID: {parent_office_id})")
+                    r_off = await db.execute(
+                        text("""INSERT INTO offices
+                                (id, name, level, created_at, updated_at)
+                                VALUES (:id, :name, :level, NOW(), NOW())"""),
+                        {"id": parent_office_id, "name": parent_office_name, "level": rt.get("office_level") or "CIRCLE OFFICE"}
+                    )
+                    parent_office_id = parent_office_id or r_off.lastrowid
+                    office_map[parent_office_name.lower().strip()] = parent_office_id
+                else:
+                    parent_office_id = off_exists
+            else:
+                parent_office_id = None
+
+            role_name = rt.get("role_name")
+            role_id = None
+            if role_name:
+                role_id = (await db.execute(
+                    text("SELECT id FROM roles WHERE LOWER(name) = :name AND is_active = 1 LIMIT 1"),
+                    {"name": role_name.lower()}
+                )).scalar()
+
+            r_parent = await db.execute(
+                text("""INSERT INTO positions
+                        (name, code, role_name, role_id, level_name, level_rank,
+                         department, section, office_id, status, created_at, updated_at)
+                        VALUES (:name, :code, :role_name, :role_id, :level_name, :level_rank,
+                                :department, :section, :office_id, 'active', NOW(), NOW())"""),
+                {"name": parent_name, "code": parent_code or f"STUB-{normalize_position_key(parent_name)}", "role_name": role_name, "role_id": role_id,
+                 "level_name": rt.get("level_name"), "level_rank": _int(rt.get("level_rank")),
+                 "department": rt.get("department"), "section": rt.get("section"), "office_id": parent_office_id}
+            )
+            parent_id = r_parent.lastrowid
+            
+            if parent_code:
+                position_map[parent_code] = parent_id
+            else:
+                position_map[f"STUB-{normalize_position_key(parent_name)}"] = parent_id
+                
+            norm_key = normalize_position_key(parent_code or parent_name)
+            if norm_key:
+                normalized_to_id[norm_key] = parent_id
+                
+            stats["positions"] += 1
+
+            # Create parent employee if not exists
+            parent_emp_id = _int(rt.get("employee_id"))
+            if parent_emp_id:
+                if parent_emp_id in created_parent_employees:
+                    emp_exists = True
+                else:
+                    emp_exists = (await db.execute(
+                        text("SELECT id FROM employees WHERE id = :eid LIMIT 1"),
+                        {"eid": parent_emp_id}
+                    )).scalar()
+                
+                if not emp_exists:
+                    created_parent_employees.add(parent_emp_id)
+                    emp_name = rt.get("employee_name") or parent_name
+                    emp_code = f"HR-EMP-{parent_emp_id}"
+                    await db.execute(
+                        text("""INSERT IGNORE INTO employees
+                                (id, employee_code, name, status, position_id, created_at, updated_at)
+                                VALUES (:id, :code, :name, 'Active', :pos_id, NOW(), NOW())"""),
+                        {"id": parent_emp_id, "code": emp_code, "name": emp_name, "pos_id": parent_id}
+                    )
+                    actual_emp_id = (await db.execute(
+                        text("SELECT id FROM employees WHERE employee_code = :code LIMIT 1"),
+                        {"code": emp_code}
+                    )).scalar() or parent_emp_id
+                    await db.execute(
+                        text("UPDATE positions SET employee_id = :eid WHERE id = :pid"),
+                        {"eid": actual_emp_id, "pid": parent_id}
+                    )
+                else:
+                    emp_code = f"HR-EMP-{parent_emp_id}"
+                    actual_emp_id = (await db.execute(
+                        text("SELECT id FROM employees WHERE employee_code = :code LIMIT 1"),
+                        {"code": emp_code}
+                    )).scalar() or parent_emp_id
+                    await db.execute(
+                        text("UPDATE positions SET employee_id = :eid WHERE id = :pid AND employee_id IS NULL"),
+                        {"eid": actual_emp_id, "pid": parent_id}
+                    )
+
+        if parent_id and child_id != parent_id:
+            try:
+                await db.execute(
+                    text("UPDATE positions SET parent_position_id = :pid WHERE id = :cid AND parent_position_id IS NULL"),
+                    {"cid": child_id, "pid": parent_id}
+                )
+            except Exception as e:
+                print(f"  WARN: Failed to link child {child_code} to parent {parent_id}: {e}")
 
     await db.commit()
     print(f"  Positions: {stats['positions']} created, {len(position_map)} total")
