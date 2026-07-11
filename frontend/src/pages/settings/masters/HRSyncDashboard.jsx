@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  App as AntApp, Button, Card, Col, Row, Space, Statistic, Table, Tag, Tooltip, Typography, Divider, Alert,
+  App as AntApp, Button, Card, Col, Row, Space, Statistic, Table, Tag, Tooltip, Typography, Divider, Alert, Progress,
 } from 'antd';
 import {
   SyncOutlined, ReloadOutlined, InfoCircleOutlined, CheckCircleOutlined,
@@ -21,7 +21,8 @@ const HRSyncDashboard = () => {
   const [syncing, setSyncing] = useState(false);
   const [lastSyncResult, setLastSyncResult] = useState(null);
   const [syncError, setSyncError] = useState(null);
-  const [syncHistory, setSyncHistory] = useState([]);
+  const [syncProgress, setSyncProgress] = useState(null);
+  const [syncPercent, setSyncPercent] = useState(0);
 
   // DB counts
   const [dbEmployees, setDbEmployees] = useState(0);
@@ -71,28 +72,15 @@ const HRSyncDashboard = () => {
     fetchDBCounts();
   }, [fetchDBCounts]);
 
-  // Fetch sync history
-  const fetchSyncHistory = useCallback(async () => {
-    try {
-      // Try to get sync log from backend
-      const res = await api.get('/masters/employees/sync-history', { params: { page_size: 10 } }).catch(() => null);
-      if (res?.data) {
-        setSyncHistory(toArray(res.data));
-      }
-    } catch {
-      // Endpoint may not exist - that's ok
-    }
-  }, []);
 
-  useEffect(() => {
-    fetchSyncHistory();
-  }, [fetchSyncHistory]);
 
   // Handle full sync
   const handleFullSync = async () => {
     setSyncing(true);
     setSyncError(null);
     setLastSyncResult(null);
+    setSyncProgress('Initializing sync...');
+    setSyncPercent(5);
 
     try {
       const res = await api.post('/masters/employees/sync-api', null, { timeout: 300000 });
@@ -117,6 +105,7 @@ const HRSyncDashboard = () => {
           const taskData = statusRes.data || {};
 
           if (taskData.status === 'completed') {
+            setSyncPercent(100);
             const data = taskData.result || {};
             setLastSyncResult({
               success: true,
@@ -144,11 +133,33 @@ const HRSyncDashboard = () => {
 
             // Refresh DB counts
             await fetchDBCounts();
-            await fetchSyncHistory();
             setSyncing(false);
           } else if (taskData.status === 'failed') {
             throw new Error(taskData.error || 'Sync task failed on server');
           } else {
+            // Update progress and calculate percentage based on backend taskData
+            if (taskData.progress) {
+              setSyncProgress(taskData.progress);
+              
+              const progressStr = taskData.progress;
+              if (progressStr.includes('employees processed')) {
+                const match = progressStr.match(/^(\d+)\s+employees/);
+                if (match) {
+                  const fetched = parseInt(match[1], 10);
+                  const total = taskData.api_total || HR_SOURCE.employees;
+                  const pct = 25 + Math.min(65, Math.round((fetched / total) * 65));
+                  setSyncPercent(pct);
+                }
+              } else if (progressStr.includes('Mapped')) {
+                setSyncPercent(95);
+              } else if (progressStr.includes('Synced')) {
+                setSyncPercent(25);
+              } else if (progressStr.includes('offline mapping')) {
+                setSyncPercent(90);
+              }
+            } else {
+              setSyncPercent(10);
+            }
             // Still running or starting, schedule next poll
             setTimeout(runPoll, pollInterval);
           }
@@ -232,6 +243,42 @@ const HRSyncDashboard = () => {
           </Button>
         </Space>
       </PageHeader>
+
+      {/* Progress & Error indicators */}
+      {syncing && (
+        <Card style={{ marginBottom: 16 }}>
+          <Space direction="vertical" style={{ width: '100%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <Text strong>Syncing HR Database...</Text>
+              <Text type="secondary">{syncPercent}%</Text>
+            </div>
+            <Progress percent={syncPercent} status="active" strokeColor={{ '0%': '#108ee9', '100%': '#87d068' }} />
+            <Text type="secondary" style={{ display: 'block', marginTop: 4 }}>
+              <SyncOutlined spin style={{ marginRight: 8 }} />
+              {syncProgress || 'Initializing sync...'}
+            </Text>
+          </Space>
+        </Card>
+      )}
+
+      {syncError && (
+        <Alert
+          type="error"
+          message="Sync Failure"
+          description={
+            <div>
+              <p>{syncError}</p>
+              <p style={{ fontSize: '12px', color: '#8c8c8c', marginTop: '4px' }}>
+                Note: This failure usually occurs when the HRMS server rate-limits or blocks rapid subsequent requests. Please wait a few minutes before trying again.
+              </p>
+            </div>
+          }
+          showIcon
+          style={{ marginBottom: 16 }}
+          closable
+          onClose={() => setSyncError(null)}
+        />
+      )}
 
       {/* Quick Actions */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
@@ -394,28 +441,6 @@ const HRSyncDashboard = () => {
         </div>
       </Card>
 
-      {/* Sync History */}
-      {syncHistory.length > 0 && (
-        <>
-          <Divider />
-          <Card title="Sync History" size="small">
-            <Table
-              dataSource={syncHistory}
-              rowKey={(r) => r.id || r.timestamp || Math.random()}
-              columns={[
-                { title: 'Timestamp', dataIndex: 'created_at', key: 'ts', width: 180, render: (v) => v ? new Date(v).toLocaleString() : '-' },
-                { title: 'Fetched', dataIndex: 'fetched', key: 'fetched', width: 100 },
-                { title: 'Created', dataIndex: 'created', key: 'created', width: 100 },
-                { title: 'Updated', dataIndex: 'updated', key: 'updated', width: 100 },
-                { title: 'Linked Users', dataIndex: 'linked_users', key: 'linked_users', width: 120 },
-                { title: 'Status', dataIndex: 'status', key: 'status', width: 100, render: (v) => <Tag color={v === 'success' ? 'green' : 'red'}>{v || 'N/A'}</Tag> },
-              ]}
-              pagination={{ pageSize: 5, showTotal: (t) => `${t} sync records` }}
-              size="small"
-            />
-          </Card>
-        </>
-      )}
     </div>
   );
 };

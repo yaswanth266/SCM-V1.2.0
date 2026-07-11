@@ -1721,15 +1721,58 @@ def _external_next_url(payload, current_url: str) -> str | None:
     return urljoin(current_url, str(next_url))
 
 
-async def _robust_get(client: httpx.AsyncClient, url: str, headers: dict, max_retries: int = 5, initial_backoff: float = 0.5):
+async def _robust_get(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict,
+    label: str = "request",
+    page: int = 1,
+    sync_logs: dict | None = None,
+    max_retries: int = 5,
+    initial_backoff: float = 0.5
+):
+    import time
     backoff = initial_backoff
     for attempt in range(max_retries):
+        t0 = time.time()
+        status_code = None
         try:
             response = await client.get(url, headers=headers)
+            t1 = time.time()
+            status_code = response.status_code
             response.raise_for_status()
+            
+            if sync_logs is not None:
+                try:
+                    payload = response.json()
+                    records = len(_external_rows(payload))
+                except Exception:
+                    records = 0
+                sync_logs["page_request_log"].append({
+                    "label": label,
+                    "page": page,
+                    "url": url,
+                    "status_code": status_code,
+                    "retries": attempt,
+                    "response_time": t1 - t0,
+                    "records": records
+                })
+                
             return response
         except Exception as exc:
+            duration = time.time() - t0
             if attempt == max_retries - 1:
+                if sync_logs is not None:
+                    sync_logs["page_request_log"].append({
+                        "label": label,
+                        "page": page,
+                        "url": url,
+                        "status_code": status_code or "ERROR",
+                        "retries": attempt,
+                        "response_time": duration,
+                        "records": 0,
+                        "error": str(exc)
+                    })
                 raise exc
             print(f"HTTP request to {url} failed: {exc}. Retrying in {backoff}s... (Attempt {attempt+1}/{max_retries})")
             await asyncio.sleep(backoff)
@@ -1769,10 +1812,7 @@ async def _fetch_external_employee_rows(max_pages: int) -> tuple[list[dict], int
                     next_url = _external_next_url(payload, str(response.url))
                     await asyncio.sleep(0.05)
                 except Exception as exc:
-                    if rows:
-                        print(f"Transient error fetching employee API on page {pages_fetched + 1}: {exc}. Returning successfully fetched {len(rows)} records.")
-                        break
-                    raise
+                    raise RuntimeError(f"Failed to fetch employee API on page {pages_fetched + 1}: {exc}") from exc
     except httpx.HTTPStatusError as exc:
         detail = exc.response.text[:500] if exc.response is not None else str(exc)
         raise HTTPException(status_code=502, detail=f"Employee API returned an error: {detail}")
@@ -1954,6 +1994,71 @@ async def _role_id_from_external(db: AsyncSession, row: dict) -> int | None:
     return None
 
 
+def normalize_position_key(text_val: str) -> str:
+    if not text_val:
+        return ""
+    import re
+    # Convert to uppercase
+    val = text_val.upper()
+    # Replace symbols
+    val = val.replace("@", "-").replace("_", "-").replace(" ", "-")
+    # Split into words
+    words = [w.strip() for w in val.split("-") if w.strip()]
+    
+    # Normalize roles
+    has_district = "DISTRICT" in words
+    has_manager = "MANAGER" in words
+    has_regional = "REGIONAL" in words
+    has_office = "OFFICE" in words
+    has_executive = "EXECUTIVE" in words
+    has_lab = "LAB" in words
+    has_technician = "TECHNICIAN" in words
+    has_store = "STORE" in words
+    has_keeper = "KEEPER" in words
+    has_state = "STATE" in words
+    has_project = "PROJECT" in words
+    has_head = "HEAD" in words
+    
+    # Reconstruct words list with normalized roles
+    new_words = []
+    # Check roles first
+    if (has_district and has_manager) or "DM" in words:
+        new_words.append("DM")
+    elif (has_regional and has_manager) or "RM" in words:
+        new_words.append("RM")
+    elif (has_office and has_executive) or "OE" in words:
+        new_words.append("OE")
+    elif (has_lab and has_technician) or "LT" in words:
+        new_words.append("LT")
+    elif (has_store and has_keeper) or "STOREKEEPER" in words or "SK" in words:
+        new_words.append("SK")
+    elif (has_state and has_project and has_head) or "SPH" in words:
+        new_words.append("SPH")
+    
+    # Filter words and add location parts
+    filler = {
+        "AP", "104", "MMU", "MMUS", "SERVICES", "MANAGER", "DISTRICT", "REGIONAL",
+        "OFFICE", "EXECUTIVE", "LAB", "TECHNICIAN", "STORE", "KEEPER", "STOREKEEPER",
+        "STATE", "PROJECT", "HEAD", "DM", "RM", "OE", "LT", "SK", "SPH", "CO", "COO"
+    }
+    
+    # Spell correction map
+    spellings = {
+        "VIJAYWADA": "VIJAYAWADA",
+        "CHITTO0R": "CHITTOOR",
+        "TIRUPATHI": "TIRUPATI",
+        "KANDUKUR": "KANDUKURU",
+        "MARKAPUR": "MARKAPURAM",
+    }
+    
+    for w in words:
+        if w not in filler:
+            corrected = spellings.get(w, w)
+            new_words.append(corrected)
+            
+    return "-".join(new_words)
+
+
 async def _resolve_parent_position_id(db: AsyncSession, row: dict, stats: dict[str, int]) -> int | None:
     pos_data = row.get("position")
     if not pos_data:
@@ -1974,72 +2079,43 @@ async def _resolve_parent_position_id(db: AsyncSession, row: dict, stats: dict[s
     if not parent_code:
         return None
         
-    # Find or create parent position shell
+    # 1. Try exact code matching
     parent_pos = (await db.execute(select(Position).where(func.lower(Position.code) == parent_code.lower()))).scalar_one_or_none()
     
-    parent_role_id = None
-    role_name = parent_item.get("role_name")
-    role_code = parent_item.get("role_code")
-    if role_code:
-        role = (await db.execute(select(Role).where(func.lower(Role.code) == role_code.lower(), Role.is_active == True))).scalar_one_or_none()
-        if role:
-            parent_role_id = role.id
-    if not parent_role_id and role_name:
-        role = (await db.execute(select(Role).where(func.lower(Role.name) == role_name.lower(), Role.is_active == True))).scalar_one_or_none()
-        if role:
-            parent_role_id = role.id
-
+    # 2 & 3. Normalized matching (code or name)
     if not parent_pos:
-        parent_pos = Position(
-            code=parent_code,
-            name=parent_name,
-            role_name=role_name,
-            role_id=parent_role_id,
-            level_name=parent_item.get("level_name"),
-            level_rank=parent_item.get("level_rank"),
-            department=parent_item.get("department"),
-            section=parent_item.get("section"),
-        )
-        db.add(parent_pos)
-        await db.flush()
-        stats["positions_created"] += 1
-    else:
-        if not parent_pos.role_id and parent_role_id:
-            parent_pos.role_id = parent_role_id
-        if not parent_pos.level_name:
-            parent_pos.level_name = parent_item.get("level_name")
-        if not parent_pos.level_rank:
-            parent_pos.level_rank = parent_item.get("level_rank")
+        norm_parent_code = normalize_position_key(parent_code) if parent_code else None
+        norm_parent_name = normalize_position_key(parent_name) if parent_name else None
+        
+        # Query all existing positions to perform in-memory key normalization mapping
+        res = await db.execute(select(Position.id, Position.code, Position.name))
+        for pid, pcode, pname in res.all():
+            if norm_parent_code and normalize_position_key(pcode) == norm_parent_code:
+                parent_pos = (await db.execute(select(Position).where(Position.id == pid))).scalar_one_or_none()
+                break
+            if norm_parent_name and normalize_position_key(pname) == norm_parent_name:
+                parent_pos = (await db.execute(select(Position).where(Position.id == pid))).scalar_one_or_none()
+                break
 
-    parent_office_id = await _office_id_from_external(db, parent_item, stats)
-    if parent_office_id:
-        parent_pos.office_id = parent_pos.office_id or parent_office_id
+    # If no parent is found, log a warning and return None (leaving parent_position_id as NULL)
+    if not parent_pos:
+        child_code = _external_text(row, "position.code", "position_code", "positionCode", "code", max_len=100) or "N/A"
+        print(f"""
+WARNING: Parent position not found.
 
-    parent_emp_id = parent_item.get("employee_id")
-    if parent_emp_id:
-        try:
-            parent_emp_id = int(parent_emp_id)
-        except (TypeError, ValueError):
-            parent_emp_id = None
+Child Position:
+{child_code}
 
-    if parent_emp_id:
-        emp_exists = (await db.execute(select(Employee).where(Employee.id == parent_emp_id))).scalar_one_or_none()
-        if not emp_exists:
-            emp_name = parent_item.get("employee_name") or parent_item.get("name") or parent_name
-            emp_code = f"HR-EMP-{parent_emp_id}"
-            new_emp = Employee(
-                id=parent_emp_id,
-                employee_code=emp_code,
-                name=emp_name,
-                status="Active",
-                position_id=parent_pos.id
-            )
-            db.add(new_emp)
-            await db.flush()
-        else:
-            if not emp_exists.position_id:
-                emp_exists.position_id = parent_pos.id
-        parent_pos.employee_id = parent_pos.employee_id or parent_emp_id
+Expected Parent Code:
+{parent_code or 'N/A'}
+
+Expected Parent Name:
+{parent_name or 'N/A'}
+
+No synthetic records were created.
+parent_position_id left NULL.
+""")
+        return None
 
     return parent_pos.id
 
@@ -2302,13 +2378,18 @@ async def _execute_sync(
     positions_total = 0
     mapped_positions = 0
 
+    sync_logs = {
+        "page_request_log": [],
+        "insertion_failures": []
+    }
+
     next_url = str(url)
 
     offline_fallback = False
     try:
         async with httpx.AsyncClient(timeout=settings.HR_API_TIMEOUT, follow_redirects=True) as client:
             # First, sync all positions
-            positions_total = await _sync_all_positions(db, org_stats, headers, client, organization_id)
+            positions_total = await _sync_all_positions(db, org_stats, headers, client, organization_id, sync_logs)
             if task is not None:
                 task["progress"] = f"Synced {positions_total} positions"
 
@@ -2319,14 +2400,12 @@ async def _execute_sync(
                 seen_urls.add(next_url)
 
                 try:
-                    response = await _robust_get(client, next_url, headers)
+                    response = await _robust_get(client, next_url, headers, "employees", pages_fetched + 1, sync_logs)
                     payload = response.json()
                     pages_fetched += 1
                 except Exception as exc:
                     print(f"Error fetching page {pages_fetched + 1}: {exc}")
-                    if fetched_total > 0:
-                        break
-                    raise
+                    raise RuntimeError(f"Failed to fetch employee page {pages_fetched + 1}: {exc}") from exc
 
                 if isinstance(payload, dict) and isinstance(payload.get("count"), int):
                     api_total = int(payload["count"])
@@ -2349,7 +2428,14 @@ async def _execute_sync(
                                 updated += 1
                     except Exception as exc:
                         skipped += 1
-                        print(f"Transient error syncing row: {exc}")
+                        err_msg = str(exc)
+                        print(f"Transient error syncing row: {err_msg}")
+                        emp_code = _external_text(row, "employee.employee_code", "employee_code", "employee.code", "code", max_len=100) or "UNKNOWN"
+                        sync_logs["insertion_failures"].append({
+                            "type": "employee",
+                            "code": emp_code,
+                            "error": err_msg
+                        })
 
                 await db.commit()
 
@@ -2360,7 +2446,7 @@ async def _execute_sync(
                     task["progress"] = f"{fetched_total} employees processed, {created} created, {updated} updated"
 
             # Third, map positions to employees
-            mapped_positions = await _sync_position_employee_mappings(db, headers, client)
+            mapped_positions = await _sync_position_employee_mappings(db, headers, client, sync_logs)
             if task is not None:
                 task["progress"] = f"Mapped {mapped_positions} positions to employees"
 
@@ -2407,11 +2493,13 @@ async def _execute_sync(
         "role_links_applied": role_links_applied,
         "mapped_positions": mapped_positions,
         "offline": offline_fallback,
+        "page_request_log": sync_logs["page_request_log"],
+        "insertion_failures": sync_logs["insertion_failures"]
     }
 
 
 async def _sync_all_positions(
-    db: AsyncSession, stats: dict[str, int], headers: dict[str, str], client: httpx.AsyncClient, organization_id: int | None
+    db: AsyncSession, stats: dict[str, int], headers: dict[str, str], client: httpx.AsyncClient, organization_id: int | None, sync_logs: dict
 ) -> int:
     base_url = settings.HR_EMPLOYEE_API_URL
     if "/api/employees" in base_url:
@@ -2432,12 +2520,12 @@ async def _sync_all_positions(
         seen_urls.add(next_url)
 
         try:
-            response = await _robust_get(client, next_url, headers)
+            response = await _robust_get(client, next_url, headers, "positions", pages_fetched + 1, sync_logs)
             payload = response.json()
             pages_fetched += 1
         except Exception as exc:
             print(f"Error fetching position page {pages_fetched + 1}: {exc}")
-            break
+            raise RuntimeError(f"Failed to fetch position page {pages_fetched + 1}: {exc}") from exc
 
         page_rows = _external_rows(payload)
         if not page_rows:
@@ -2452,7 +2540,14 @@ async def _sync_all_positions(
                     pos_row["position"] = {"reporting_to": row.get("reporting_to_details")}
                     await _position_id_from_external(db, pos_row, stats, organization_id)
             except Exception as exc:
-                print(f"Transient error syncing position row: {exc}")
+                err_msg = str(exc)
+                print(f"Transient error syncing position row: {err_msg}")
+                pos_code = _external_text(row, "code", "position_code", "positionCode", max_len=100) or "UNKNOWN"
+                sync_logs["insertion_failures"].append({
+                    "type": "position",
+                    "code": pos_code,
+                    "error": err_msg
+                })
 
         await db.commit()
         next_url = _external_next_url(payload, str(response.url))
@@ -2461,7 +2556,7 @@ async def _sync_all_positions(
     return total_positions_fetched
 
 
-async def _sync_position_employee_mappings(db: AsyncSession, headers: dict[str, str], client: httpx.AsyncClient) -> int:
+async def _sync_position_employee_mappings(db: AsyncSession, headers: dict[str, str], client: httpx.AsyncClient, sync_logs: dict) -> int:
     base_url = settings.HR_EMPLOYEE_API_URL
     if "/api/employees" in base_url:
         pos_url = base_url.replace("/api/employees", "/api/positions")
@@ -2481,12 +2576,12 @@ async def _sync_position_employee_mappings(db: AsyncSession, headers: dict[str, 
         seen_urls.add(next_url)
 
         try:
-            response = await _robust_get(client, next_url, headers)
+            response = await _robust_get(client, next_url, headers, "mappings", pages_fetched + 1, sync_logs)
             payload = response.json()
             pages_fetched += 1
         except Exception as exc:
             print(f"Error fetching position page for mapping {pages_fetched + 1}: {exc}")
-            break
+            raise RuntimeError(f"Failed to fetch mapping page {pages_fetched + 1}: {exc}") from exc
 
         page_rows = _external_rows(payload)
         if not page_rows:
