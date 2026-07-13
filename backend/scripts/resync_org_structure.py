@@ -113,6 +113,10 @@ def normalize_position_key(text_val: str) -> str:
         new_words.append("SK")
     elif (has_state and has_project and has_head) or "SPH" in words:
         new_words.append("SPH")
+    elif "COO" in words or ("CHIEF" in words and "OPERATING" in words and "OFFICER" in words):
+        new_words.append("COO")
+    elif "CO" in words:
+        new_words.append("CO")
     
     # Filter words and add location parts
     filler = {
@@ -833,6 +837,59 @@ parent_position_id left NULL.
         await db.commit()
     except Exception as e:
         print(f"  WARN: Error during post-sync warehousing/user linkage: {e}")
+
+    # Run post-sync database integrity validations
+    print("Running post-sync database integrity validations...")
+    dup_emp = (await db.execute(text("""
+        SELECT employee_code, COUNT(*) 
+        FROM employees 
+        GROUP BY employee_code 
+        HAVING COUNT(*) > 1
+    """))).all()
+    if dup_emp:
+        raise ValueError(f"Integrity Violation: Found duplicate employee codes: {dup_emp}")
+        
+    dup_pos = (await db.execute(text("""
+        SELECT code, COUNT(*) 
+        FROM positions 
+        GROUP BY code 
+        HAVING COUNT(*) > 1
+    """))).all()
+    if dup_pos:
+        raise ValueError(f"Integrity Violation: Found duplicate position codes: {dup_pos}")
+        
+    dup_pos_combos = (await db.execute(text("""
+        SELECT employee_id, role_id, office_id, COUNT(*) 
+        FROM positions 
+        WHERE employee_id IS NOT NULL AND role_id IS NOT NULL AND office_id IS NOT NULL
+        GROUP BY employee_id, role_id, office_id 
+        HAVING COUNT(*) > 1
+    """))).all()
+    if dup_pos_combos:
+        raise ValueError(f"Integrity Violation: Found duplicate employee-role-office position assignments: {dup_pos_combos}")
+        
+    orphans = (await db.execute(text("""
+        SELECT p.id, p.code, p.parent_position_id 
+        FROM positions p 
+        LEFT JOIN positions parent ON p.parent_position_id = parent.id 
+        WHERE p.parent_position_id IS NOT NULL AND parent.id IS NULL
+    """))).all()
+    if orphans:
+        raise ValueError(f"Integrity Violation: Found orphan parent_position_ids: {orphans}")
+
+    # 5. Circular reference detection
+    res_hierarchy = (await db.execute(text("SELECT id, parent_position_id FROM positions"))).all()
+    pos_parents = {pid: parent_id for pid, parent_id in res_hierarchy}
+    for pid in pos_parents:
+        visited = set()
+        curr = pid
+        while curr is not None:
+            if curr in visited:
+                raise ValueError(f"Integrity Violation: Found circular hierarchy reference at position ID {curr} (visited path: {visited})")
+            visited.add(curr)
+            curr = pos_parents.get(curr)
+
+    print("Post-sync database integrity validations passed successfully.")
 
     # Summary and Instrumentation report
     print("=" * 60)

@@ -2103,6 +2103,10 @@ def normalize_position_key(text_val: str) -> str:
         new_words.append("SK")
     elif (has_state and has_project and has_head) or "SPH" in words:
         new_words.append("SPH")
+    elif "COO" in words or ("CHIEF" in words and "OPERATING" in words and "OFFICER" in words):
+        new_words.append("COO")
+    elif "CO" in words:
+        new_words.append("CO")
     
     # Filter words and add location parts
     filler = {
