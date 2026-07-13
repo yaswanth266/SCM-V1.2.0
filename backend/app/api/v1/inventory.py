@@ -3311,6 +3311,17 @@ async def create_item(
     await ensure_feature_schema(db)
     await ensure_item_uom_category_schema(db)
     data = payload.model_dump()
+
+    brand_val = data.get("brand")
+    if brand_val:
+        from app.models.inventory_master import Brand
+        brand_obj = None
+        if str(brand_val).isdigit():
+            brand_obj = (await db.execute(select(Brand).where(Brand.id == int(brand_val)))).scalar_one_or_none()
+        if not brand_obj:
+            brand_obj = (await db.execute(select(Brand).where(func.lower(Brand.code) == str(brand_val).lower()))).scalar_one_or_none()
+        if brand_obj:
+            data["brand"] = brand_obj.code
     kit_components = data.pop("kit_components", None)
     initial_quantity = data.pop("initial_quantity", None)
     initial_warehouse_id = data.pop("initial_warehouse_id", None)
@@ -3485,6 +3496,18 @@ async def update_item(
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
     update_data = payload.model_dump(exclude_unset=True)
+
+    brand_val = update_data.get("brand")
+    if brand_val:
+        from app.models.inventory_master import Brand
+        brand_obj = None
+        if str(brand_val).isdigit():
+            brand_obj = (await db.execute(select(Brand).where(Brand.id == int(brand_val)))).scalar_one_or_none()
+        if not brand_obj:
+            brand_obj = (await db.execute(select(Brand).where(func.lower(Brand.code) == str(brand_val).lower()))).scalar_one_or_none()
+        if brand_obj:
+            update_data["brand"] = brand_obj.code
+
     kit_components_explicit = "kit_components" in payload.model_fields_set
     kit_components = update_data.pop("kit_components", None)
     update_data.pop("category_id", None)

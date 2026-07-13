@@ -272,14 +272,16 @@ async def _fetch_all_paginated(client, headers, base_url, label):
     if total_pages <= 1:
         return all_rows, count
 
-    # Fetch other pages concurrently in batches of 10
-    batch_size = 10
+    # Fetch other pages concurrently in batches of 5 to avoid overloading the server
+    batch_size = 5
     tasks = []
     for page in range(2, total_pages + 1):
         url = f"{base_url}?page_size=200&page={page}"
         tasks.append((page, url))
 
     for i in range(0, len(tasks), batch_size):
+        if i > 0:
+            await asyncio.sleep(0.2)  # Delay between batches to give upstream server breathing room
         batch = tasks[i:i + batch_size]
         print(f"  Fetching {label} pages {batch[0][0]} to {batch[-1][0]} concurrently...")
         futures = [
@@ -289,23 +291,40 @@ async def _fetch_all_paginated(client, headers, base_url, label):
         results = await asyncio.gather(*futures)
         for items in results:
             all_rows.extend(items)
-        await asyncio.sleep(0.05)
 
     return all_rows, count
 
 
 async def fetch_all(client, headers):
-    print("[2/5] Fetching employees from HRMS API...")
-    employee_rows, emp_count = await _fetch_all_paginated(client, headers,
-                                                         settings.HR_EMPLOYEE_API_URL,
-                                                         "employees")
-    print(f"  Total: {len(employee_rows)} employees\n")
+    import os
+    if os.environ.get("HR_SYNC_OFFLINE", "false").lower() == "true":
+        import json
+        print("[2/5] (OFFLINE MOCK) Reading employees from employees_page1.json...")
+        with open("employees_page1.json", "r", encoding="utf-8") as f:
+            emp_data = json.load(f)
+        employee_rows = emp_data.get("results") or []
+        emp_count = len(employee_rows)
+        print(f"  Total: {len(employee_rows)} employees\n")
 
-    print("[3/5] Fetching positions from HRMS API...")
-    position_rows, pos_count = await _fetch_all_paginated(client, headers,
-                                                         _pos_base_url(), "positions")
-    print(f"  Total: {len(position_rows)} positions\n")
-    return employee_rows, emp_count, position_rows, pos_count
+        print("[3/5] (OFFLINE MOCK) Reading positions from positions_page1.json...")
+        with open("positions_page1.json", "r", encoding="utf-8") as f:
+            pos_data = json.load(f)
+        position_rows = pos_data.get("results") or []
+        pos_count = len(position_rows)
+        print(f"  Total: {len(position_rows)} positions\n")
+        return employee_rows, emp_count, position_rows, pos_count
+    else:
+        print("[2/5] Fetching employees from HRMS API...")
+        employee_rows, emp_count = await _fetch_all_paginated(client, headers,
+                                                             settings.HR_EMPLOYEE_API_URL,
+                                                             "employees")
+        print(f"  Total: {len(employee_rows)} employees\n")
+
+        print("[3/5] Fetching positions from HRMS API...")
+        position_rows, pos_count = await _fetch_all_paginated(client, headers,
+                                                             _pos_base_url(), "positions")
+        print(f"  Total: {len(position_rows)} positions\n")
+        return employee_rows, emp_count, position_rows, pos_count
 
 
 # ---------------------------------------------------------------------------
@@ -318,40 +337,43 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
     created_parent_employees = set()
 
     # ---- PROJECTS ----
-    project_map = {}
+    proj_res = await db.execute(text("SELECT id, UPPER(code) FROM projects"))
+    project_map = {r[1]: r[0] for r in proj_res.all() if r[1]}
+
+    record_count = 0
     for row in employee_rows:
         proj = row.get("project") or {}
         code = (_text(proj, "code") or "").upper()
         name = _text(proj, "name") or code
         if code and code not in project_map:
-            existing = (await db.execute(
-                text("SELECT id FROM projects WHERE code = :code"),
-                {"code": code}
-            )).scalar_one_or_none()
-            if existing:
-                project_map[code] = existing
-            else:
-                try:
-                    r = await db.execute(
-                        text("""INSERT INTO projects (organization_id, name, code, status, created_at, updated_at)
-                                VALUES (:org_id, :name, :code, 'active', NOW(), NOW())"""),
-                        {"org_id": org_id, "name": name, "code": code}
-                    )
-                    project_map[code] = r.lastrowid
-                    stats["projects"] += 1
-                except Exception as e:
-                    err_msg = str(e)
-                    print(f"  WARN: Could not create project {code}: {err_msg}")
-                    insertion_failures.append({
-                        "type": "project",
-                        "code": code,
-                        "error": err_msg
-                    })
+            try:
+                r = await db.execute(
+                    text("""INSERT INTO projects (organization_id, name, code, status, created_at, updated_at)
+                            VALUES (:org_id, :name, :code, 'active', NOW(), NOW())"""),
+                    {"org_id": org_id, "name": name, "code": code}
+                )
+                project_map[code] = r.lastrowid
+                stats["projects"] += 1
+            except Exception as e:
+                err_msg = str(e)
+                print(f"  WARN: Could not create project {code}: {err_msg}")
+                insertion_failures.append({
+                    "type": "project",
+                    "code": code,
+                    "error": err_msg
+                })
+        
+        record_count += 1
+        if record_count % 100 == 0:
+            await db.commit()
     await db.commit()
     print(f"  Projects: {stats['projects']} created, {len(project_map)} total")
 
     # ---- OFFICES ----
-    office_map = {}
+    office_res = await db.execute(text("SELECT id, LOWER(name) FROM offices"))
+    office_map = {r[1].strip(): r[0] for r in office_res.all() if r[1]}
+
+    record_count = 0
     for row in employee_rows:
         off = row.get("office") or {}
         name = _text(off, "name")
@@ -360,39 +382,37 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
         key = name.lower().strip()
         if key in office_map:
             continue
+        
         geo = off.get("geo_location") or {}
-        existing = (await db.execute(
-            text("SELECT id FROM offices WHERE LOWER(name) = :name LIMIT 1"),
-            {"name": key}
-        )).scalar()
-        if existing:
-            office_map[key] = existing
-        else:
-            try:
-                r = await db.execute(
-                    text("""INSERT INTO offices (name, level, country, state, district, mandal,
-                             cluster, cluster_type, specific_location, address,
-                             created_at, updated_at)
-                            VALUES (:name, :level, :country, :state, :district, :mandal,
-                                    :cluster, :cluster_type, :specific_location, :address,
-                                    NOW(), NOW())"""),
-                    {"name": name, "level": _text(off, "level"),
-                     "country": _text(geo, "country"), "state": _text(geo, "state"),
-                     "district": _text(geo, "district"), "mandal": _text(geo, "mandal"),
-                     "cluster": _text(geo, "cluster"), "cluster_type": _text(geo, "cluster_type"),
-                     "specific_location": _text(geo, "specific_location"),
-                     "address": _text(geo, "address", max_len=2000)}
-                )
-                office_map[key] = r.lastrowid
-                stats["offices"] += 1
-            except Exception as e:
-                err_msg = str(e)
-                print(f"  WARN: Could not create office {name}: {err_msg}")
-                insertion_failures.append({
-                    "type": "office",
-                    "code": name,
-                    "error": err_msg
-                })
+        try:
+            r = await db.execute(
+                text("""INSERT INTO offices (name, level, country, state, district, mandal,
+                         cluster, cluster_type, specific_location, address,
+                         created_at, updated_at)
+                        VALUES (:name, :level, :country, :state, :district, :mandal,
+                                :cluster, :cluster_type, :specific_location, :address,
+                                NOW(), NOW())"""),
+                {"name": name, "level": _text(off, "level"),
+                 "country": _text(geo, "country"), "state": _text(geo, "state"),
+                 "district": _text(geo, "district"), "mandal": _text(geo, "mandal"),
+                 "cluster": _text(geo, "cluster"), "cluster_type": _text(geo, "cluster_type"),
+                 "specific_location": _text(geo, "specific_location"),
+                 "address": _text(geo, "address", max_len=2000)}
+            )
+            office_map[key] = r.lastrowid
+            stats["offices"] += 1
+        except Exception as e:
+            err_msg = str(e)
+            print(f"  WARN: Could not create office {name}: {err_msg}")
+            insertion_failures.append({
+                "type": "office",
+                "code": name,
+                "error": err_msg
+            })
+        
+        record_count += 1
+        if record_count % 100 == 0:
+            await db.commit()
     await db.commit()
     print(f"  Offices: {stats['offices']} created, {len(office_map)} total")
 
@@ -400,6 +420,13 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
     position_map = {}
     parent_relations = []
 
+    # Pre-fetch all roles for in-memory caching
+    roles_res = await db.execute(text("SELECT id, LOWER(code), LOWER(name) FROM roles WHERE is_active = 1"))
+    roles_db = roles_res.all()
+    role_code_to_id = {r[1]: r[0] for r in roles_db if r[1]}
+    role_name_to_id = {r[2]: r[0] for r in roles_db if r[2]}
+
+    record_count = 0
     for row in employee_rows:
         pos = row.get("position") or {}
         code = (_text(pos, "code") or "").upper()
@@ -433,68 +460,58 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
                         "parent_details": rt
                     })
 
-        existing = (await db.execute(
-            text("SELECT id FROM positions WHERE code = :code LIMIT 1"),
-            {"code": code}
-        )).scalar()
+        role_details = pos.get("role_details") or {}
+        role_code = _text(pos, "role_code") or role_details.get("code")
+        role_name = _text(pos, "role_name") or _text(pos, "role") or role_details.get("name")
+        local_role_id = None
+        if role_code:
+            local_role_id = role_code_to_id.get(role_code.lower())
+        if not local_role_id and role_name:
+            local_role_id = role_name_to_id.get(role_name.lower())
 
-        if existing:
-            position_map[code] = existing
-        else:
-            role_details = pos.get("role_details") or {}
-            # Resolve role_id from local roles table
-            role_code = _text(pos, "role_code") or role_details.get("code")
-            role_name = _text(pos, "role_name") or _text(pos, "role") or role_details.get("name")
-            local_role_id = None
-            if role_code:
-                local_role_id = (await db.execute(
-                    text("SELECT id FROM roles WHERE LOWER(code) = :code AND is_active = 1 LIMIT 1"),
-                    {"code": role_code.lower()}
-                )).scalar()
-            if not local_role_id and role_name:
-                local_role_id = (await db.execute(
-                    text("SELECT id FROM roles WHERE LOWER(name) = :name AND is_active = 1 LIMIT 1"),
-                    {"name": role_name.lower()}
-                )).scalar()
-
-            try:
-                r = await db.execute(
-                    text("""INSERT INTO positions
-                        (name, code, role_name, role_id, level_name, level_rank,
-                         department, section, job_name, job_family_name, job_family_id,
-                         role_type_id, status, start_date, project_id, office_id,
-                         created_at, updated_at)
-                        VALUES (:name, :code, :role_name, :role_id, :level_name, :level_rank,
-                                :department, :section, :job_name, :job_family_name, :job_family_id,
-                                :role_type_id, :status, :start_date, :project_id, :office_id,
-                                NOW(), NOW())"""),
-                    {"name": name, "code": code,
-                     "role_name": _text(pos, "role_name") or _text(role_details, "name"),
-                     "role_id": local_role_id,
-                     "level_name": _text(pos, "level_name") or _text(pos, "level"),
-                     "level_rank": _int(pos.get("level_rank")),
-                     "department": _text(pos, "department") or _text(row, "department"),
-                     "section": _text(pos, "section"),
-                     "job_name": _text(pos, "job_name") or _text(role_details, "job_name"),
-                     "job_family_name": _text(pos, "job_family_name"),
-                     "job_family_id": _int(pos.get("job_family_id")),
-                     "role_type_id": _int(pos.get("role_type_id")),
-                     "status": _text(pos, "status") or "active",
-                     "start_date": _date(pos.get("start_date")),
-                     "project_id": project_id, "office_id": office_id}
-                )
-                position_map[code] = r.lastrowid
-                stats["positions"] += 1
-            except Exception as e:
-                err_msg = str(e)
-                print(f"  WARN: Could not create position {code}: {err_msg}")
-                insertion_failures.append({
-                    "type": "position",
-                    "code": code,
-                    "error": err_msg
-                })
+        try:
+            r = await db.execute(
+                text("""INSERT INTO positions
+                    (name, code, role_name, role_id, level_name, level_rank,
+                     department, section, job_name, job_family_name, job_family_id,
+                     role_type_id, status, start_date, project_id, office_id,
+                     created_at, updated_at)
+                    VALUES (:name, :code, :role_name, :role_id, :level_name, :level_rank,
+                            :department, :section, :job_name, :job_family_name, :job_family_id,
+                            :role_type_id, :status, :start_date, :project_id, :office_id,
+                            NOW(), NOW())"""),
+                {"name": name, "code": code,
+                 "role_name": _text(pos, "role_name") or _text(role_details, "name"),
+                 "role_id": local_role_id,
+                 "level_name": _text(pos, "level_name") or _text(pos, "level"),
+                 "level_rank": _int(pos.get("level_rank")),
+                 "department": _text(pos, "department") or _text(row, "department"),
+                 "section": _text(pos, "section"),
+                 "job_name": _text(pos, "job_name") or _text(role_details, "job_name"),
+                 "job_family_name": _text(pos, "job_family_name"),
+                 "job_family_id": _int(pos.get("job_family_id")),
+                 "role_type_id": _int(pos.get("role_type_id")),
+                 "status": _text(pos, "status") or "active",
+                 "start_date": _date(pos.get("start_date")),
+                 "project_id": project_id, "office_id": office_id}
+            )
+            position_map[code] = r.lastrowid
+            stats["positions"] += 1
+        except Exception as e:
+            err_msg = str(e)
+            print(f"  WARN: Could not create position {code}: {err_msg}")
+            insertion_failures.append({
+                "type": "position",
+                "code": code,
+                "error": err_msg
+            })
+        
+        record_count += 1
+        if record_count % 100 == 0:
+            await db.commit()
 
     # Positions from positions API for missed ones
+    record_count = 0
     for pos_row in position_rows:
         code = (_text(pos_row, "code") or "").upper()
         if not code:
@@ -526,20 +543,13 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
             
         name = _text(pos_row, "name") or code
         role_details = pos_row.get("role_details") or {}
-        # Resolve role_id from local roles table
         role_code = _text(pos_row, "role_code") or role_details.get("code")
         role_name = _text(pos_row, "role_name") or _text(pos_row, "role") or role_details.get("name")
         local_role_id = None
         if role_code:
-            local_role_id = (await db.execute(
-                text("SELECT id FROM roles WHERE LOWER(code) = :code AND is_active = 1 LIMIT 1"),
-                {"code": role_code.lower()}
-            )).scalar()
+            local_role_id = role_code_to_id.get(role_code.lower())
         if not local_role_id and role_name:
-            local_role_id = (await db.execute(
-                text("SELECT id FROM roles WHERE LOWER(name) = :name AND is_active = 1 LIMIT 1"),
-                {"name": role_name.lower()}
-            )).scalar()
+            local_role_id = role_name_to_id.get(role_name.lower())
 
         try:
             r = await db.execute(
@@ -574,6 +584,10 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
                 "code": code,
                 "error": err_msg
             })
+        
+        record_count += 1
+        if record_count % 100 == 0:
+            await db.commit()
 
     await db.commit()
 
@@ -585,6 +599,7 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
         if norm_key:
             normalized_to_id[norm_key] = db_id
 
+    record_count = 0
     for rel in parent_relations:
         child_code = rel["child_code"]
         parent_code = rel["parent_code"]
@@ -644,11 +659,19 @@ parent_position_id left NULL.
                     "code": f"{child_code}->{parent_id}",
                     "error": err_msg
                 })
+        
+        record_count += 1
+        if record_count % 100 == 0:
+            await db.commit()
 
     await db.commit()
     print(f"  Positions: {stats['positions']} created, {len(position_map)} total")
 
     # ---- EMPLOYEES (bidirectional mapping) ----
+    emp_res = await db.execute(text("SELECT id, employee_code FROM employees"))
+    employee_cache = {r[1]: r[0] for r in emp_res.all() if r[1]}
+
+    record_count = 0
     for row in employee_rows:
         emp = row.get("employee") or {}
         code = (_text(emp, "employee_code") or _text(row, "employee_code")
@@ -661,10 +684,7 @@ parent_position_id left NULL.
         pos_code = (_text(pos_data, "code") or "").upper()
         position_id = position_map.get(pos_code)
 
-        existing = (await db.execute(
-            text("SELECT id FROM employees WHERE employee_code = :code LIMIT 1"),
-            {"code": code}
-        )).scalar()
+        existing = employee_cache.get(code)
 
         if not existing:
             try:
@@ -692,6 +712,7 @@ parent_position_id left NULL.
                 )
                 emp_id = emp_id or r.lastrowid
                 stats["employees"] += 1
+                employee_cache[code] = emp_id
 
                 if position_id and emp_id:
                     await db.execute(
@@ -729,29 +750,42 @@ parent_position_id left NULL.
                     "code": code,
                     "error": err_msg
                 })
+        
+        record_count += 1
+        if record_count % 100 == 0:
+            await db.commit()
 
     await db.commit()
 
-    # Populate employees.position_id for parent employees who were created with NULL position_id
+    # Deterministically update employees.position_id for all employees based on highest level (lowest level_rank) and code
     try:
         await db.execute(text("""
             UPDATE employees e
             JOIN (
-                SELECT p.employee_id, MIN(p.id) as min_pos_id
-                FROM positions p
-                WHERE p.employee_id IS NOT NULL
-                GROUP BY p.employee_id
+                SELECT p1.employee_id, p1.id as primary_pos_id
+                FROM positions p1
+                JOIN (
+                    SELECT employee_id, MIN(level_rank) as min_rank
+                    FROM positions
+                    WHERE employee_id IS NOT NULL
+                    GROUP BY employee_id
+                ) p2 ON p1.employee_id = p2.employee_id AND p1.level_rank = p2.min_rank
+                WHERE p1.id = (
+                    SELECT p3.id FROM positions p3 
+                    WHERE p3.employee_id = p1.employee_id AND p3.level_rank = p1.level_rank 
+                    ORDER BY p3.code ASC LIMIT 1
+                )
             ) t ON e.id = t.employee_id
-            SET e.position_id = t.min_pos_id
-            WHERE e.position_id IS NULL
+            SET e.position_id = t.primary_pos_id
         """))
         await db.commit()
     except Exception as e:
-        print(f"  WARN: Could not populate employees.position_id: {e}")
+        print(f"  WARN: Could not deterministically populate employees.position_id: {e}")
 
     # Step 5 — Assigned employee from positions API
     print("\n[5/5] Applying assigned_employee from positions API...")
     mapped = 0
+    record_count = 0
     for pos_row in position_rows:
         code = (_text(pos_row, "code") or "").upper()
         if not code:
@@ -773,6 +807,10 @@ parent_position_id left NULL.
             mapped += 1
         except Exception:
             pass
+        
+        record_count += 1
+        if record_count % 100 == 0:
+            await db.commit()
     await db.commit()
     print(f"  Mapped {mapped} positions via assigned_employee.\n")
 
