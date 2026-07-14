@@ -1887,14 +1887,28 @@ async def _project_id_from_external(db: AsyncSession, row: dict, stats: dict[str
     project_code = _external_text(row, "project.code", "project_code", "projectCode", max_len=50) or _external_code(project_name, 50)
     if not project_code:
         return None
+
+    project_id = row.get("project_id")
+    if not project_id and isinstance(row.get("project"), dict):
+        project_id = row.get("project").get("id") or row.get("project").get("project_id")
+    try:
+        project_id = int(project_id) if project_id is not None else None
+    except (TypeError, ValueError):
+        project_id = None
     
     project = None
     if cache is not None:
-        project = cache["projects_by_code"].get(project_code.lower())
+        if project_id and "projects_by_id" in cache:
+            project = cache["projects_by_id"].get(project_id)
+        if not project:
+            project = cache["projects_by_code"].get(project_code.lower())
         if not project and project_name:
             project = cache["projects_by_name"].get(project_name.lower())
     else:
-        project = (await db.execute(select(Project).where(func.lower(Project.code) == project_code.lower()))).scalar_one_or_none()
+        if project_id:
+            project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+        if not project:
+            project = (await db.execute(select(Project).where(func.lower(Project.code) == project_code.lower()))).scalar_one_or_none()
         if not project and project_name:
             project = (await db.execute(select(Project).where(func.lower(Project.name) == project_name.lower()))).scalar_one_or_none()
 
@@ -1909,11 +1923,17 @@ async def _project_id_from_external(db: AsyncSession, row: dict, stats: dict[str
         if not organization_id:
             raise HTTPException(status_code=422, detail="No organization exists for imported HR projects")
         project = Project(organization_id=organization_id, code=project_code, name=project_name or project_code, status="active")
+        if project_id is not None:
+            project.id = project_id
         db.add(project)
         await db.flush()
         stats["projects_created"] += 1
         
         if cache is not None:
+            if "projects_by_id" not in cache:
+                cache["projects_by_id"] = {}
+            if project.id:
+                cache["projects_by_id"][project.id] = project
             cache["projects_by_code"][project_code.lower()] = project
             if project_name:
                 cache["projects_by_name"][project_name.lower()] = project
@@ -2634,6 +2654,7 @@ async def _execute_sync(
             "norm_code_to_id": {normalize_position_key(p.code): p.id for p in positions_db if p.code},
             "norm_name_to_id": {normalize_position_key(p.name): p.id for p in positions_db if p.name},
             
+            "projects_by_id": {p.id: p for p in projects_db},
             "projects_by_code": {p.code.lower(): p for p in projects_db if p.code},
             "projects_by_name": {p.name.lower(): p for p in projects_db if p.name},
             
@@ -2750,9 +2771,138 @@ async def _execute_sync(
         await sync_all_offices_to_warehouses(db, organization_id=organization_id or 1)
         await sync_all_position_employees(db)
         
+        # Automatic Orphan Repair
+        print("Running automatic orphan repairs...")
+        await db.execute(text("""
+            UPDATE warehouses 
+            SET office_id = NULL 
+            WHERE office_id IS NOT NULL 
+              AND office_id NOT IN (SELECT id FROM offices)
+        """))
+        await db.execute(text("""
+            UPDATE users 
+            SET employee_id = NULL 
+            WHERE employee_id IS NOT NULL 
+              AND employee_id NOT IN (SELECT id FROM employees)
+        """))
+        await db.execute(text("""
+            UPDATE approval_workflows 
+            SET project_id = NULL 
+            WHERE project_id IS NOT NULL 
+              AND project_id NOT IN (SELECT id FROM projects)
+        """))
+        
         await db.commit()
+
+        # Run post-sync database integrity validations
+        print("Running post-sync database integrity validations...")
+        dup_emp = (await db.execute(text("""
+            SELECT employee_code, COUNT(*) 
+            FROM employees 
+            GROUP BY employee_code 
+            HAVING COUNT(*) > 1
+        """))).all()
+        if dup_emp:
+            raise ValueError(f"Integrity Violation: Found duplicate employee codes: {dup_emp}")
+            
+        dup_pos = (await db.execute(text("""
+            SELECT code, COUNT(*) 
+            FROM positions 
+            GROUP BY code 
+            HAVING COUNT(*) > 1
+        """))).all()
+        if dup_pos:
+            raise ValueError(f"Integrity Violation: Found duplicate position codes: {dup_pos}")
+
+        dup_off = (await db.execute(text("""
+            SELECT name, COUNT(*) 
+            FROM offices 
+            GROUP BY name 
+            HAVING COUNT(*) > 1
+        """))).all()
+        if dup_off:
+            raise ValueError(f"Integrity Violation: Found duplicate office names: {dup_off}")
+
+        dup_proj = (await db.execute(text("""
+            SELECT code, COUNT(*) 
+            FROM projects 
+            GROUP BY code 
+            HAVING COUNT(*) > 1
+        """))).all()
+        if dup_proj:
+            raise ValueError(f"Integrity Violation: Found duplicate project codes: {dup_proj}")
+            
+        dup_pos_combos = (await db.execute(text("""
+            SELECT employee_id, role_id, office_id, COUNT(*) 
+            FROM positions 
+            WHERE employee_id IS NOT NULL AND role_id IS NOT NULL AND office_id IS NOT NULL
+            GROUP BY employee_id, role_id, office_id 
+            HAVING COUNT(*) > 1
+        """))).all()
+        if dup_pos_combos:
+            raise ValueError(f"Integrity Violation: Found duplicate employee-role-office position assignments: {dup_pos_combos}")
+            
+        orphans = (await db.execute(text("""
+            SELECT p.id, p.code, p.parent_position_id 
+            FROM positions p 
+            LEFT JOIN positions parent ON p.parent_position_id = parent.id 
+            WHERE p.parent_position_id IS NOT NULL AND parent.id IS NULL
+        """))).all()
+        if orphans:
+            raise ValueError(f"Integrity Violation: Found orphan parent_position_ids: {orphans}")
+
+        orphan_wh = (await db.execute(text("""
+            SELECT id FROM warehouses 
+            WHERE office_id IS NOT NULL AND office_id NOT IN (SELECT id FROM offices)
+        """))).all()
+        if orphan_wh:
+            raise ValueError(f"Integrity Violation: Found orphan office references in warehouses: {orphan_wh}")
+
+        orphan_usr = (await db.execute(text("""
+            SELECT id FROM users 
+            WHERE employee_id IS NOT NULL AND employee_id NOT IN (SELECT id FROM employees)
+        """))).all()
+        if orphan_usr:
+            raise ValueError(f"Integrity Violation: Found orphan employee references in users: {orphan_usr}")
+
+        # FK Integrity Validation for Master Entities
+        invalid_emp_pos = (await db.execute(text("""
+            SELECT id FROM employees 
+            WHERE position_id IS NOT NULL AND position_id NOT IN (SELECT id FROM positions)
+        """))).all()
+        if invalid_emp_pos:
+            raise ValueError(f"Integrity Violation: Employees referencing non-existent positions: {invalid_emp_pos}")
+
+        invalid_pos_off = (await db.execute(text("""
+            SELECT id FROM positions 
+            WHERE office_id IS NOT NULL AND office_id NOT IN (SELECT id FROM offices)
+        """))).all()
+        if invalid_pos_off:
+            raise ValueError(f"Integrity Violation: Positions referencing non-existent offices: {invalid_pos_off}")
+
+        invalid_pos_proj = (await db.execute(text("""
+            SELECT id FROM positions 
+            WHERE project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM projects)
+        """))).all()
+        if invalid_pos_proj:
+            raise ValueError(f"Integrity Violation: Positions referencing non-existent projects: {invalid_pos_proj}")
+
+        # Circular reference detection
+        res_hierarchy = (await db.execute(text("SELECT id, parent_position_id FROM positions"))).all()
+        pos_parents = {pid: parent_id for pid, parent_id in res_hierarchy}
+        for pid in pos_parents:
+            visited = set()
+            curr = pid
+            while curr is not None:
+                if curr in visited:
+                    raise ValueError(f"Integrity Violation: Found circular hierarchy reference at position ID {curr} (visited path: {visited})")
+                visited.add(curr)
+                curr = pos_parents.get(curr)
+
+        print("Post-sync database integrity validations passed successfully.")
     except Exception as exc:
         print(f"Error post-processing sync: {exc}")
+        raise exc
 
     return {
         "message": "Employee API sync completed (Offline Fallback)" if offline_fallback else "Employee API sync completed",

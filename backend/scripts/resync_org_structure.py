@@ -351,12 +351,13 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
         name = _text(proj, "name") or code
         if code and code not in project_map:
             try:
+                proj_id = _int(proj.get("id")) or _int(row.get("project_id")) or _int(proj.get("project_id"))
                 r = await db.execute(
-                    text("""INSERT INTO projects (organization_id, name, code, status, created_at, updated_at)
-                            VALUES (:org_id, :name, :code, 'active', NOW(), NOW())"""),
-                    {"org_id": org_id, "name": name, "code": code}
+                    text("""INSERT INTO projects (id, organization_id, name, code, status, created_at, updated_at)
+                            VALUES (:id, :org_id, :name, :code, 'active', NOW(), NOW())"""),
+                    {"id": proj_id, "org_id": org_id, "name": name, "code": code}
                 )
-                project_map[code] = r.lastrowid
+                project_map[code] = proj_id or r.lastrowid
                 stats["projects"] += 1
             except Exception as e:
                 err_msg = str(e)
@@ -389,21 +390,22 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
         
         geo = off.get("geo_location") or {}
         try:
+            office_id = _int(off.get("id")) or _int(row.get("office_id")) or _int(off.get("office_id"))
             r = await db.execute(
-                text("""INSERT INTO offices (name, level, country, state, district, mandal,
+                text("""INSERT INTO offices (id, name, level, country, state, district, mandal,
                          cluster, cluster_type, specific_location, address,
                          created_at, updated_at)
-                        VALUES (:name, :level, :country, :state, :district, :mandal,
+                        VALUES (:id, :name, :level, :country, :state, :district, :mandal,
                                 :cluster, :cluster_type, :specific_location, :address,
                                 NOW(), NOW())"""),
-                {"name": name, "level": _text(off, "level"),
+                {"id": office_id, "name": name, "level": _text(off, "level"),
                  "country": _text(geo, "country"), "state": _text(geo, "state"),
                  "district": _text(geo, "district"), "mandal": _text(geo, "mandal"),
                  "cluster": _text(geo, "cluster"), "cluster_type": _text(geo, "cluster_type"),
                  "specific_location": _text(geo, "specific_location"),
                  "address": _text(geo, "address", max_len=2000)}
             )
-            office_map[key] = r.lastrowid
+            office_map[key] = office_id or r.lastrowid
             stats["offices"] += 1
         except Exception as e:
             err_msg = str(e)
@@ -474,17 +476,18 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
             local_role_id = role_name_to_id.get(role_name.lower())
 
         try:
+            pos_id = _int(pos.get("id")) or _int(row.get("position_id")) or _int(pos.get("position_id"))
             r = await db.execute(
                 text("""INSERT INTO positions
-                    (name, code, role_name, role_id, level_name, level_rank,
+                    (id, name, code, role_name, role_id, level_name, level_rank,
                      department, section, job_name, job_family_name, job_family_id,
                      role_type_id, status, start_date, project_id, office_id,
                      created_at, updated_at)
-                    VALUES (:name, :code, :role_name, :role_id, :level_name, :level_rank,
+                    VALUES (:id, :name, :code, :role_name, :role_id, :level_name, :level_rank,
                             :department, :section, :job_name, :job_family_name, :job_family_id,
                             :role_type_id, :status, :start_date, :project_id, :office_id,
                             NOW(), NOW())"""),
-                {"name": name, "code": code,
+                {"id": pos_id, "name": name, "code": code,
                  "role_name": _text(pos, "role_name") or _text(role_details, "name"),
                  "role_id": local_role_id,
                  "level_name": _text(pos, "level_name") or _text(pos, "level"),
@@ -499,7 +502,7 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
                  "start_date": _date(pos.get("start_date")),
                  "project_id": project_id, "office_id": office_id}
             )
-            position_map[code] = r.lastrowid
+            position_map[code] = pos_id or r.lastrowid
             stats["positions"] += 1
         except Exception as e:
             err_msg = str(e)
@@ -556,15 +559,16 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
             local_role_id = role_name_to_id.get(role_name.lower())
 
         try:
+            pos_id = _int(pos_row.get("id")) or _int(pos_row.get("position_id"))
             r = await db.execute(
                 text("""INSERT INTO positions
-                    (name, code, role_name, role_id, level_name, level_rank,
+                    (id, name, code, role_name, role_id, level_name, level_rank,
                      department, section, job_name, job_family_name, job_family_id,
                      role_type_id, status, start_date, created_at, updated_at)
-                    VALUES (:name, :code, :role_name, :role_id, :level_name, :level_rank,
+                    VALUES (:id, :name, :code, :role_name, :role_id, :level_name, :level_rank,
                             :department, :section, :job_name, :job_family_name, :job_family_id,
                             :role_type_id, :status, :start_date, NOW(), NOW())"""),
-                {"name": name, "code": code,
+                {"id": pos_id, "name": name, "code": code,
                  "role_name": _text(pos_row, "role_name") or _text(role_details, "name"),
                  "role_id": local_role_id,
                  "level_name": _text(pos_row, "level_name") or _text(pos_row, "level"),
@@ -578,7 +582,7 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
                  "status": _text(pos_row, "status") or "active",
                  "start_date": _date(pos_row.get("start_date"))}
             )
-            position_map[code] = r.lastrowid
+            position_map[code] = pos_id or r.lastrowid
             stats["positions"] += 1
         except Exception as e:
             err_msg = str(e)
@@ -834,6 +838,26 @@ parent_position_id left NULL.
         print("Applying position roles to users...")
         applied_roles = await _apply_position_roles_to_linked_users(db)
         print(f"  Applied roles to {applied_roles} users.")
+        # Automatic Orphan Repair
+        print("Running automatic orphan repairs...")
+        await db.execute(text("""
+            UPDATE warehouses 
+            SET office_id = NULL 
+            WHERE office_id IS NOT NULL 
+              AND office_id NOT IN (SELECT id FROM offices)
+        """))
+        await db.execute(text("""
+            UPDATE users 
+            SET employee_id = NULL 
+            WHERE employee_id IS NOT NULL 
+              AND employee_id NOT IN (SELECT id FROM employees)
+        """))
+        await db.execute(text("""
+            UPDATE approval_workflows 
+            SET project_id = NULL 
+            WHERE project_id IS NOT NULL 
+              AND project_id NOT IN (SELECT id FROM projects)
+        """))
         await db.commit()
     except Exception as e:
         print(f"  WARN: Error during post-sync warehousing/user linkage: {e}")
@@ -857,6 +881,24 @@ parent_position_id left NULL.
     """))).all()
     if dup_pos:
         raise ValueError(f"Integrity Violation: Found duplicate position codes: {dup_pos}")
+
+    dup_off = (await db.execute(text("""
+        SELECT name, COUNT(*) 
+        FROM offices 
+        GROUP BY name 
+        HAVING COUNT(*) > 1
+    """))).all()
+    if dup_off:
+        raise ValueError(f"Integrity Violation: Found duplicate office names: {dup_off}")
+
+    dup_proj = (await db.execute(text("""
+        SELECT code, COUNT(*) 
+        FROM projects 
+        GROUP BY code 
+        HAVING COUNT(*) > 1
+    """))).all()
+    if dup_proj:
+        raise ValueError(f"Integrity Violation: Found duplicate project codes: {dup_proj}")
         
     dup_pos_combos = (await db.execute(text("""
         SELECT employee_id, role_id, office_id, COUNT(*) 
@@ -876,6 +918,42 @@ parent_position_id left NULL.
     """))).all()
     if orphans:
         raise ValueError(f"Integrity Violation: Found orphan parent_position_ids: {orphans}")
+
+    orphan_wh = (await db.execute(text("""
+        SELECT id FROM warehouses 
+        WHERE office_id IS NOT NULL AND office_id NOT IN (SELECT id FROM offices)
+    """))).all()
+    if orphan_wh:
+        raise ValueError(f"Integrity Violation: Found orphan office references in warehouses: {orphan_wh}")
+
+    orphan_usr = (await db.execute(text("""
+        SELECT id FROM users 
+        WHERE employee_id IS NOT NULL AND employee_id NOT IN (SELECT id FROM employees)
+    """))).all()
+    if orphan_usr:
+        raise ValueError(f"Integrity Violation: Found orphan employee references in users: {orphan_usr}")
+
+    # FK Integrity Validation for Master Entities
+    invalid_emp_pos = (await db.execute(text("""
+        SELECT id FROM employees 
+        WHERE position_id IS NOT NULL AND position_id NOT IN (SELECT id FROM positions)
+    """))).all()
+    if invalid_emp_pos:
+        raise ValueError(f"Integrity Violation: Employees referencing non-existent positions: {invalid_emp_pos}")
+
+    invalid_pos_off = (await db.execute(text("""
+        SELECT id FROM positions 
+        WHERE office_id IS NOT NULL AND office_id NOT IN (SELECT id FROM offices)
+    """))).all()
+    if invalid_pos_off:
+        raise ValueError(f"Integrity Violation: Positions referencing non-existent offices: {invalid_pos_off}")
+
+    invalid_pos_proj = (await db.execute(text("""
+        SELECT id FROM positions 
+        WHERE project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM projects)
+    """))).all()
+    if invalid_pos_proj:
+        raise ValueError(f"Integrity Violation: Positions referencing non-existent projects: {invalid_pos_proj}")
 
     # 5. Circular reference detection
     res_hierarchy = (await db.execute(text("SELECT id, parent_position_id FROM positions"))).all()
