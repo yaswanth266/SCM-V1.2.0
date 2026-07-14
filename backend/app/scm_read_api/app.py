@@ -247,7 +247,7 @@ async def forward_indent_acknowledged(request: Request, x_scm_signature: Optiona
     import urllib.error
     import json
     
-    target_url = "http://10.2.1.50:8090/api/v1/assets/scm-hooks/indent-acknowledged"
+    target_url = os.getenv("AIMS_WEBHOOK_URL") or "http://10.2.1.50:8090/api/v1/assets/scm-hooks/indent-acknowledged"
     body = await request.body()
     
     headers = {
