@@ -258,7 +258,7 @@ const SerialNumbersModal = ({
               <BarcodeOutlined style={{ color: '#fff', fontSize: 18 }} />
             </div>
             <div>
-              <div style={{ color: '#0f172a', fontWeight: 800, fontSize: 15 }}>Select Serial Numbers (Light Mode)</div>
+              <div style={{ color: '#0f172a', fontWeight: 800, fontSize: 15 }}>Select Serial Numbers</div>
               {itemName && (
                 <div style={{ color: '#64748b', fontSize: 12, fontWeight: 500 }}>
                   {itemName}{itemCode ? ` · ${itemCode}` : ''}
