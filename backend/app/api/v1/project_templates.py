@@ -103,6 +103,9 @@ async def get_project_indent_template(
             "uom_id": item_link.uom_id,
             "item_name": item_link.item.name if item_link.item else None,
             "item_code": item_link.item.item_code if item_link.item else None,
+            "item_type": item_link.item.item_type if item_link.item else None,
+            "has_batch": bool(getattr(item_link.item, "has_batch", False)) if item_link.item else False,
+            "has_serial": bool(getattr(item_link.item, "has_serial", False)) if item_link.item else False,
             "uom_name": item_link.uom.name if item_link.uom else None,
         })
 
@@ -197,6 +200,9 @@ async def upsert_project_indent_template(
             "uom_id": item_link.uom_id,
             "item_name": item_link.item.name if item_link.item else None,
             "item_code": item_link.item.item_code if item_link.item else None,
+            "item_type": item_link.item.item_type if item_link.item else None,
+            "has_batch": bool(getattr(item_link.item, "has_batch", False)) if item_link.item else False,
+            "has_serial": bool(getattr(item_link.item, "has_serial", False)) if item_link.item else False,
             "uom_name": item_link.uom.name if item_link.uom else None,
         })
 

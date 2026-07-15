@@ -1751,6 +1751,9 @@ class ProjectIndentTemplateItemResponse(BaseModel):
     uom_id: Optional[int] = None
     item_name: Optional[str] = None
     item_code: Optional[str] = None
+    item_type: Optional[str] = None
+    has_batch: Optional[bool] = None
+    has_serial: Optional[bool] = None
     uom_name: Optional[str] = None
     model_config = {"from_attributes": True}
 

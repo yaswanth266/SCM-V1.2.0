@@ -94,7 +94,7 @@ async def list_indents(
     if template_type:
         query = query.where(Indent.template_type == template_type)
         count_query = count_query.where(Indent.template_type == template_type)
-    else:
+    elif not available_for_issue and not pending_acknowledgement:
         query = query.where(Indent.template_type.is_(None))
         count_query = count_query.where(Indent.template_type.is_(None))
 
