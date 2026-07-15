@@ -159,7 +159,7 @@ const IndentForm = () => {
         params: { is_active: true, search, limit: 100 },
       });
       const data = res.data || [];
-      
+
       const currentVal = form.getFieldValue('vehicle_code');
       if (currentVal) {
         setVehicles((prev) => {
@@ -561,7 +561,7 @@ const IndentForm = () => {
             <Descriptions.Item label="Source BOM">
               {indent.source_bom_code || indent.source_bom_name
                 ? `${indent.source_bom_code || ''}${indent.source_bom_code && indent.source_bom_name ? ' - ' : ''}${indent.source_bom_name || ''}`
-                : '-'}
+                : 'No BOM'}
             </Descriptions.Item>
             <Descriptions.Item label="Vehicle Code">{indent.vehicle_code || '-'}</Descriptions.Item>
             <Descriptions.Item label="Vehicle Number">{indent.vehicle_number || '-'}</Descriptions.Item>
@@ -570,11 +570,11 @@ const IndentForm = () => {
             <Descriptions.Item label="Created By">{indent.created_by_name || indent.requested_by_name || indent.raised_by_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="Raising Position">
               {indent.position_name ? (
-                <span style={{ 
-                  backgroundColor: '#e6f7ff', 
-                  color: '#0050b3', 
-                  border: '1px solid #91d5ff', 
-                  padding: '2px 8px', 
+                <span style={{
+                  backgroundColor: '#e6f7ff',
+                  color: '#0050b3',
+                  border: '1px solid #91d5ff',
+                  padding: '2px 8px',
                   borderRadius: '4px',
                   fontWeight: '600',
                   fontSize: '12px'
@@ -653,10 +653,10 @@ const IndentForm = () => {
                           {formatDate(h.timestamp)} {h.level ? `(Level ${h.level})` : ''}
                         </div>
                         {h.remarks && (
-                          <div style={{ 
-                            marginTop: 4, 
-                            padding: '6px 10px', 
-                            backgroundColor: '#f5f5f5', 
+                          <div style={{
+                            marginTop: 4,
+                            padding: '6px 10px',
+                            backgroundColor: '#f5f5f5',
                             borderLeft: `3px solid ${h.action === 'rejected' ? '#ff4d4f' : '#1890ff'}`,
                             borderRadius: '0 4px 4px 0',
                             fontSize: '13px'
@@ -741,12 +741,12 @@ const IndentForm = () => {
                 prev.map((it) =>
                   it.key === record.key
                     ? {
-                        ...it,
-                        item_id: itemId,
-                        item_name: item ? (item.item_name || item.name || '') : '',
-                        uom_id: item ? (item.primary_uom_id || null) : null,
-                        uom: item ? (item.primary_uom?.name || item.primary_uom_name || '') : '',
-                      }
+                      ...it,
+                      item_id: itemId,
+                      item_name: item ? (item.item_name || item.name || '') : '',
+                      uom_id: item ? (item.primary_uom_id || null) : null,
+                      uom: item ? (item.primary_uom?.name || item.primary_uom_name || '') : '',
+                    }
                     : it
                 )
               );
@@ -855,9 +855,9 @@ const IndentForm = () => {
                   }
                 ]}
               >
-                <DatePicker 
-                  style={{ width: '100%' }} 
-                  format={DATE_FORMAT} 
+                <DatePicker
+                  style={{ width: '100%' }}
+                  format={DATE_FORMAT}
                   disabledDate={(current) => current && current.isBefore(dayjs(), 'day')}
                 />
               </Form.Item>

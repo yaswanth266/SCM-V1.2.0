@@ -1040,7 +1040,9 @@ async def main():
             sys.exit(1)
 
         async with AsyncSessionLocal() as db:
-            await sync_all(db, employee_rows, position_rows, org_id=1, emp_expected=emp_count, pos_expected=pos_count)
+            org_res = await db.execute(text("SELECT id FROM organizations LIMIT 1"))
+            org_id = org_res.scalar() or 1
+            await sync_all(db, employee_rows, position_rows, org_id=org_id, emp_expected=emp_count, pos_expected=pos_count)
 
     print("\nDone!")
 
