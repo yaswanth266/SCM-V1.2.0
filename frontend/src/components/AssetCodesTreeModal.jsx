@@ -510,9 +510,9 @@ const AssetCodesTreeModal = ({
   };
 
   const getTitle = () => {
-    if (isAsset) return 'Select Asset Codes (Light Mode)';
-    if (isConsumable) return 'Select Consumable Codes (Light Mode)';
-    return 'Select Serial Numbers (Light Mode)';
+    if (isAsset) return 'Select Asset Codes';
+    if (isConsumable) return 'Select Consumable Codes';
+    return 'Select Serial Numbers';
   };
 
   return (
