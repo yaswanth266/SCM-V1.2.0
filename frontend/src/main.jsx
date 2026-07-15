@@ -219,7 +219,7 @@ try {
   ReactDOM.createRoot(document.getElementById('root')).render(
     <ConfigProvider theme={theme}>
       <AntApp>
-        <BrowserRouter>
+        <BrowserRouter basename={IS_UAT ? '/uat' : '/'}>
           <App />
         </BrowserRouter>
       </AntApp>

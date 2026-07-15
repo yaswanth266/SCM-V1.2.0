@@ -7,7 +7,12 @@
  */
 import axios from 'axios';
 
-const BASE = import.meta.env.VITE_API_URL || '/api/v1';
+const IS_UAT = String(import.meta.env.VITE_UAT || '').toLowerCase() === 'true' || 
+               String(import.meta.env.VITE_UAT || '').toLowerCase() === '1' ||
+               String(import.meta.env.VITE_UAT || '').toLowerCase() === 'yes' ||
+               String(import.meta.env.VITE_UAT || '').toLowerCase() === 'on';
+const UAT_PREFIX = IS_UAT ? '/uat' : '';
+const BASE = import.meta.env.VITE_API_URL || `${UAT_PREFIX}/api/v1`;
 
 const vendorApi = axios.create({
   baseURL: BASE,
@@ -32,8 +37,13 @@ vendorApi.interceptors.response.use(
       localStorage.removeItem('vendor_token');
       localStorage.removeItem('vendor_user');
       // Only redirect if we're currently on the /supplier path
-      if (window.location.pathname.startsWith('/supplier')) {
-        window.location.href = '/login';
+      const IS_UAT = String(import.meta.env.VITE_UAT || '').toLowerCase() === 'true' || 
+                     String(import.meta.env.VITE_UAT || '').toLowerCase() === '1' ||
+                     String(import.meta.env.VITE_UAT || '').toLowerCase() === 'yes' ||
+                     String(import.meta.env.VITE_UAT || '').toLowerCase() === 'on';
+      const uatPrefix = IS_UAT ? '/uat' : '';
+      if (window.location.pathname.startsWith(`${uatPrefix}/supplier`)) {
+        window.location.href = `${uatPrefix}/login`;
       }
     }
     return Promise.reject(err);

@@ -2,7 +2,12 @@ import axios from 'axios';
 
 // BUG-FE-116: prefer VITE_API_BASE_URL when provided so deploys to
 // non-default mounts (or remote API hosts) don't have to patch source.
-const API_BASE_URL = (import.meta?.env?.VITE_API_BASE_URL) || '/api/v1';
+const IS_UAT = String(import.meta.env.VITE_UAT || '').toLowerCase() === 'true' || 
+               String(import.meta.env.VITE_UAT || '').toLowerCase() === '1' ||
+               String(import.meta.env.VITE_UAT || '').toLowerCase() === 'yes' ||
+               String(import.meta.env.VITE_UAT || '').toLowerCase() === 'on';
+const UAT_PREFIX = IS_UAT ? '/uat' : '';
+const API_BASE_URL = (import.meta?.env?.VITE_API_BASE_URL) || `${UAT_PREFIX}/api/v1`;
 const API_TIMEOUT_MS = Number(import.meta?.env?.VITE_API_TIMEOUT_MS || 30000);
 
 const api = axios.create({
@@ -208,14 +213,16 @@ api.interceptors.response.use(
         localStorage.removeItem('refreshToken');
         localStorage.removeItem('user');
         localStorage.removeItem('permissions');
-        if (window.location.pathname !== '/login') {
+        const loginPath = `${UAT_PREFIX}/login`;
+
+        if (window.location.pathname !== loginPath) {
           // BUG-FE-119: prefer the pre-imported reference so an unmount race
           // during strict-mode doesn't suppress the warning toast.
           try {
             (_antdMessage || (await import('antd')).message)
               .warning('Session expired, please log in again');
           } catch { /* best-effort */ }
-          window.location.href = '/login';
+          window.location.href = loginPath;
         }
         return Promise.reject(refreshError);
       } finally {
