@@ -90,6 +90,17 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
   const handleItemChange = (val, itemObj, index) => {
     if (itemObj) {
       const currentItems = form.getFieldValue('items') || [];
+      const isDuplicate = currentItems.some((item, idx) => item?.item_id === val && idx !== index);
+      if (isDuplicate) {
+        message.warning('Item already exists in the template. Please update its quantity.');
+        currentItems[index] = {
+          ...currentItems[index],
+          item_id: undefined,
+          uom_id: undefined,
+        };
+        form.setFieldsValue({ items: currentItems });
+        return;
+      }
       currentItems[index] = {
         ...currentItems[index],
         item_id: val,
@@ -109,6 +120,13 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
       const values = await form.validateFields();
       if (!values.items || values.items.length === 0) {
         message.error('At least one item is required in the template');
+        return;
+      }
+
+      const itemIds = values.items.map(item => item.item_id).filter(Boolean);
+      const uniqueItemIds = new Set(itemIds);
+      if (itemIds.length !== uniqueItemIds.size) {
+        message.error('Duplicate items are not allowed in the template');
         return;
       }
 
@@ -195,6 +213,9 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
                               <ItemSelector
                                 placeholder="Search item..."
                                 onChange={(val, itemObj) => handleItemChange(val, itemObj, index)}
+                                extraParams={{
+                                  item_type: templateType === 'consumables' ? 'consumable' : 'asset'
+                                }}
                               />
                             </Form.Item>
                           </Col>

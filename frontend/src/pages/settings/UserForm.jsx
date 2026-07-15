@@ -239,7 +239,7 @@ const UserForm = () => {
                 label="Username"
                 rules={[
                   { required: true, message: 'Username is required' },
-                  { pattern: /^[a-zA-Z0-9_]{3,100}$/, message: 'Only letters, numbers, underscore (3-100 chars)' },
+                  { pattern: /^[a-zA-Z0-9_-]{3,100}$/, message: 'Only letters, numbers, underscore, hyphen (3-100 chars)' },
                 ]}
               >
                 <Input placeholder="Enter username" maxLength={100} />
