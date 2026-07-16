@@ -143,11 +143,7 @@ const Login = () => {
       <section className="bavya-login-brand">
         <div className="grid-overlay" aria-hidden />
         <header className="brand-header">
-          <img src="/bavya-mark.png" alt="" />
-          <div className="wm">
-            <b>BAVYA SCM</b>
-            <span>SUPPLY CHAIN MANAGEMENT</span>
-          </div>
+          <img src="/SCM_640logo1.png" alt="Bavya SCM" />
         </header>
         <div className="brand-hero">
           <h1>
@@ -343,6 +339,29 @@ const Login = () => {
                 for your district.
                 <br />
                 <a href="mailto:it@bhspl.in">Contact IT →</a>
+              </div>
+            </div>
+
+            <div className="help-card download-app-card" style={{ marginTop: '16px', background: 'linear-gradient(135deg, rgba(72, 24, 144, 0.04) 0%, rgba(183, 0, 81, 0.04) 100%)', border: '1px dashed rgba(183, 0, 81, 0.2)' }}>
+              <div className="ic" style={{ color: '#b70051' }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                  strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+                  <line x1="12" y1="18" x2="12.01" y2="18" />
+                </svg>
+              </div>
+              <div className="body">
+                <b>Bavya SCM Mobile App</b>
+                Scan QR codes, receive material dispatches, and track field indents on the go.
+                <br />
+                <a href="/BHSPL_SCM.apk" download="BHSPL_SCM.apk" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginTop: '6px', fontWeight: 'bold', color: '#b70051', textDecoration: 'none' }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="7 10 12 15 17 10" />
+                    <line x1="12" y1="15" x2="12" y2="3" />
+                  </svg>
+                  Download Android APK →
+                </a>
               </div>
             </div>
           </form>

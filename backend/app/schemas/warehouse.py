@@ -411,6 +411,7 @@ class MaterialIssueResponse(BaseModel):
     issue_number: str
     mr_id: Optional[int] = None
     indent_id: Optional[int] = None
+    indent_number: Optional[str] = None
     warehouse_id: int
     warehouse_name: Optional[str] = None
     destination_warehouse_id: Optional[int] = None

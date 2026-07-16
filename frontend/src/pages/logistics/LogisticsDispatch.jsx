@@ -901,9 +901,9 @@ export default function LogisticsDispatch() {
       setSubmitting(true);
 
       const consignmentMaterials = (selectedIssue.items || []).map(item => ({
-        materialId: item.item_id,
-        qty: item.qty,
-        batchNo: item.batch?.batch_number || 'B2026-AUTO',
+        materialId: item.item_id || item.material_id,
+        qty: item.qty || item.quantity,
+        batchNo: item.batch?.batch_number || item.batch_number || 'B2026-AUTO',
         pkgType: 'Pallet',
         pkgCount: Math.ceil(item.qty / 10),
         instructions: 'Fragile. Maintain standard handling protocol.'
