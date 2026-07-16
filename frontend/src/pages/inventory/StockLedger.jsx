@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
-  Button, Card, Select, DatePicker, Space, Typography, message, Tag, Tooltip,
+  Button, Card, Select, DatePicker, Space, Typography, message, Tag, Tooltip, Row, Col,
 } from 'antd';
 import {
-  DownloadOutlined, FilterOutlined,
+  DownloadOutlined, FilterOutlined, ReloadOutlined, SearchOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import PageHeader from '../../components/PageHeader';
@@ -274,60 +274,160 @@ const StockLedger = () => {
     },
   ];
 
-  const filterToolbar = (
-    <Space wrap size="small" style={{ marginLeft: 12 }}>
-      <ItemSelector
-        value={filterItem}
-        onChange={(val) => setFilterItem(val)}
-        placeholder="Filter by item..."
-        style={{ width: 200 }}
-      />
-      <Select
-        placeholder="Warehouse"
-        options={warehouses}
-        value={filterWarehouse}
-        onChange={(val) => setFilterWarehouse(val)}
-        allowClear
-        style={{ width: 160 }}
-        size="middle"
-        showSearch
-        optionFilterProp="label"
-      />
-      <Select
-        placeholder="Transaction Type"
-        options={TRANSACTION_TYPES}
-        value={filterTransType}
-        onChange={(val) => setFilterTransType(val)}
-        style={{ width: 160 }}
-        size="middle"
-      />
-      <RangePicker
-        value={filterDateRange}
-        onChange={(val) => setFilterDateRange(val)}
-        format={DATE_FORMAT}
-        size="middle"
-      />
-      <Button type="primary" icon={<FilterOutlined />} onClick={applyFilters} size="middle">
-        Apply
-      </Button>
-    </Space>
-  );
+  const handleResetFilters = () => {
+    setFilterItem(undefined);
+    setFilterWarehouse(undefined);
+    setFilterTransType('');
+    setFilterDateRange(null);
+  };
+
+  const filterCardStyle = {
+    background: '#ffffff',
+    borderRadius: '12px',
+    border: '1px solid #e2e8f0',
+    boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+    marginBottom: '20px',
+  };
+
+  const labelStyle = {
+    display: 'block',
+    fontWeight: 600,
+    color: '#475569',
+    marginBottom: '6px',
+    fontSize: '11px',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  };
 
   return (
     <div>
       <PageHeader title="Stock Ledger" subtitle="Stock movement history and running balances">
-        <Button icon={<DownloadOutlined />} onClick={handleExport}>
-          Export to Excel
+        <Button
+          type="primary"
+          icon={<DownloadOutlined />}
+          onClick={handleExport}
+          style={{
+            background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+            borderColor: '#10b981',
+            borderRadius: '8px',
+            fontWeight: 600,
+            boxShadow: '0 4px 10px rgba(16, 185, 129, 0.15)',
+            border: 'none',
+            height: '36px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px'
+          }}
+        >
+          Export Ledger
         </Button>
       </PageHeader>
 
-      <Card styles={{ body: { padding: 0 } }}>
+      <Card style={filterCardStyle} styles={{ body: { padding: '16px 20px' } }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <Space size={8}>
+            <FilterOutlined style={{ color: '#4f46e5', fontSize: '16px' }} />
+            <span style={{ fontWeight: 700, fontSize: '14px', color: '#0f172a' }}></span>
+          </Space>
+          {(filterItem || filterWarehouse || filterTransType || filterDateRange) && (
+            <Button
+              type="text"
+              size="small"
+              onClick={handleResetFilters}
+              style={{ color: '#64748b', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <ReloadOutlined style={{ fontSize: '11px' }} /> Clear All
+            </Button>
+          )}
+        </div>
+
+        <Row gutter={[16, 12]}>
+          <Col xs={24} sm={12} md={6}>
+            <span style={labelStyle}>Item</span>
+            <ItemSelector
+              value={filterItem}
+              onChange={(val) => setFilterItem(val)}
+              placeholder="All items"
+              style={{ width: '100%' }}
+            />
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <span style={labelStyle}>Warehouse</span>
+            <Select
+              placeholder="All warehouses"
+              options={warehouses}
+              value={filterWarehouse}
+              onChange={(val) => setFilterWarehouse(val)}
+              allowClear
+              style={{ width: '100%' }}
+              showSearch
+              optionFilterProp="label"
+            />
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <span style={labelStyle}>Transaction Type</span>
+            <Select
+              placeholder="All types"
+              options={TRANSACTION_TYPES}
+              value={filterTransType}
+              onChange={(val) => setFilterTransType(val)}
+              style={{ width: '100%' }}
+            />
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <span style={labelStyle}>Posting Date Period</span>
+            <RangePicker
+              value={filterDateRange}
+              onChange={(val) => setFilterDateRange(val)}
+              format={DATE_FORMAT}
+              style={{ width: '100%' }}
+            />
+          </Col>
+        </Row>
+
+        {/* Active tags bar */}
+        {(filterItem || filterWarehouse || filterTransType || filterDateRange) && (
+          <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px dashed #e2e8f0', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+            <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Active Filters:</span>
+            {filterItem && (
+              <Tag closable onClose={() => setFilterItem(undefined)} color="blue" style={{ borderRadius: '4px', fontWeight: 500 }}>
+                Item Selected
+              </Tag>
+            )}
+            {filterWarehouse && (
+              <Tag closable onClose={() => setFilterWarehouse(undefined)} color="blue" style={{ borderRadius: '4px', fontWeight: 500 }}>
+                Warehouse: {warehouses.find(w => w.value === filterWarehouse)?.label || filterWarehouse}
+              </Tag>
+            )}
+            {filterTransType && (
+              <Tag closable onClose={() => setFilterTransType('')} color="blue" style={{ borderRadius: '4px', fontWeight: 500 }}>
+                Type: {getTransTypeLabel(filterTransType)}
+              </Tag>
+            )}
+            {filterDateRange && filterDateRange[0] && (
+              <Tag closable onClose={() => setFilterDateRange(null)} color="blue" style={{ borderRadius: '4px', fontWeight: 500 }}>
+                Period: {dayjs(filterDateRange[0]).format('DD/MM/YYYY')} - {dayjs(filterDateRange[1]).format('DD/MM/YYYY')}
+              </Tag>
+            )}
+          </div>
+        )}
+      </Card>
+
+      <Card styles={{ body: { padding: 0 } }} style={{ borderRadius: '12px', overflow: 'hidden', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05)' }}>
         <DataTable
           key={refreshKey}
           columns={columns}
           fetchFunction={fetchStockLedger}
+          extraParams={{
+            item_id: filterItem,
+            warehouse_id: filterWarehouse,
+            transaction_type: filterTransType,
+            date_from: filterDateRange?.[0] ? formatDateForAPI(filterDateRange[0]) : undefined,
+            date_to: filterDateRange?.[1] ? formatDateForAPI(filterDateRange[1]) : undefined,
+          }}
           rowKey="id"
-          showSearch={false}
+          showSearch={true}
+          searchPlaceholder="Search by item code, item name, reference..."
           exportFileName="Stock_Ledger"
           showExport={false}
           scroll={{ x: 2000 }}

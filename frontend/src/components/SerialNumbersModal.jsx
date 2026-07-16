@@ -337,26 +337,6 @@ const SerialNumbersModal = ({
             >
               Bulk Paste
             </Button>
-            {availableSerials.length > 0 && filteredAvailable.length > 0 && (
-              <Button
-                size="small" icon={<ThunderboltOutlined />}
-                onClick={() => {
-                  const toFill = needed - draftFilled;
-                  if (toFill <= 0) return;
-                  const take = filteredAvailable.slice(0, toFill);
-                  setDraft(prev => [...prev, ...take]);
-                  setJustAdded(new Set(take));
-                  setTimeout(() => setJustAdded(new Set()), 1200);
-                }}
-                disabled={draftFilled >= needed}
-                style={{
-                  background: '#fef3c7', border: '1px solid #fde047',
-                  color: '#b45309', fontSize: 12, borderRadius: 6, fontWeight: 600
-                }}
-              >
-                Auto-fill
-              </Button>
-            )}
           </Space>
         </div>
 
@@ -441,14 +421,6 @@ const SerialNumbersModal = ({
                     style={{ borderRadius: 6, flex: 1 }}
                     allowClear
                   />
-                  <Button
-                    icon={<CheckOutlined />}
-                    onClick={selectAll}
-                    disabled={filteredAvailable.length === 0 || draftFilled >= needed}
-                    style={{ borderRadius: 6, fontSize: 12, fontWeight: 600 }}
-                  >
-                    Select All ({filteredAvailable.length})
-                  </Button>
                 </div>
 
                 <div style={{ color: '#64748b', fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10, fontWeight: 600 }}>
