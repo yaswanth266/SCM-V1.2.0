@@ -219,7 +219,7 @@ const VendorForm = () => {
                             { required: true, message: 'Phone is required' },
                             {
                               validator: (_, value) => {
-                                if (!value) return Promise.reject(new Error('Phone is required'));
+                                if (!value) return Promise.resolve();
                                 const cleaned = value.replace(/[\s\-()]/g, '');
                                 if (/^(?:\+?91|0)?[6-9]\d{9}$/.test(cleaned) || /^\+?[1-9]\d{9,14}$/.test(cleaned)) {
                                   return Promise.resolve();
@@ -240,7 +240,7 @@ const VendorForm = () => {
                             { required: true, message: 'Alt Phone is required' },
                             {
                               validator: (_, value) => {
-                                if (!value) return Promise.reject(new Error('Alt Phone is required'));
+                                if (!value) return Promise.resolve();
                                 const cleaned = value.replace(/[\s\-()]/g, '');
                                 if (/^(?:\+?91|0)?[6-9]\d{9}$/.test(cleaned) || /^\+?[1-9]\d{9,14}$/.test(cleaned)) {
                                   return Promise.resolve();
