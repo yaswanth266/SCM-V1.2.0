@@ -19,6 +19,9 @@ PINCODE_PATTERN = re.compile(r"^[0-9]{5,10}$")
 # BUG-PRO-104 fix: format-validate PAN (Indian Permanent Account Number).
 # 5 letters + 4 digits + 1 letter, e.g. ABCDE1234F.
 PAN_PATTERN = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]{1}$")
+BANK_NAME_PATTERN = re.compile(r"^[a-zA-Z\s.-]+$")
+BANK_ACCOUNT_PATTERN = re.compile(r"^[0-9]{9,18}$")
+IFSC_PATTERN = re.compile(r"^[A-Z]{4}0[A-Z0-9]{6}$")
 
 
 def validate_phone_number(v: str) -> str:
@@ -910,6 +913,36 @@ class VendorCreate(BaseModel):
             raise ValueError("Payment terms must be between 0 and 365 days")
         return v
 
+    @field_validator("bank_name")
+    @classmethod
+    def val_bank_name(cls, v):
+        if v and v.strip():
+            v = v.strip()
+            if not BANK_NAME_PATTERN.match(v):
+                raise ValueError("Invalid bank name format. Must contain only letters, spaces, hyphens, or dots.")
+            return v[:100]
+        return None
+
+    @field_validator("bank_account")
+    @classmethod
+    def val_bank_account(cls, v):
+        if v and v.strip():
+            v = v.strip()
+            if not BANK_ACCOUNT_PATTERN.match(v):
+                raise ValueError("Invalid bank account number. Must be between 9 and 18 digits.")
+            return v
+        return None
+
+    @field_validator("bank_ifsc")
+    @classmethod
+    def val_bank_ifsc(cls, v):
+        if v and v.strip():
+            v = v.strip().upper()
+            if not IFSC_PATTERN.match(v):
+                raise ValueError("Invalid bank IFSC format. Must be 11 characters (e.g., SBIN0001234).")
+            return v
+        return None
+
 
 class VendorUpdate(BaseModel):
     name: Optional[str] = None
@@ -1017,6 +1050,36 @@ class VendorUpdate(BaseModel):
             return v
         if v < 0 or v > 365:
             raise ValueError("Payment terms must be between 0 and 365 days")
+        return v
+
+    @field_validator("bank_name")
+    @classmethod
+    def val_bank_name(cls, v):
+        if v and v.strip():
+            v = v.strip()
+            if not BANK_NAME_PATTERN.match(v):
+                raise ValueError("Invalid bank name format. Must contain only letters, spaces, hyphens, or dots.")
+            return v[:100]
+        return v
+
+    @field_validator("bank_account")
+    @classmethod
+    def val_bank_account(cls, v):
+        if v and v.strip():
+            v = v.strip()
+            if not BANK_ACCOUNT_PATTERN.match(v):
+                raise ValueError("Invalid bank account number. Must be between 9 and 18 digits.")
+            return v
+        return v
+
+    @field_validator("bank_ifsc")
+    @classmethod
+    def val_bank_ifsc(cls, v):
+        if v and v.strip():
+            v = v.strip().upper()
+            if not IFSC_PATTERN.match(v):
+                raise ValueError("Invalid bank IFSC format. Must be 11 characters (e.g., SBIN0001234).")
+            return v
         return v
 
 
