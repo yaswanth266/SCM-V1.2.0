@@ -99,12 +99,14 @@ const OrganizationStructure = () => {
     office_id: undefined,
     department: undefined,
     status: undefined,
+    employee_code: undefined,
   });
 
   const [employeeFilters, setEmployeeFilters] = useState({
     position_id: undefined,
     status: undefined,
     gender: undefined,
+    employee_code: undefined,
   });
 
   // Refs hold the LATEST filter values synchronously so fetchRows never reads
@@ -131,11 +133,11 @@ const OrganizationStructure = () => {
 
   const handleResetFilters = () => {
     if (activeTab === 'positions') {
-      const cleared = { project_id: undefined, office_id: undefined, department: undefined, status: undefined };
+      const cleared = { project_id: undefined, office_id: undefined, department: undefined, status: undefined, employee_code: undefined };
       positionFiltersRef.current = cleared;
       setPositionFilters(cleared);
     } else if (activeTab === 'employees') {
-      const cleared = { position_id: undefined, status: undefined, gender: undefined };
+      const cleared = { position_id: undefined, status: undefined, gender: undefined, employee_code: undefined };
       employeeFiltersRef.current = cleared;
       setEmployeeFilters(cleared);
     }
@@ -155,6 +157,7 @@ const OrganizationStructure = () => {
     if (positionFilters.office_id  != null) p.office_id  = positionFilters.office_id;
     if (positionFilters.department != null) p.department = positionFilters.department;
     if (positionFilters.status     != null) p.status     = positionFilters.status;
+    if (positionFilters.employee_code != null) p.employee_code = positionFilters.employee_code;
     return p;
   }, [positionFilters]);
 
@@ -163,6 +166,7 @@ const OrganizationStructure = () => {
     if (employeeFilters.position_id != null) p.position_id = employeeFilters.position_id;
     if (employeeFilters.status      != null) p.status      = employeeFilters.status;
     if (employeeFilters.gender      != null) p.gender      = employeeFilters.gender;
+    if (employeeFilters.employee_code != null) p.employee_code = employeeFilters.employee_code;
     return p;
   }, [employeeFilters]);
 
@@ -217,11 +221,13 @@ const OrganizationStructure = () => {
       if (f.office_id  != null) finalParams.office_id  = f.office_id;
       if (f.department != null) finalParams.department = f.department;
       if (f.status     != null) finalParams.status     = f.status;
+      if (f.employee_code != null) finalParams.employee_code = f.employee_code;
     } else if (entity === 'employees') {
       const f = employeeFiltersRef.current;
       if (f.position_id != null) finalParams.position_id = f.position_id;
       if (f.status      != null) finalParams.status      = f.status;
       if (f.gender      != null) finalParams.gender      = f.gender;
+      if (f.employee_code != null) finalParams.employee_code = f.employee_code;
     }
     return api.get(ENDPOINTS[entity], { params: finalParams });
   };
@@ -450,7 +456,7 @@ const OrganizationStructure = () => {
       { title: 'Start Date', dataIndex: 'start_date', width: 110, render: (v) => v ? dayjs(v).format('YYYY-MM-DD') : '-' },
       { title: 'Project', dataIndex: 'project_name', width: 150 },
       { title: 'Office', dataIndex: 'office_name', width: 150 },
-      { title: 'Reports To', dataIndex: 'parent_position_name', width: 150 },
+      { title: 'Reports To', dataIndex: 'parent_position_name', width: 150, render: (text) => text || <span style={{ color: '#aaa', fontStyle: 'italic' }}>N/A</span> },
       {
         title: 'Hierarchy',
         key: 'hierarchy',
@@ -753,6 +759,13 @@ const OrganizationStructure = () => {
           
           {activeTab === 'positions' && (
             <>
+              <Input
+                placeholder="Filter by Employee Code"
+                style={{ width: 180 }}
+                allowClear
+                value={positionFilters.employee_code}
+                onChange={(e) => handlePositionFilterChange('employee_code', e.target.value)}
+              />
               <Select
                 placeholder="Filter by Project"
                 style={{ width: 180 }}
@@ -793,6 +806,13 @@ const OrganizationStructure = () => {
 
           {activeTab === 'employees' && (
             <>
+              <Input
+                placeholder="Filter by Employee Code"
+                style={{ width: 180 }}
+                allowClear
+                value={employeeFilters.employee_code}
+                onChange={(e) => handleEmployeeFilterChange('employee_code', e.target.value)}
+              />
               <Select
                 placeholder="Filter by Position"
                 style={{ width: 220 }}

@@ -13,6 +13,7 @@ from app.models.warehouse import Warehouse
 from app.schemas.auth import (
     LoginRequest, TokenResponse, UserCreate, UserResponse,
     ChangePassword, RefreshTokenRequest, RoleInfo, UserPositionInfo, LogoutRequest,
+    ProjectInfo, WarehouseInfo,
 )
 from app.services.auth_service import (
     hash_password, verify_password, create_access_token,
@@ -103,22 +104,133 @@ async def _resolve_primary_warehouse(db: AsyncSession, user_id: int, active_role
     )
     rows = (await db.execute(stmt)).all()
 
-    if not rows:
-        return None, None
+    if rows:
+        if active_role_id is not None:
+            # Try to find a warehouse mapped to the active role
+            for row in rows:
+                if row[2] == active_role_id:
+                    return row[0], row[1]
 
-    if active_role_id is not None:
-        # Try to find a warehouse mapped to the active role
-        for row in rows:
-            if row[2] == active_role_id:
-                return row[0], row[1]
+            # Fallback to a warehouse mapped to no specific role (role_id is null)
+            for row in rows:
+                if row[2] is None:
+                    return row[0], row[1]
 
-        # Fallback to a warehouse mapped to no specific role (role_id is null)
-        for row in rows:
-            if row[2] is None:
-                return row[0], row[1]
+        # Final fallback: just get the first warehouse mapped to this user
+        return rows[0][0], rows[0][1]
 
-    # Final fallback: just get the first warehouse mapped to this user
-    return rows[0][0], rows[0][1]
+    # Fallback Strategy (Goal 2): if user lacks explicit user_warehouses links,
+    # resolve using the office_id of their active/primary position.
+    from app.models.user import User
+    from app.models.master import Employee, Position
+
+    user_stmt = select(User).where(User.id == user_id)
+    user_obj = (await db.execute(user_stmt)).scalar_one_or_none()
+
+    if user_obj and user_obj.employee_id:
+        emp_stmt = select(Employee).where(Employee.id == user_obj.employee_id)
+        employee = (await db.execute(emp_stmt)).scalar_one_or_none()
+        
+        if employee and employee.position_id:
+            pos_stmt = select(Position).where(Position.id == employee.position_id)
+            position = (await db.execute(pos_stmt)).scalar_one_or_none()
+            
+            if position and position.office_id:
+                wh_stmt = select(Warehouse.id, Warehouse.name).where(Warehouse.office_id == position.office_id).limit(1)
+                wh_row = (await db.execute(wh_stmt)).first()
+                if wh_row:
+                    return wh_row[0], wh_row[1]
+
+    return None, None
+
+
+async def get_user_projects_info(db: AsyncSession, user_id: int, employee_id: Optional[int], employee_position_id: Optional[int]) -> List[ProjectInfo]:
+    from app.models.user import UserProject, Project
+    from app.models.master import Position
+    from app.schemas.auth import ProjectInfo
+
+    project_ids = set()
+
+    # 1. Direct user_projects assignments
+    direct_res = await db.execute(
+        select(UserProject.project_id).where(UserProject.user_id == user_id)
+    )
+    for (pid,) in direct_res.all():
+        if pid:
+            project_ids.add(pid)
+
+    # 2. Position projects (both primary and other multiple positions)
+    if employee_id or employee_position_id:
+        pos_res = await db.execute(
+            select(Position.project_id)
+            .where((Position.employee_id == employee_id) | (Position.id == employee_position_id))
+        )
+        for (pid,) in pos_res.all():
+            if pid:
+                project_ids.add(pid)
+
+    if not project_ids:
+        return []
+
+    proj_res = await db.execute(
+        select(Project.id, Project.name).where(Project.id.in_(list(project_ids)))
+    )
+    return [ProjectInfo(id=row[0], name=row[1]) for row in proj_res.all()]
+
+
+async def get_user_warehouses_info(db: AsyncSession, user_id: int, employee_id: Optional[int], employee_position_id: Optional[int]) -> List[WarehouseInfo]:
+    from app.models.user import UserWarehouse, Role
+    from app.models.warehouse import Warehouse
+    from app.models.master import Position
+    from app.schemas.auth import WarehouseInfo
+
+    # 1. Explicit warehouse assignments
+    wh_stmt = (
+        select(UserWarehouse.warehouse_id, Warehouse.name, UserWarehouse.role_id)
+        .join(Warehouse, Warehouse.id == UserWarehouse.warehouse_id)
+        .where(UserWarehouse.user_id == user_id)
+    )
+    wh_rows = (await db.execute(wh_stmt)).all()
+
+    warehouses_map = {}
+    for row in wh_rows:
+        wh_id, wh_name, r_id = row
+        role_name = None
+        if r_id:
+            role_res = await db.execute(select(Role.name).where(Role.id == r_id))
+            role_name = role_res.scalar_one_or_none()
+        warehouses_map[wh_id] = WarehouseInfo(
+            id=wh_id,
+            name=wh_name,
+            role_id=r_id,
+            role_name=role_name
+        )
+
+    # 2. Fallback/Additional positions -> office -> warehouse mapping
+    if employee_id or employee_position_id:
+        pos_stmt = await db.execute(
+            select(Position.office_id, Position.role_id)
+            .where((Position.employee_id == employee_id) | (Position.id == employee_position_id))
+        )
+        for office_id, r_id in pos_stmt.all():
+            if office_id:
+                wh_res = await db.execute(
+                    select(Warehouse.id, Warehouse.name).where(Warehouse.office_id == office_id)
+                )
+                for wh_id, wh_name in wh_res.all():
+                    if wh_id not in warehouses_map:
+                        role_name = None
+                        if r_id:
+                            role_res = await db.execute(select(Role.name).where(Role.id == r_id))
+                            role_name = role_res.scalar_one_or_none()
+                        warehouses_map[wh_id] = WarehouseInfo(
+                            id=wh_id,
+                            name=wh_name,
+                            role_id=r_id,
+                            role_name=role_name
+                        )
+
+    return list(warehouses_map.values())
 
 
 # BUG-AUTH-002: tight prod default was 10/min, blew up multi-role UAT testing
@@ -347,6 +459,8 @@ async def login(
         login_active_role = user.user_type
 
     primary_wh_id, primary_wh_name = await _resolve_primary_warehouse(db, user.id, user.active_role_id)
+    projects_list = await get_user_projects_info(db, user.id, user.employee_id, employee_position_id)
+    warehouses_list = await get_user_warehouses_info(db, user.id, user.employee_id, employee_position_id)
 
     return TokenResponse(
         access_token=access_token,
@@ -375,6 +489,8 @@ async def login(
             last_login=user.last_login,
             created_at=user.created_at,
             roles=role_list,
+            warehouses=warehouses_list,
+            projects=projects_list,
             positions=positions_list,
             permissions=permissions,
         ),
@@ -450,6 +566,8 @@ async def get_me(
         active_role_code = current_user.user_type
 
     primary_wh_id, primary_wh_name = await _resolve_primary_warehouse(db, current_user.id, current_user.active_role_id)
+    projects_list = await get_user_projects_info(db, current_user.id, current_user.employee_id, employee_position_id)
+    warehouses_list = await get_user_warehouses_info(db, current_user.id, current_user.employee_id, employee_position_id)
 
     return UserResponse(
         id=current_user.id,
@@ -474,6 +592,8 @@ async def get_me(
         last_login=current_user.last_login,
         created_at=current_user.created_at,
         roles=role_list,
+        warehouses=warehouses_list,
+        projects=projects_list,
         positions=positions_list,
         permissions=permissions,
     )

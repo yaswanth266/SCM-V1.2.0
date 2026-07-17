@@ -11,24 +11,42 @@ from app.models.user import UserRole, Role
 
 async def get_position_ancestors(db: AsyncSession, position_id: int) -> List:
     from app.models.settings_master import Position
+    from sqlalchemy import text
     ancestors = []
-    curr_id = position_id
     visited = set()
+    to_visit = [position_id]
     
-    res = await db.execute(select(Position).where(Position.id == curr_id))
-    pos = res.scalar_one_or_none()
-    if not pos:
-        return []
-        
-    curr_id = pos.parent_position_id
-    while curr_id and curr_id not in visited:
+    while to_visit:
+        curr_id = to_visit.pop(0)
+        if curr_id in visited:
+            continue
         visited.add(curr_id)
-        res = await db.execute(select(Position).where(Position.id == curr_id))
-        parent_pos = res.scalar_one_or_none()
-        if not parent_pos:
-            break
-        ancestors.append(parent_pos)
-        curr_id = parent_pos.parent_position_id
+        
+        # Get parents from position_reporting junction table
+        try:
+            parent_res = await db.execute(
+                text("SELECT parent_position_id FROM position_reporting WHERE position_id = :pos_id"),
+                {"pos_id": curr_id}
+            )
+            parent_ids = [r[0] for r in parent_res.all()]
+        except Exception:
+            parent_ids = []
+            
+        # Fallback to legacy parent_position_id if junction table has no entries
+        if not parent_ids:
+            pos_res = await db.execute(select(Position.parent_position_id).where(Position.id == curr_id))
+            legacy_parent = pos_res.scalar()
+            if legacy_parent:
+                parent_ids = [legacy_parent]
+                
+        for pid in parent_ids:
+            if pid not in visited:
+                res = await db.execute(select(Position).where(Position.id == pid))
+                parent_pos = res.scalar_one_or_none()
+                if parent_pos:
+                    ancestors.append(parent_pos)
+                    to_visit.append(pid)
+                    
     return ancestors
 
 

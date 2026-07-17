@@ -7,6 +7,9 @@ import {
   CalendarOutlined,
   CheckCircleOutlined,
   SyncOutlined,
+  ProjectOutlined,
+  HomeOutlined,
+  ApartmentOutlined,
 } from '@ant-design/icons';
 import PageHeader from '../../components/PageHeader';
 import useAuthStore from '../../store/authStore';
@@ -168,6 +171,134 @@ const Profile = () => {
                 <span style={{ color: '#374151' }}>{user.last_login ? formatDateTime(user.last_login) : 'Never'}</span>
               </Descriptions.Item>
             </Descriptions>
+          </Card>
+        </Col>
+      </Row>
+
+      {/* Assigned Org Structure & Access */}
+      <Row gutter={[24, 24]} style={{ marginTop: '24px' }}>
+        <Col span={24}>
+          <Card
+            title={
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <ApartmentOutlined style={{ color: '#2563EB' }} />
+                <span>Assigned Org Structure & Access</span>
+              </span>
+            }
+            bordered={false}
+            style={{
+              borderRadius: '8px',
+              boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+            }}
+            headStyle={{ borderBottom: '1px solid #F3F4F6', fontWeight: '600' }}
+          >
+            <Row gutter={[32, 24]}>
+              {/* Positions Column */}
+              <Col xs={24} md={8}>
+                <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: '#374151', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ApartmentOutlined style={{ color: '#2563EB' }} />
+                  <span>Positions</span>
+                </h3>
+                {user.positions && user.positions.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {user.positions.map((pos) => {
+                      const isActive = user.position_id === pos.id;
+                      return (
+                        <div
+                          key={pos.id}
+                          style={{
+                            padding: '12px 16px',
+                            borderRadius: '8px',
+                            border: isActive ? '1px solid #3B82F6' : '1px solid #E5E7EB',
+                            background: isActive ? '#EFF6FF' : '#F9FAFB',
+                            transition: 'all 0.2s',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <span style={{ fontWeight: '600', color: isActive ? '#1D4ED8' : '#374151' }}>
+                              {pos.name}
+                            </span>
+                            {isActive && (
+                              <Tag color="blue" style={{ margin: 0, borderRadius: '4px', fontWeight: '600' }}>
+                                Active
+                              </Tag>
+                            )}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#6B7280', marginTop: '4px' }}>
+                            Code: {pos.code} {pos.role_name ? `| Role: ${pos.role_name}` : ''}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p style={{ color: '#9CA3AF', fontStyle: 'italic' }}>No associated positions</p>
+                )}
+              </Col>
+
+              {/* Projects Column */}
+              <Col xs={24} md={8}>
+                <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: '#374151', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <ProjectOutlined style={{ color: '#2563EB' }} />
+                  <span>Projects</span>
+                </h3>
+                {user.projects && user.projects.length > 0 ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {user.projects.map((proj) => (
+                      <Tag
+                        key={proj.id}
+                        color="purple"
+                        style={{
+                          padding: '6px 12px',
+                          fontSize: '13px',
+                          borderRadius: '6px',
+                          fontWeight: '500',
+                          margin: 0,
+                        }}
+                      >
+                        {proj.name}
+                      </Tag>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: '#9CA3AF', fontStyle: 'italic' }}>No assigned projects</p>
+                )}
+              </Col>
+
+              {/* Warehouses Column */}
+              <Col xs={24} md={8}>
+                <h3 style={{ fontSize: '15px', fontWeight: '600', marginBottom: '16px', color: '#374151', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <HomeOutlined style={{ color: '#2563EB' }} />
+                  <span>Warehouses</span>
+                </h3>
+                {user.warehouses && user.warehouses.length > 0 ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {user.warehouses.map((wh) => (
+                      <div
+                        key={wh.id}
+                        style={{
+                          padding: '12px 16px',
+                          borderRadius: '8px',
+                          border: '1px solid #E5E7EB',
+                          background: '#F9FAFB',
+                        }}
+                      >
+                        <div style={{ fontWeight: '600', color: '#374151' }}>
+                          {wh.name}
+                        </div>
+                        {wh.role_name && (
+                          <div style={{ fontSize: '12px', color: '#6B7280', marginTop: '4px' }}>
+                            Role: {wh.role_name}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: '#9CA3AF', fontStyle: 'italic' }}>No assigned warehouses</p>
+                )}
+              </Col>
+            </Row>
           </Card>
         </Col>
       </Row>

@@ -138,30 +138,6 @@ async def _build_user_response(db: AsyncSession, u, roles_loaded=True):
             if ur.role:
                 role_list.append(RoleInfo(id=ur.role.id, code=ur.role.code, name=ur.role.name))
 
-    # Build warehouse list with names (and role info if set)
-    warehouse_list = []
-    if u.warehouses:
-        from app.models.warehouse import Warehouse
-        wh_ids = [uw.warehouse_id for uw in u.warehouses]
-        wh_rows = (await db.execute(
-            select(Warehouse.id, Warehouse.name).where(Warehouse.id.in_(wh_ids))
-        )).all()
-        wh_name_map = {row.id: row.name for row in wh_rows}
-        for uw in u.warehouses:
-            warehouse_list.append(WarehouseInfo(
-                id=uw.warehouse_id,
-                name=wh_name_map.get(uw.warehouse_id),
-                role_id=uw.role_id if hasattr(uw, 'role_id') else None,
-                role_name=(uw.role.name if hasattr(uw, 'role') and uw.role else None),
-            ))
-
-    # Build project list
-    project_list = []
-    if u.projects:
-        for up in u.projects:
-            if up.project:
-                project_list.append(ProjectInfo(id=up.project.id, name=up.project.name))
-
     # Ensure employee is loaded/resolved
     employee_position_id = None
     if u.employee_id:
@@ -176,9 +152,11 @@ async def _build_user_response(db: AsyncSession, u, roles_loaded=True):
         if employee:
             employee_position_id = employee.position_id
 
-    # Fetch positions list
-    from app.api.v1.auth import get_user_positions
+    # Fetch positions list and resolve project/warehouse lists via position-based lookup helpers
+    from app.api.v1.auth import get_user_positions, get_user_projects_info, get_user_warehouses_info
     positions_list = await get_user_positions(db, u.employee_id, employee_position_id)
+    project_list = await get_user_projects_info(db, u.id, u.employee_id, employee_position_id)
+    warehouse_list = await get_user_warehouses_info(db, u.id, u.employee_id, employee_position_id)
 
     return UserResponse(
         id=u.id, organization_id=u.organization_id, employee_id=u.employee_id, employee_code=u.employee_code,
@@ -1281,6 +1259,7 @@ async def list_positions(
     office_id: Optional[int] = None,
     department: Optional[str] = None,
     status: Optional[str] = None,
+    employee_code: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1295,6 +1274,7 @@ async def list_positions(
         .join(Role, Position.role_id == Role.id, isouter=True)
     )
     count_q = select(func.count(Position.id))
+    has_employee_join = False
     if search:
         like = f"%{search}%"
         condition = or_(
@@ -1308,12 +1288,20 @@ async def list_positions(
             Employee.employee_code.ilike(like)
         )
         q = q.join(Employee, or_(Position.employee_id == Employee.id, Employee.position_id == Position.id), isouter=True).where(condition).distinct()
+        has_employee_join = True
         count_q = (
             select(func.count(Position.id.distinct()))
             .join(Role, Position.role_id == Role.id, isouter=True)
             .join(Employee, or_(Position.employee_id == Employee.id, Employee.position_id == Position.id), isouter=True)
             .where(condition)
         )
+    if employee_code:
+        like = f"%{employee_code}%"
+        if not has_employee_join:
+            q = q.join(Employee, or_(Position.employee_id == Employee.id, Employee.position_id == Position.id), isouter=True)
+            count_q = count_q.join(Employee, or_(Position.employee_id == Employee.id, Employee.position_id == Position.id), isouter=True)
+        q = q.where(Employee.employee_code.ilike(like)).distinct()
+        count_q = count_q.where(Employee.employee_code.ilike(like))
     if project_id is not None:
         q = q.where(Position.project_id == project_id)
         count_q = count_q.where(Position.project_id == project_id)
@@ -1329,11 +1317,31 @@ async def list_positions(
     total = (await db.execute(count_q)).scalar() or 0
     rows = (await db.execute(q.order_by(Position.level_rank.asc(), Position.name.asc()).offset(offset).limit(limit))).all()
     
+    parent_names_map = {}
     if rows:
         pos_objs = [r[0] for r in rows]
         position_ids = [p.id for p in pos_objs]
         direct_employee_ids = [p.employee_id for p in pos_objs if p.employee_id is not None]
         
+        # Fetch multiple parents if any
+        try:
+            parents_res = await db.execute(
+                text("""
+                    SELECT pr.position_id, p.name
+                    FROM position_reporting pr
+                    JOIN positions p ON pr.parent_position_id = p.id
+                    WHERE pr.position_id IN :pos_ids
+                """),
+                {"pos_ids": tuple(position_ids)}
+            )
+            for pos_id, p_name in parents_res.all():
+                if pos_id not in parent_names_map:
+                    parent_names_map[pos_id] = []
+                if p_name not in parent_names_map[pos_id]:
+                    parent_names_map[pos_id].append(p_name)
+        except Exception as exc:
+            print(f"Error fetching multiple parents: {exc}")
+
         emp_q = select(Employee).where(
             or_(
                 Employee.position_id.in_(position_ids),
@@ -1369,12 +1377,15 @@ async def list_positions(
         emp_name = emp.name if emp else None
         emp_code = emp.employee_code if emp else None
         
+        p_names = parent_names_map.get(pos.id)
+        display_parent_name = ", ".join(p_names) if p_names else parent_name
+
         items.append(
             _position_payload(
                 pos,
                 project_name=project_name,
                 office_name=office_name,
-                parent_name=parent_name,
+                parent_name=display_parent_name,
                 role_name=role_name,
                 role_code=role_code,
                 employee_name=emp_name,
@@ -1511,6 +1522,7 @@ async def list_employees(
     position_id: Optional[int] = None,
     status: Optional[str] = None,
     gender: Optional[str] = None,
+    employee_code: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1527,6 +1539,10 @@ async def list_employees(
         condition = or_(Employee.name.ilike(like), Employee.employee_code.ilike(like), Employee.email.ilike(like), Employee.phone.ilike(like))
         q = q.where(condition)
         count_q = count_q.where(condition)
+    if employee_code:
+        like = f"%{employee_code}%"
+        q = q.where(Employee.employee_code.ilike(like))
+        count_q = count_q.where(Employee.employee_code.ilike(like))
     if position_id is not None:
         q = q.where(Employee.position_id == position_id)
         count_q = count_q.where(Employee.position_id == position_id)
@@ -2150,6 +2166,74 @@ def normalize_position_key(text_val: str) -> str:
             new_words.append(corrected)
             
     return "-".join(new_words)
+
+
+async def _resolve_parent_position_ids(db: AsyncSession, row: dict, cache: dict = None) -> list[int]:
+    pos_data = row.get("position")
+    if not pos_data:
+        return []
+    reporting_to = pos_data.get("reporting_to_details") or pos_data.get("reporting_to")
+    if not reporting_to or not isinstance(reporting_to, list):
+        return []
+    
+    parent_ids = []
+    for parent_item in reporting_to:
+        if isinstance(parent_item, (int, float)):
+            parent_ids.append(int(parent_item))
+            continue
+            
+        if not isinstance(parent_item, dict):
+            continue
+            
+        parent_name = parent_item.get("position_name") or parent_item.get("name")
+        if not parent_name:
+            continue
+            
+        parent_code = parent_item.get("code") or parent_item.get("position_code") or _external_code(parent_name, 100)
+        if not parent_code:
+            continue
+            
+        parent_id = None
+        if cache is not None:
+            # 1. Try exact code matching
+            if parent_code.lower() in cache["code_to_id"]:
+                parent_id = cache["code_to_id"][parent_code.lower()]
+            
+            # 2 & 3. Normalized matching (code or name)
+            if parent_id is None:
+                norm_parent_code = normalize_position_key(parent_code)
+                if norm_parent_code and norm_parent_code in cache["norm_code_to_id"]:
+                    parent_id = cache["norm_code_to_id"][norm_parent_code]
+            
+            if parent_id is None:
+                norm_parent_name = normalize_position_key(parent_name)
+                if norm_parent_name and norm_parent_name in cache["norm_name_to_id"]:
+                    parent_id = cache["norm_name_to_id"][norm_parent_name]
+        else:
+            # 1. Try exact code matching
+            parent_pos = (await db.execute(select(Position).where(func.lower(Position.code) == parent_code.lower()))).scalar_one_or_none()
+            if parent_pos:
+                parent_id = parent_pos.id
+            
+            # 2 & 3. Normalized matching (code or name)
+            if not parent_id:
+                norm_parent_code = normalize_position_key(parent_code) if parent_code else None
+                norm_parent_name = normalize_position_key(parent_name) if parent_name else None
+                
+                # Query all existing positions to perform in-memory key normalization mapping
+                res = await db.execute(select(Position.id, Position.code, Position.name))
+                for pid, pcode, pname in res.all():
+                    if norm_parent_code and normalize_position_key(pcode) == norm_parent_code:
+                        parent_id = pid
+                        break
+                    if norm_parent_name and normalize_position_key(pname) == norm_parent_name:
+                        parent_id = pid
+                        break
+                        
+        if parent_id and parent_id not in parent_ids:
+            parent_ids.append(parent_id)
+            
+    return parent_ids
 
 
 async def _resolve_parent_position_id(db: AsyncSession, row: dict, stats: dict[str, int], cache: dict = None) -> int | None:
@@ -2955,6 +3039,50 @@ async def _sync_all_positions(
         
         record_count += 1
         if record_count % 100 == 0:
+            await db.commit()
+
+    await db.commit()
+
+    # Pass 2: Resolve and update parent_position_id for all positions now that all exist in db/cache
+    second_record_count = 0
+    for row in all_rows:
+        try:
+            async with db.begin_nested():
+                pos_row = dict(row)
+                pos_row["position"] = {"reporting_to": row.get("reporting_to_details")}
+                
+                position_id = row.get("id") or row.get("position_id")
+                try:
+                    position_id = int(position_id) if position_id is not None else None
+                except (TypeError, ValueError):
+                    position_id = None
+                
+                if position_id:
+                    position = None
+                    if cache is not None:
+                        position = cache["positions_by_id"].get(position_id)
+                    if not position:
+                        position = (await db.execute(select(Position).where(Position.id == position_id))).scalar_one_or_none()
+                    
+                    if position:
+                        parent_ids = await _resolve_parent_position_ids(db, pos_row, cache=cache)
+                        position.parent_position_id = parent_ids[0] if parent_ids else None
+                        
+                        # Clear old relationships for this position
+                        await db.execute(text("DELETE FROM position_reporting WHERE position_id = :pos_id"), {"pos_id": position.id})
+                        
+                        # Insert all resolved parents
+                        for p_id in parent_ids:
+                            if p_id != position.id:  # Avoid self-loops
+                                await db.execute(text("""
+                                    INSERT IGNORE INTO position_reporting (position_id, parent_position_id)
+                                    VALUES (:pos_id, :p_id)
+                                """), {"pos_id": position.id, "p_id": p_id})
+        except Exception as exc:
+            print(f"Transient error resolving parent in second pass: {exc}")
+        
+        second_record_count += 1
+        if second_record_count % 100 == 0:
             await db.commit()
 
     await db.commit()
