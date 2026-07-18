@@ -19,6 +19,9 @@ PINCODE_PATTERN = re.compile(r"^[0-9]{5,10}$")
 # BUG-PRO-104 fix: format-validate PAN (Indian Permanent Account Number).
 # 5 letters + 4 digits + 1 letter, e.g. ABCDE1234F.
 PAN_PATTERN = re.compile(r"^[A-Z]{5}[0-9]{4}[A-Z]{1}$")
+BANK_NAME_PATTERN = re.compile(r"^[a-zA-Z\s.-]+$")
+BANK_ACCOUNT_PATTERN = re.compile(r"^[0-9]{9,18}$")
+IFSC_PATTERN = re.compile(r"^[A-Z]{4}0[A-Z0-9]{6}$")
 
 
 def validate_phone_number(v: str) -> str:
@@ -809,23 +812,23 @@ class VendorCategoryResponse(BaseModel):
 class VendorCreate(BaseModel):
     vendor_code: str
     name: str
-    contact_person: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    alt_phone: Optional[str] = None
-    address_line1: Optional[str] = None
-    address_line2: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    pincode: Optional[str] = None
-    country: str = "India"
+    contact_person: str
+    email: str
+    phone: str
+    alt_phone: str
+    address_line1: str
+    address_line2: str
+    city: str
+    state: str
+    pincode: str
+    country: str
     gst_number: str
     pan_number: str
-    bank_name: Optional[str] = None
-    bank_account: Optional[str] = None
-    bank_ifsc: Optional[str] = None
-    payment_terms_days: Optional[int] = 30
-    credit_limit: Optional[Decimal] = Decimal("0")
+    bank_name: str
+    bank_account: str
+    bank_ifsc: str
+    payment_terms_days: int
+    credit_limit: Decimal
     vendor_type: str = "material"
     vendor_type_id: Optional[int] = None
     vendor_type_ids: List[int] = Field(default_factory=list)
@@ -848,22 +851,50 @@ class VendorCreate(BaseModel):
     def val_name(cls, v):
         return _require_non_empty(v, "Vendor name")[:255]
 
+    @field_validator("contact_person")
+    @classmethod
+    def val_contact_person(cls, v):
+        return _require_non_empty(v, "Contact person")
+
+    @field_validator("address_line1")
+    @classmethod
+    def val_address_line1(cls, v):
+        return _require_non_empty(v, "Address line 1")
+
+    @field_validator("address_line2")
+    @classmethod
+    def val_address_line2(cls, v):
+        return _require_non_empty(v, "Address line 2")
+
+    @field_validator("city")
+    @classmethod
+    def val_city(cls, v):
+        return _require_non_empty(v, "City")
+
+    @field_validator("state")
+    @classmethod
+    def val_state(cls, v):
+        return _require_non_empty(v, "State")
+
+    @field_validator("country")
+    @classmethod
+    def val_country(cls, v):
+        return _require_non_empty(v, "Country")
+
     @field_validator("email")
     @classmethod
     def val_email(cls, v):
-        if v and v.strip():
-            v = v.strip().lower()
-            if not EMAIL_PATTERN.match(v):
-                raise ValueError("Invalid email format")
-            return v[:255]
-        return None
+        v = _require_non_empty(v, "Email")
+        v = v.lower()
+        if not EMAIL_PATTERN.match(v):
+            raise ValueError("Invalid email format")
+        return v[:255]
 
     @field_validator("phone", "alt_phone")
     @classmethod
     def val_phone(cls, v):
-        if v and v.strip():
-            return validate_phone_number(v)
-        return None
+        v = _require_non_empty(v, "Phone number")
+        return validate_phone_number(v)
 
     @field_validator("gst_number")
     @classmethod
@@ -883,16 +914,13 @@ class VendorCreate(BaseModel):
             raise ValueError("Invalid PAN format. Must be 10-char alphanumeric (e.g., ABCDE1234F)")
         return v
 
-
     @field_validator("pincode")
     @classmethod
     def val_pincode(cls, v):
-        if v and v.strip():
-            v = v.strip()
-            if not PINCODE_PATTERN.match(v):
-                raise ValueError("Invalid pincode. Must be 5-10 digits")
-            return v[:10]
-        return None
+        v = _require_non_empty(v, "Pincode")
+        if not PINCODE_PATTERN.match(v):
+            raise ValueError("Invalid pincode. Must be 5-10 digits")
+        return v[:10]
 
     @field_validator("vendor_type")
     @classmethod
@@ -902,7 +930,9 @@ class VendorCreate(BaseModel):
     @field_validator("credit_limit")
     @classmethod
     def val_credit(cls, v):
-        if v is not None and v < 0:
+        if v is None:
+            raise ValueError("Credit limit is required and cannot be empty")
+        if v < 0:
             raise ValueError("Credit limit cannot be negative")
         return v
 
@@ -910,9 +940,34 @@ class VendorCreate(BaseModel):
     @classmethod
     def val_terms(cls, v):
         if v is None:
-            return v
+            raise ValueError("Payment terms is required and cannot be empty")
         if v < 0 or v > 365:
             raise ValueError("Payment terms must be between 0 and 365 days")
+        return v
+
+    @field_validator("bank_name")
+    @classmethod
+    def val_bank_name(cls, v):
+        v = _require_non_empty(v, "Bank name")
+        if not BANK_NAME_PATTERN.match(v):
+            raise ValueError("Invalid bank name format. Must contain only letters, spaces, hyphens, or dots.")
+        return v[:100]
+
+    @field_validator("bank_account")
+    @classmethod
+    def val_bank_account(cls, v):
+        v = _require_non_empty(v, "Bank account")
+        if not BANK_ACCOUNT_PATTERN.match(v):
+            raise ValueError("Invalid bank account number. Must be between 9 and 18 digits.")
+        return v
+
+    @field_validator("bank_ifsc")
+    @classmethod
+    def val_bank_ifsc(cls, v):
+        v = _require_non_empty(v, "Bank IFSC")
+        v = v.upper()
+        if not IFSC_PATTERN.match(v):
+            raise ValueError("Invalid bank IFSC format. Must be 11 characters (e.g., SBIN0001234).")
         return v
 
 
@@ -1022,6 +1077,36 @@ class VendorUpdate(BaseModel):
             return v
         if v < 0 or v > 365:
             raise ValueError("Payment terms must be between 0 and 365 days")
+        return v
+
+    @field_validator("bank_name")
+    @classmethod
+    def val_bank_name(cls, v):
+        if v and v.strip():
+            v = v.strip()
+            if not BANK_NAME_PATTERN.match(v):
+                raise ValueError("Invalid bank name format. Must contain only letters, spaces, hyphens, or dots.")
+            return v[:100]
+        return v
+
+    @field_validator("bank_account")
+    @classmethod
+    def val_bank_account(cls, v):
+        if v and v.strip():
+            v = v.strip()
+            if not BANK_ACCOUNT_PATTERN.match(v):
+                raise ValueError("Invalid bank account number. Must be between 9 and 18 digits.")
+            return v
+        return v
+
+    @field_validator("bank_ifsc")
+    @classmethod
+    def val_bank_ifsc(cls, v):
+        if v and v.strip():
+            v = v.strip().upper()
+            if not IFSC_PATTERN.match(v):
+                raise ValueError("Invalid bank IFSC format. Must be 11 characters (e.g., SBIN0001234).")
+            return v
         return v
 
 

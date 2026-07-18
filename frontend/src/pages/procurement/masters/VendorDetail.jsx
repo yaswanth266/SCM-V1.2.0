@@ -17,7 +17,6 @@ const VendorDetail = () => {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('info');
   const [vendorItems, setVendorItems] = useState([]);
-  const [vendorContracts, setVendorContracts] = useState([]);
   const [vendorRatings, setVendorRatings] = useState([]);
   const [vendorPOs, setVendorPOs] = useState([]);
   const [tabLoading, setTabLoading] = useState(false);
@@ -49,9 +48,6 @@ const VendorDetail = () => {
       if (tab === 'items') {
         const res = await api.get(`/masters/vendors/${id}/items`, { params: { page_size: 200 } });
         setVendorItems(res.data.items || res.data.data || res.data || []);
-      } else if (tab === 'contracts') {
-        const res = await api.get(`/masters/vendors/${id}/contracts`, { params: { page_size: 100 } });
-        setVendorContracts(res.data.items || res.data.data || res.data || []);
       } else if (tab === 'ratings') {
         const res = await api.get(`/masters/vendors/${id}/ratings`, { params: { page_size: 100 } });
         setVendorRatings(res.data.items || res.data.data || res.data || []);
@@ -118,26 +114,11 @@ const VendorDetail = () => {
               <Table dataSource={vendorItems} loading={tabLoading} rowKey={(r) => r.id || r.item_id} size="small"
                 pagination={{ pageSize: 20, showSizeChanger: true }} scroll={{ x: 'max-content' }}
                 columns={[
-                  { title: 'Item Code', dataIndex: ['item', 'item_code'], key: 'code', render: (t, r) => t || r.item_code || '-' },
-                  { title: 'Item Name', dataIndex: ['item', 'name'], key: 'name', render: (t, r) => t || r.item_name || '-' },
+                  { title: 'Item Code', dataIndex: 'item_code', key: 'code', render: (t, r) => t || r.item?.item_code || '-' },
+                  { title: 'Item Name', dataIndex: 'item_name', key: 'name', render: (t, r) => t || r.item?.name || '-' },
                   { title: 'Lead Time', dataIndex: 'lead_time_days', key: 'lt', render: (v) => v ? `${v} days` : '-' },
-                  { title: 'Last Price', dataIndex: 'last_price', key: 'lp', align: 'right', render: (v) => formatCurrency(v) },
+                  { title: 'Last Price', dataIndex: 'rate', key: 'lp', align: 'right', render: (v, r) => formatCurrency(v || r.last_price) },
                   { title: 'Preferred', dataIndex: 'is_preferred', key: 'p', render: (v) => v ? <Tag color="green">Yes</Tag> : <Tag>No</Tag> },
-                ]}
-              />
-            ),
-          },
-          {
-            key: 'contracts', label: 'Contracts',
-            children: (
-              <Table dataSource={vendorContracts} loading={tabLoading} rowKey="id" size="small"
-                pagination={{ pageSize: 20, showSizeChanger: true }} scroll={{ x: 'max-content' }}
-                columns={[
-                  { title: 'Contract No', dataIndex: 'contract_number', key: 'no' },
-                  { title: 'Start Date', dataIndex: 'start_date', key: 'start', render: (v) => formatDate(v) },
-                  { title: 'End Date', dataIndex: 'end_date', key: 'end', render: (v) => formatDate(v) },
-                  { title: 'Value', dataIndex: 'contract_value', key: 'val', align: 'right', render: (v) => formatCurrency(v) },
-                  { title: 'Status', dataIndex: 'status', key: 'st', render: (s) => <StatusTag status={s} /> },
                 ]}
               />
             ),
@@ -148,9 +129,11 @@ const VendorDetail = () => {
               <Table dataSource={vendorRatings} loading={tabLoading} rowKey="id" size="small"
                 pagination={{ pageSize: 20, showSizeChanger: true }} scroll={{ x: 'max-content' }}
                 columns={[
-                  { title: 'Date', dataIndex: 'rating_date', key: 'date', render: (v) => formatDate(v) },
-                  { title: 'Criteria', dataIndex: 'criteria', key: 'crit' },
-                  { title: 'Score', dataIndex: 'score', key: 'score', render: (v) => <Rate disabled allowHalf value={v || 0} style={{ fontSize: 14 }} /> },
+                  { title: 'Date', dataIndex: 'created_at', key: 'date', render: (v) => formatDate(v) },
+                  { title: 'Delivery Timeliness', dataIndex: 'delivery_timeliness', key: 'dt', render: (v) => v ? `${v}/5` : '-' },
+                  { title: 'Cost Efficiency', dataIndex: 'cost_efficiency', key: 'ce', render: (v) => v ? `${v}/5` : '-' },
+                  { title: 'Service Reliability', dataIndex: 'service_reliability', key: 'sr', render: (v) => v ? `${v}/5` : '-' },
+                  { title: 'Overall Rating', dataIndex: 'overall_rating', key: 'score', render: (v) => <Rate disabled allowHalf value={v || 0} style={{ fontSize: 14 }} /> },
                   { title: 'Remarks', dataIndex: 'remarks', key: 'rem', ellipsis: true },
                 ]}
               />
@@ -164,7 +147,7 @@ const VendorDetail = () => {
                 columns={[
                   { title: 'PO Number', dataIndex: 'po_number', key: 'po' },
                   { title: 'Date', dataIndex: 'po_date', key: 'date', render: (v) => formatDate(v) },
-                  { title: 'Amount', dataIndex: 'total_amount', key: 'amt', align: 'right', render: (v) => formatCurrency(v) },
+                  { title: 'Amount', dataIndex: 'grand_total', key: 'amt', align: 'right', render: (v, r) => formatCurrency(v || r.total_amount) },
                   { title: 'Status', dataIndex: 'status', key: 'st', render: (s) => <StatusTag status={s} /> },
                 ]}
               />
