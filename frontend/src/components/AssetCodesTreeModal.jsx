@@ -216,13 +216,22 @@ const AssetCodesTreeModal = ({
       setSelectedBinFilter('ALL');
       
       if (selectedCodes.length > 0) {
-        setSelected([...selectedCodes]);
+        // Map short codes (e.g. "1029") to their matching full codes (e.g. "151110-0004-1-1029")
+        const mapped = selectedCodes.map(selCode => {
+          const matched = allCodesWithMetadata.find(c => 
+            c.code === selCode || 
+            c.code.endsWith(`-${selCode}`) ||
+            (itemCode && c.code === `${itemCode}-1-${selCode}`)
+          );
+          return matched ? matched.code : selCode;
+        });
+        setSelected(mapped);
       } else {
         setSelected([]);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, allCodesWithMetadata, selectedCodes, batchIds]);
 
   const toggleCode = (code) => {
     if (lockedCodes && lockedCodes[code]) return;

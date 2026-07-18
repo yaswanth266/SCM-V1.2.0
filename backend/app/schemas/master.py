@@ -637,6 +637,9 @@ class ItemUpdate(BaseModel):
 class ItemResponse(BaseModel):
     id: int
     category_id: Optional[int] = None
+    category_l1: Optional[str] = None
+    category_l2: Optional[str] = None
+    category_l3: Optional[str] = None
     feature_id: Optional[int] = None
     feature_ids: Optional[List[int]] = None
     feature_names: Optional[List[str]] = None
@@ -647,7 +650,9 @@ class ItemResponse(BaseModel):
     item_type: str
     is_kit: bool = False
     uom_category_id: Optional[int] = None
+    uom_category_name: Optional[str] = None
     primary_uom_id: int
+    primary_uom_name: Optional[str] = None
     secondary_uom_id: Optional[int] = None
     hsn_code: Optional[str] = None
     sku: Optional[str] = None

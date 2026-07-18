@@ -139,7 +139,7 @@ const Indents = () => {
       const data = res.data;
       const items = (data.items || []).map((item) => ({
         ...item,
-        approved_qty: item.approved_qty || item.requested_qty || item.qty,
+        approved_qty: item.approved_qty ?? item.requested_qty ?? item.qty,
       }));
       setApproveTarget(data);
       setApproveItems(items);

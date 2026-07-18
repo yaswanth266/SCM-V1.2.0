@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { router } from 'expo-router';
+import { API_BASE_URL } from '../constants/config';
 
 // ─── Custom Premium Vector Icons ───────────────────────────────────────────────
 const Icon = ({ name, size = 18, color = '#7A6D66' }: { name: string; size?: number; color?: string }) => {
@@ -87,7 +88,6 @@ const Icon = ({ name, size = 18, color = '#7A6D66' }: { name: string; size?: num
 
 export default function AcknowledgementScreen() {
   const [token, setToken] = useState<string>('');
-  const [apiUrl, setApiUrl] = useState<string>('');
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -155,7 +155,6 @@ export default function AcknowledgementScreen() {
       try {
         const savedToken = await AsyncStorage.getItem('user_token');
         const savedUserStr = await AsyncStorage.getItem('user_profile');
-        const savedApiUrl = await AsyncStorage.getItem('API_URL');
 
         if (!savedToken || !savedUserStr) {
           router.replace('/');
@@ -166,8 +165,7 @@ export default function AcknowledgementScreen() {
         const parsedUser = JSON.parse(savedUserStr);
         setUser(parsedUser);
         setEmployeeCode(parsedUser?.employee_code || '');
-        const url = savedApiUrl || 'http://10.2.1.31:8000';
-        setApiUrl(url);
+        const url = API_BASE_URL;
 
         fetchAcknowledgements(url, savedToken, 1, activeTab);
         fetchPendingIndents(url, savedToken);
@@ -216,18 +214,18 @@ export default function AcknowledgementScreen() {
 
   const handleRefresh = () => {
     setRefreshing(true);
-    fetchAcknowledgements(apiUrl, token, 1, activeTab);
+    fetchAcknowledgements(API_BASE_URL, token, 1, activeTab);
   };
 
   const loadMore = () => {
     if (acknowledgements.length < total && !loading) {
-      fetchAcknowledgements(apiUrl, token, page + 1, activeTab);
+      fetchAcknowledgements(API_BASE_URL, token, page + 1, activeTab);
     }
   };
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
-    fetchAcknowledgements(apiUrl, token, 1, tab);
+    fetchAcknowledgements(API_BASE_URL, token, 1, tab);
   };
 
   // ─── Fetch Details ──────────────────────────────────────────────────────────
@@ -235,7 +233,7 @@ export default function AcknowledgementScreen() {
     setDetailLoading(true);
     setDetailModalVisible(true);
     try {
-      const res = await axios.get(`${apiUrl}/api/v1/indent/acknowledgements/${ackId}`, {
+      const res = await axios.get(`${API_BASE_URL}/api/v1/indent/acknowledgements/${ackId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setSelectedAck(res.data);
@@ -271,7 +269,7 @@ export default function AcknowledgementScreen() {
     setBarcodeInput('');
     setSelectedIndentDetail(null);
     setFormModalVisible(true);
-    fetchPendingIndents(apiUrl, token);
+    fetchPendingIndents(API_BASE_URL, token);
   };
 
   const handleSelectIndent = async (indentId: string) => {
@@ -284,7 +282,7 @@ export default function AcknowledgementScreen() {
 
     setLoadingIndentDetail(true);
     try {
-      const detailRes = await axios.get(`${apiUrl}/api/v1/indent/indents/${indentId}`, {
+      const detailRes = await axios.get(`${API_BASE_URL}/api/v1/indent/indents/${indentId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const indent = detailRes.data;
@@ -293,7 +291,7 @@ export default function AcknowledgementScreen() {
       // Fetch prior acknowledgements to compute remaining quantity
       let priorByLine: any = {};
       try {
-        const priorRes = await axios.get(`${apiUrl}/api/v1/indent/indents/${indentId}/acknowledgements`, {
+        const priorRes = await axios.get(`${API_BASE_URL}/api/v1/indent/indents/${indentId}/acknowledgements`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         const priorAcks = priorRes.data || [];
@@ -374,7 +372,7 @@ export default function AcknowledgementScreen() {
         })),
       };
 
-      await axios.post(`${apiUrl}/api/v1/indent/acknowledgements`, payload, {
+      await axios.post(`${API_BASE_URL}/api/v1/indent/acknowledgements`, payload, {
         headers: { Authorization: `Bearer ${token}` },
       });
 

@@ -742,13 +742,19 @@ async def process_approval_action(
             ),
         )
 
+    history_action = action
+    history_comments = comments
+    if action == "unhold":
+        history_action = "returned"
+        history_comments = f"[Unhold] {comments}" if comments else "Document unheld"
+
     # Always record the history row (audit).
     history = ApprovalHistory(
         request_id=request_id,
         level=request.current_level,
-        action=action,
+        action=history_action,
         action_by=action_by,
-        comments=comments,
+        comments=history_comments,
     )
     db.add(history)
 
@@ -802,6 +808,8 @@ async def process_approval_action(
         request.completed_at = datetime.now(timezone.utc)
     elif action == "on_hold":
         request.status = "on_hold"
+    elif action == "unhold":
+        request.status = "pending"
     elif action == "returned":
         is_hierarchical = False
         if request.document_type in ("indent", "dispatch"):
@@ -859,7 +867,7 @@ async def process_approval_action(
             pass
 
     await db.flush()
-    if request.status in ("approved", "rejected", "on_hold"):
+    if request.status in ("approved", "rejected", "on_hold", "pending"):
         await update_document_status(
             db,
             document_type=request.document_type,
@@ -1587,7 +1595,7 @@ async def update_document_status(db: AsyncSession, document_type: str, document_
     # to "pending_approval" so the doc stays in the in-flight state but
     # the engine is paused.
     target_status = status
-    if status == "on_hold":
+    if status == "on_hold" or status == "pending":
         target_status = "pending_approval"
 
     if document_type == "purchase_order" and status == "approved":

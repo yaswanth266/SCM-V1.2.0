@@ -46,6 +46,7 @@ export default function LogisticsConsignment() {
   const [pageSize, setPageSize] = useState(20);
   const [searchText, setSearchText] = useState('');
   const [statusFilter, setStatusFilter] = useState(null);
+  const [stats, setStats] = useState({ total: 0, packed: 0, inTransit: 0, received: 0 });
 
   // Create form state
   const [showCreate, setShowCreate] = useState(false);
@@ -308,6 +309,175 @@ export default function LogisticsConsignment() {
     URL.revokeObjectURL(url);
   };
 
+  const handleDownloadDeliverableDocument = (consignment) => {
+    const w = window.open('', '_blank', 'width=950,height=800');
+    if (!w) {
+      message.warning('Popup blocked. Allow popups to download Deliverable Document.');
+      return;
+    }
+
+    const packagesSection = (consignment.packages || []).map((pkg, idx) => {
+      const itemsRows = (pkg.items || []).map((item, itemIdx) => {
+        return `
+          <tr>
+            <td>${itemIdx + 1}</td>
+            <td style="font-family: monospace;">${item.material_code || '—'}</td>
+            <td style="font-weight: 500;">${item.material_name || '—'}</td>
+            <td>${item.batch_number || '—'}</td>
+            <td>${item.expiry_date || '—'}</td>
+            <td style="font-weight: bold; text-align: center;">${item.quantity_packed || 0}</td>
+            <td style="text-align: center;">${item.uom_code || '—'}</td>
+          </tr>
+        `;
+      }).join('');
+
+      return `
+        <div class="package-card">
+          <div class="package-header">
+            <strong>Package ${idx + 1} / ${consignment.total_packages || 0}: ${pkg.package_number}</strong>
+            <span class="package-meta">Type: ${pkg.package_type || 'BOX'} | Weight: ${pkg.gross_weight_kg ? pkg.gross_weight_kg + ' KG' : '—'} | Volume: ${pkg.volume_cft ? pkg.volume_cft.toFixed(2) + ' CFT' : '—'}</span>
+          </div>
+          <table class="items-table">
+            <thead>
+              <tr>
+                <th style="width: 40px;">#</th>
+                <th style="width: 100px;">Code</th>
+                <th>Material / Item Description</th>
+                <th style="width: 110px;">Batch</th>
+                <th style="width: 110px;">Expiry</th>
+                <th style="width: 80px; text-align: center;">Qty</th>
+                <th style="width: 80px; text-align: center;">UOM</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsRows || '<tr><td colspan="7" style="text-align: center; color: #64748b;">No items in this package</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }).join('');
+
+    w.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Deliverable Document - ${consignment.consignment_number}</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: #1e293b; padding: 30px; font-size: 13px; line-height: 1.5; background: #ffffff; }
+            .no-print-bar { display: flex; justify-content: flex-end; margin-bottom: 20px; border-bottom: 1px solid #e2e8f0; padding-bottom: 10px; }
+            .btn-print { padding: 8px 16px; background: #0284c7; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 13px; }
+            .header-container { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #0f172a; padding-bottom: 15px; margin-bottom: 25px; }
+            .company-info { display: flex; flex-direction: column; }
+            .company-title { font-size: 22px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #0f172a; margin: 0; }
+            .doc-title { font-size: 14px; font-weight: 700; color: #0284c7; margin-top: 5px; margin-bottom: 0; text-transform: uppercase; letter-spacing: 0.5px; }
+            .barcode-box { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+            .cons-number { font-family: monospace; font-size: 16px; font-weight: 700; color: #0f172a; }
+            .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 25px; }
+            .section { border: 1px solid #e2e8f0; border-radius: 8px; padding: 15px; background: #f8fafc; }
+            .section-title { font-weight: 700; text-transform: uppercase; font-size: 11px; color: #475569; border-bottom: 1px solid #cbd5e1; padding-bottom: 6px; margin-top: 0; margin-bottom: 10px; letter-spacing: 0.5px; }
+            .meta-list { list-style: none; padding: 0; margin: 0; }
+            .meta-list li { margin-bottom: 6px; display: flex; justify-content: space-between; font-size: 12px; }
+            .meta-list li span { font-weight: 500; color: #64748b; }
+            .meta-list li strong { color: #0f172a; }
+            .package-card { border: 1px solid #e2e8f0; border-radius: 8px; margin-bottom: 20px; overflow: hidden; page-break-inside: avoid; }
+            .package-header { background: #f1f5f9; padding: 10px 15px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
+            .package-meta { font-size: 12px; color: #475569; font-weight: 500; }
+            .items-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            .items-table th, .items-table td { border-bottom: 1px solid #e2e8f0; padding: 8px 12px; text-align: left; }
+            .items-table th { background: #f8fafc; color: #475569; font-weight: 600; }
+            .items-table tr:last-child td { border-bottom: none; }
+            .footer-sigs { margin-top: 50px; display: flex; justify-content: space-between; page-break-inside: avoid; }
+            .signature-box { border-top: 1px solid #94a3b8; width: 220px; text-align: center; padding-top: 6px; font-size: 11px; color: #64748b; margin-top: 35px; }
+            @media print {
+              body { padding: 0; }
+              .no-print-bar { display: none; }
+              .package-card { page-break-inside: avoid; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="no-print-bar">
+            <button class="btn-print" onclick="window.print()">Print / Save as PDF</button>
+          </div>
+
+          <div class="header-container">
+            <div class="company-info">
+              <div class="company-title">Bavya SCM Logistics</div>
+              <div class="doc-title">Deliverable Document</div>
+            </div>
+            <div class="barcode-box">
+              <span class="cons-number">${consignment.consignment_number}</span>
+              <img src="https://bwipjs-api.metafloor.com/?bcid=code128&text=${encodeURIComponent(consignment.consignment_number)}&scale=1.5&rotate=N&includetext" alt="Barcode" height="35" />
+            </div>
+          </div>
+
+          <div class="grid">
+            <div class="section">
+              <div class="section-title">Consignment Details</div>
+              <ul class="meta-list">
+                <li><span>Consignment #:</span> <strong>${consignment.consignment_number}</strong></li>
+                <li><span>MI Reference #:</span> <strong>${consignment.material_issue_number || '—'}</strong></li>
+                <li><span>Indent Reference #:</span> <strong>${consignment.indent_number || '—'}</strong></li>
+                <li><span>Status:</span> <strong>${consignment.status?.replace('_', ' ') || '—'}</strong></li>
+                <li><span>Created Date:</span> <strong>${consignment.created_at ? new Date(consignment.created_at).toLocaleString() : '—'}</strong></li>
+                <li><span>Packed Date:</span> <strong>${consignment.packed_at ? new Date(consignment.packed_at).toLocaleString() : '—'}</strong></li>
+              </ul>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Destination & Receiver</div>
+              <ul class="meta-list">
+                <li><span>Source Warehouse:</span> <strong>${consignment.warehouse_name || '—'}</strong></li>
+                <li><span>Destination WH:</span> <strong>${consignment.destination_warehouse_name || '—'}</strong></li>
+                <li><span>Receiver Employee:</span> <strong>${consignment.receiver_name ? `${consignment.receiver_name} (${consignment.receiver_employee_code || '—'})` : (consignment.receiver_employee_code || '—')}</strong></li>
+                <li><span>Receiver Designation:</span> <strong>${consignment.receiver_position_code || '—'}</strong></li>
+                <li><span>Total Weight:</span> <strong>${consignment.total_weight_kg ? consignment.total_weight_kg + ' KG' : '—'}</strong></li>
+                <li><span>Total Volume:</span> <strong>${consignment.total_volume_cft ? consignment.total_volume_cft.toFixed(2) + ' CFT' : '—'}</strong></li>
+              </ul>
+            </div>
+          </div>
+
+          <h3 style="border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; margin-top: 30px; margin-bottom: 15px; color: #0f172a; text-transform: uppercase; font-size: 14px; letter-spacing: 0.5px;">package wise items</h3>
+          
+          ${packagesSection || '<div style="text-align: center; padding: 30px; color: #64748b; border: 1px dashed #e2e8f0; border-radius: 8px;">No packages defined for this consignment.</div>'}
+
+          <div class="footer-sigs">
+            <div class="signature-box">
+              Authorized Dispatcher<br/>(Store Manager)
+            </div>
+            <div class="signature-box">
+              Custodian / Transporter<br/>(Carrier Representative)
+            </div>
+            <div class="signature-box">
+              Consignee Acknowledgement<br/>(Receiver Signature)
+            </div>
+          </div>
+
+          <script>
+            window.onload = function() {
+              setTimeout(function() {
+                window.print();
+              }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    w.document.close();
+  };
+
+  const handleDownloadDeliverableDocumentById = async (conId) => {
+    try {
+      const hideMsg = message.loading({ content: 'Generating deliverable document...', duration: 0 });
+      const res = await api.get(`/consignment/${conId}`);
+      if (typeof hideMsg === 'function') hideMsg();
+      handleDownloadDeliverableDocument(res.data);
+    } catch (err) {
+      console.error(err);
+      message.error('Failed to generate deliverable document');
+    }
+  };
+
   const handlePreviewConsignmentLabel = () => {
     if (!detailConsignment) return;
     setPrintLabelType('consignment');
@@ -504,6 +674,21 @@ export default function LogisticsConsignment() {
       const res = await api.get('/consignment', { params });
       setConsignments(res.data.data || []);
       setTotal(res.data.total || 0);
+
+      // Fetch statistics counts in parallel
+      const [totalRes, packedRes, transitRes, receivedRes, partialRes] = await Promise.all([
+        api.get('/consignment', { params: { page: 1, page_size: 1 } }),
+        api.get('/consignment', { params: { page: 1, page_size: 1, status: 'PACKED' } }),
+        api.get('/consignment', { params: { page: 1, page_size: 1, status: 'IN_TRANSIT' } }),
+        api.get('/consignment', { params: { page: 1, page_size: 1, status: 'RECEIVED' } }),
+        api.get('/consignment', { params: { page: 1, page_size: 1, status: 'PARTIALLY_RECEIVED' } }),
+      ]);
+      setStats({
+        total: totalRes.data.total || 0,
+        packed: packedRes.data.total || 0,
+        inTransit: transitRes.data.total || 0,
+        received: (receivedRes.data.total || 0) + (partialRes.data.total || 0),
+      });
     } catch (err) {
       console.error('Failed to fetch consignments:', err);
       message.error('Failed to load consignments');
@@ -1023,6 +1208,9 @@ export default function LogisticsConsignment() {
           <Tooltip title="View details & packages">
             <Button size="small" icon={<EyeOutlined />} onClick={() => handleViewDetail(r.id)} />
           </Tooltip>
+          <Tooltip title="Download Deliverable Document">
+            <Button size="small" icon={<DownloadOutlined style={{ color: '#0ea5e9' }} />} onClick={() => handleDownloadDeliverableDocumentById(r.id)} />
+          </Tooltip>
           {r.status === 'DRAFT' && (
             <>
               <Tooltip title="Edit consignment">
@@ -1084,6 +1272,13 @@ export default function LogisticsConsignment() {
             >
               Download Barcode
             </Button>
+            <Button
+              icon={<DownloadOutlined style={{ color: '#0ea5e9' }} />}
+              onClick={() => handleDownloadDeliverableDocument(detailConsignment)}
+              style={{ borderRadius: '8px', fontWeight: 600 }}
+            >
+              Deliverable Document
+            </Button>
             {detailConsignment.status === 'DRAFT' && (
               <Button type="primary" icon={<CheckCircleOutlined />}
                 onClick={() => handlePack(detailConsignment.id)}
@@ -1096,7 +1291,7 @@ export default function LogisticsConsignment() {
 
         {/* Consignment Info */}
         <Row gutter={[16, 16]} style={{ marginBottom: '16px' }}>
-          <Col xs={24} md={16}>
+          <Col xs={24} md={24}>
             <Card style={{ borderRadius: '12px', border: '1px solid #e2e8f0', height: '100%' }}>
               <Descriptions title={<span style={{ fontWeight: 700 }}>Consignment Details</span>} column={{ xs: 1, sm: 2 }} size="small">
                 <Descriptions.Item label="Consignment #">{detailConsignment.consignment_number}</Descriptions.Item>
@@ -1112,52 +1307,6 @@ export default function LogisticsConsignment() {
                 <Descriptions.Item label="Created">{formatDate(detailConsignment.created_at)}</Descriptions.Item>
                 <Descriptions.Item label="Packed At">{detailConsignment.packed_at ? formatDate(detailConsignment.packed_at) : '—'}</Descriptions.Item>
               </Descriptions>
-            </Card>
-          </Col>
-          <Col xs={24} md={8}>
-            <Card
-              title={<span style={{ fontWeight: 700 }}><BarcodeOutlined style={{ marginRight: '8px', color: '#4f46e5' }} />Parent Package Barcodes</span>}
-              extra={
-                (detailConsignment.status === 'DRAFT' || detailConsignment.status === 'PACKED') && (
-                  <Button
-                    type="link"
-                    size="small"
-                    icon={<BoxPlotOutlined style={{ color: '#4f46e5' }} />}
-                    onClick={() => setParentPackagingVisible(true)}
-                    style={{ fontWeight: 600 }}
-                  >
-                    Manage Parents
-                  </Button>
-                )
-              }
-              style={{ borderRadius: '12px', border: '1px solid #e2e8f0', height: '100%', overflowY: 'auto' }}
-            >
-              {(() => {
-                const parents = {};
-                (detailConsignment.packages || []).forEach(p => {
-                  if (p.parent_package_code && !parents[p.parent_package_code]) {
-                    parents[p.parent_package_code] = p.parent_package_barcode || p.parent_package_code;
-                  }
-                });
-                const parentCodes = Object.keys(parents);
-                if (parentCodes.length > 0) {
-                  return (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                      {parentCodes.map(code => (
-                        <div key={code} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', borderBottom: '1px solid #f1f5f9', paddingBottom: '12px' }}>
-                          <Barcode value={code} width={1.2} height={40} fontSize={11} />
-                          <Space style={{ marginTop: '4px' }}>
-                            <Button size="small" type="link" icon={<PrinterOutlined />} onClick={() => handlePreviewParentLabel(code)}>Print</Button>
-                            <Button size="small" type="link" icon={<DownloadOutlined />} onClick={() => handleDownloadBarcode(code)}>Download</Button>
-                          </Space>
-                          <div style={{ fontSize: '11px', color: '#64748b', textAlign: 'center', marginTop: '4px' }}>Scan barcode to acknowledge this parent package group.</div>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                }
-                return <Empty description="No parent packages defined" />;
-              })()}
             </Card>
           </Col>
         </Row>
@@ -1793,24 +1942,40 @@ export default function LogisticsConsignment() {
 
       {/* Stats Row */}
       <Row gutter={[16, 16]} style={{ marginBottom: '16px' }}>
-        <Col xs={12} sm={6} md={3}>
-          <Card size="small" style={{ borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-            <Statistic title="Total" value={total} suffix="Consignments" valueStyle={{ fontSize: '20px', fontWeight: 700 }} />
+        <Col xs={12} sm={6} md={6}>
+          <Card size="small" style={{ borderRadius: '10px', border: '1px solid #e2e8f0', background: '#f8fafc' }}>
+            <Statistic 
+              title={<span style={{ color: '#64748b', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Total Consignments</span>} 
+              value={stats.total} 
+              valueStyle={{ fontSize: '24px', fontWeight: 800, color: '#0f172a' }} 
+            />
           </Card>
         </Col>
-        <Col xs={12} sm={6} md={3}>
-          <Card size="small" style={{ borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-            <Statistic title="Draft" value={consignments.filter(c => c.status === 'DRAFT').length} valueStyle={{ fontSize: '20px', color: '#64748b' }} />
+        <Col xs={12} sm={6} md={6}>
+          <Card size="small" style={{ borderRadius: '10px', border: '1px solid #e2e8f0', background: '#f0f9ff' }}>
+            <Statistic 
+              title={<span style={{ color: '#0369a1', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Packed</span>} 
+              value={stats.packed} 
+              valueStyle={{ fontSize: '24px', fontWeight: 800, color: '#0284c7' }} 
+            />
           </Card>
         </Col>
-        <Col xs={12} sm={6} md={3}>
-          <Card size="small" style={{ borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-            <Statistic title="In Transit" value={consignments.filter(c => c.status === 'IN_TRANSIT').length} valueStyle={{ fontSize: '20px', color: '#0284c7' }} />
+        <Col xs={12} sm={6} md={6}>
+          <Card size="small" style={{ borderRadius: '10px', border: '1px solid #e2e8f0', background: '#fffbeb' }}>
+            <Statistic 
+              title={<span style={{ color: '#b45309', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>In Transit</span>} 
+              value={stats.inTransit} 
+              valueStyle={{ fontSize: '24px', fontWeight: 800, color: '#d97706' }} 
+            />
           </Card>
         </Col>
-        <Col xs={12} sm={6} md={3}>
-          <Card size="small" style={{ borderRadius: '10px', border: '1px solid #e2e8f0' }}>
-            <Statistic title="Received" value={consignments.filter(c => c.status === 'RECEIVED').length} valueStyle={{ fontSize: '20px', color: '#16a34a' }} />
+        <Col xs={12} sm={6} md={6}>
+          <Card size="small" style={{ borderRadius: '10px', border: '1px solid #e2e8f0', background: '#f0fdf4' }}>
+            <Statistic 
+              title={<span style={{ color: '#15803d', fontWeight: 600, fontSize: '12px', textTransform: 'uppercase' }}>Received</span>} 
+              value={stats.received} 
+              valueStyle={{ fontSize: '24px', fontWeight: 800, color: '#16a34a' }} 
+            />
           </Card>
         </Col>
       </Row>

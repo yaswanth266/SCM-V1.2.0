@@ -144,8 +144,18 @@ async def get_stock_balances(
         query = query.where(StockBalance.item_id.in_(search_subq))
         count_query = count_query.where(StockBalance.item_id.in_(search_subq))
 
-    # BUG-INV-135: filter by quantity unless show_zero_stock is set.
-    if not show_zero_stock:
+    if show_zero_stock:
+        query = query.where(
+            StockBalance.available_qty == 0,
+            StockBalance.reserved_qty == 0,
+            StockBalance.transit_qty == 0
+        )
+        count_query = count_query.where(
+            StockBalance.available_qty == 0,
+            StockBalance.reserved_qty == 0,
+            StockBalance.transit_qty == 0
+        )
+    else:
         from sqlalchemy import or_
         query = query.where(
             or_(
@@ -564,13 +574,21 @@ async def get_stock_ledger(
     # could shift when posting_date jumps across page boundaries on a
     # back-dated insert. Always order by posting_date first, then id as the
     # tiebreaker so paging is reproducible.
+    from sqlalchemy import case
     query = (
         select(StockLedger)
         .options(
             selectinload(StockLedger.item),
             selectinload(StockLedger.warehouse),
         )
-        .order_by(StockLedger.posting_date.desc(), StockLedger.id.desc())
+        .order_by(
+            StockLedger.posting_date.desc(),
+            case(
+                (StockLedger.qty_out > 0, 1),
+                else_=2
+            ).asc(),
+            StockLedger.id.desc()
+        )
     )
     count_query = select(func.count(StockLedger.id))
 
@@ -3214,6 +3232,7 @@ async def list_items(
         query.options(
             selectinload(Item.primary_uom),
             selectinload(Item.category),
+            selectinload(Item.uom_category),
             selectinload(Item.feature),
             selectinload(Item.sub_class),
             selectinload(Item.kit_components).selectinload(MasterItemKitComponent.uom),
@@ -3224,6 +3243,31 @@ async def list_items(
     item_ids = [int(i.id) for i in items]
     fallback_feature_ids = [int(i.feature_id) for i in items if i.feature_id]
     item_feature_map, feature_map = await _load_feature_maps_for_items(db, item_ids, fallback_feature_ids)
+
+    # In-memory category hierarchy lookup helper to avoid N+1 queries
+    from app.models.inventory_master import ItemCategory
+    cat_rows = (await db.execute(select(ItemCategory))).scalars().all()
+    cat_map = {c.id: c for c in cat_rows}
+
+    def get_cat_hierarchy(category_id: int | None) -> dict:
+        hierarchy = {"level1": None, "level2": None, "level3": None}
+        if not category_id:
+            return hierarchy
+        current_id = category_id
+        for _ in range(3):
+            if not current_id:
+                break
+            cat = cat_map.get(current_id)
+            if not cat:
+                break
+            if cat.level == 1:
+                hierarchy["level1"] = cat.name
+            elif cat.level == 2:
+                hierarchy["level2"] = cat.name
+            elif cat.level == 3:
+                hierarchy["level3"] = cat.name
+            current_id = cat.parent_id
+        return hierarchy
 
     # Enrich response with UOM and category names for frontend
     response_items = []
@@ -3236,6 +3280,14 @@ async def list_items(
         data["primary_uom"] = {"id": i.primary_uom.id, "name": i.primary_uom.name, "abbreviation": i.primary_uom.abbreviation, "category_id": i.primary_uom.category_id} if i.primary_uom else None
         data["category_name"] = i.category.name if i.category else None
         data["category"] = {"id": i.category.id, "name": i.category.name, "code": i.category.code} if i.category else None
+        data["uom_category_name"] = i.uom_category.name if i.uom_category else None
+        
+        # Category hierarchy path
+        hierarchy = get_cat_hierarchy(i.category_id)
+        data["category_l1"] = hierarchy["level1"]
+        data["category_l2"] = hierarchy["level2"]
+        data["category_l3"] = hierarchy["level3"]
+
         data["feature_id"] = feature_ids[0] if feature_ids else None
         data["feature_ids"] = feature_ids
         data["feature_names"] = feature_names
@@ -3248,6 +3300,28 @@ async def list_items(
         response_items.append(data)
 
     return build_paginated_response(response_items, total, page, page_size)
+
+
+async def _resolve_category_hierarchy(db: AsyncSession, category_id: int | None) -> dict:
+    hierarchy = {"level1": None, "level2": None, "level3": None}
+    if not category_id:
+        return hierarchy
+    from app.models.inventory_master import ItemCategory
+    current_id = category_id
+    for _ in range(3):
+        if not current_id:
+            break
+        row = (await db.execute(select(ItemCategory).where(ItemCategory.id == current_id))).scalar_one_or_none()
+        if not row:
+            break
+        if row.level == 1:
+            hierarchy["level1"] = row.name
+        elif row.level == 2:
+            hierarchy["level2"] = row.name
+        elif row.level == 3:
+            hierarchy["level3"] = row.name
+        current_id = row.parent_id
+    return hierarchy
 
 
 @router.get("/items/{item_id}", response_model=ItemResponse)
@@ -3265,6 +3339,8 @@ async def get_item(
         select(Item)
         .options(
             selectinload(Item.primary_uom),
+            selectinload(Item.category),
+            selectinload(Item.uom_category),
             selectinload(Item.sub_class),
             selectinload(Item.kit_components).selectinload(MasterItemKitComponent.uom),
         )
@@ -3284,6 +3360,19 @@ async def get_item(
     if item.primary_uom:
         data["primary_uom_name"] = item.primary_uom.name
         data["primary_uom"] = {"id": item.primary_uom.id, "name": item.primary_uom.name, "abbreviation": item.primary_uom.abbreviation, "category_id": item.primary_uom.category_id}
+    if item.category:
+        data["category_name"] = item.category.name
+        data["category"] = {"id": item.category.id, "name": item.category.name, "code": item.category.code}
+    if item.uom_category:
+        data["uom_category_name"] = item.uom_category.name
+        data["uom_category"] = {"id": item.uom_category.id, "name": item.uom_category.name}
+    
+    # Resolve category hierarchy levels L1, L2, L3
+    hierarchy = await _resolve_category_hierarchy(db, item.category_id)
+    data["category_l1"] = hierarchy["level1"]
+    data["category_l2"] = hierarchy["level2"]
+    data["category_l3"] = hierarchy["level3"]
+
     data["feature_id"] = feature_ids[0] if feature_ids else None
     data["feature_ids"] = feature_ids
     data["feature_names"] = feature_names

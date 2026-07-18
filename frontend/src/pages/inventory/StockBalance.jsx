@@ -7,7 +7,8 @@ import {
 import {
   AppstoreOutlined, WarningOutlined, ClockCircleOutlined,
   DollarOutlined, DownloadOutlined, EyeOutlined, FilterOutlined,
-  BarChartOutlined, UnorderedListOutlined, PlusOutlined,
+  BarChartOutlined, UnorderedListOutlined, PlusOutlined, ReloadOutlined,
+  SearchOutlined,
 } from '@ant-design/icons';
 import useAuthStore from '../../store/authStore';
 import BarcodeDisplay from '../../components/BarcodeDisplay';
@@ -801,13 +802,17 @@ const StockBalance = () => {
   ];
 
   const filterToolbar = (
-    <Space wrap size="small" style={{ marginLeft: 12 }}>
+    <Space wrap size="small" style={{ marginLeft: 12, alignItems: 'center' }}>
       <Input
-        placeholder="Search items by code or name..."
+        placeholder="Search by code or name..."
+        prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}
         value={searchInput}
         onChange={(e) => setSearchInput(e.target.value)}
+        onPressEnter={(e) => {
+          setFilterItem(e.target.value);
+        }}
         allowClear
-        style={{ width: 220 }}
+        style={{ width: 220, borderRadius: '8px' }}
         size="middle"
       />
       <Select
@@ -816,36 +821,74 @@ const StockBalance = () => {
         value={filterWarehouse}
         onChange={(val) => setFilterWarehouse(val)}
         allowClear
-        style={{ width: 160 }}
+        style={{ width: 180 }}
         size="middle"
         showSearch
         optionFilterProp="label"
+        dropdownStyle={{ borderRadius: '8px' }}
       />
       <Select
-        placeholder="Category"
+        placeholder="Item Class"
         options={CATEGORY_OPTIONS}
         value={filterCategory}
         onChange={(val) => setFilterCategory(val)}
         allowClear
         style={{ width: 140 }}
         size="middle"
+        dropdownStyle={{ borderRadius: '8px' }}
       />
       <Input
         placeholder="Batch..."
+        prefix={<BarcodeOutlined style={{ color: '#94a3b8' }} />}
         value={batchInput}
         onChange={(e) => setBatchInput(e.target.value)}
+        onPressEnter={(e) => {
+          setFilterBatch(e.target.value);
+        }}
         allowClear
-        style={{ width: 120 }}
+        style={{ width: 120, borderRadius: '8px' }}
         size="middle"
       />
-      <Space size="small">
-        <Text type="secondary" style={{ fontSize: 12 }}>Zero Stock</Text>
+      <div style={{ 
+        display: 'inline-flex', 
+        alignItems: 'center', 
+        background: showZeroStock ? '#fdf2f8' : '#f8fafc', 
+        padding: '5px 12px', 
+        borderRadius: '8px', 
+        border: showZeroStock ? '1px solid #fbcfe8' : '1px solid #e2e8f0', 
+        gap: '8px',
+        height: '32px',
+        transition: 'all 0.2s ease'
+      }}>
+        <Text style={{ 
+          fontSize: '12px', 
+          fontWeight: 600, 
+          color: showZeroStock ? '#db2777' : '#475569' 
+        }}>
+          Zero Stock Only
+        </Text>
         <Switch
           checked={showZeroStock}
           onChange={(val) => setShowZeroStock(val)}
           size="small"
         />
-      </Space>
+      </div>
+      <Button 
+        icon={<ReloadOutlined />} 
+        onClick={() => {
+          setSearchInput('');
+          setFilterItem('');
+          setFilterWarehouse(user?.warehouse_id || undefined);
+          setFilterCategory(undefined);
+          setBatchInput('');
+          setFilterBatch('');
+          setShowZeroStock(false);
+        }}
+        style={{ borderRadius: '8px' }}
+        size="middle"
+      >
+        Reset
+      </Button>
     </Space>
   );
 
@@ -1127,7 +1170,7 @@ const StockBalance = () => {
             warehouse_id: filterWarehouse,
             category: filterCategory,
             batch: filterBatch,
-            show_zero_stock: showZeroStock || undefined,
+            show_zero_stock: showZeroStock,
             group_by: groupBy || undefined,
             search: filterItem || undefined,
           }}

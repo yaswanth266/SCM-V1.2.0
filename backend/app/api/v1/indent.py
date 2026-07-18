@@ -1286,6 +1286,33 @@ async def approve_indent(
             detail=f"Only indents in pending_approval can be approved (current status: {indent.status})",
         )
 
+    # Apply per-line approved_qty overrides early from the Approve modal payload (BUG-FE-IND-005)
+    # both for the workflow path and the direct approval path.
+    if payload and payload.items:
+        line_rows = await db.execute(
+            select(IndentItem).where(IndentItem.indent_id == indent_id)
+        )
+        line_by_id = {l.id: l for l in line_rows.scalars().all()}
+        for it in payload.items:
+            line_id = it.get("id") or it.get("indent_item_id")
+            target = line_by_id.get(line_id)
+            if not target:
+                continue
+            qty = it.get("approved_qty")
+            if qty is None:
+                continue
+            try:
+                qty_dec = Decimal(str(qty))
+                if qty_dec < 0:
+                    continue
+                requested = Decimal(str(target.requested_qty or 0))
+                if qty_dec > requested:
+                    qty_dec = requested
+                target.approved_qty = qty_dec
+            except Exception:
+                continue
+        await db.flush()
+
     # BUG-IND-006 — separation of duties: the originator can never approve
     # their own indent, even if they hold an APPROVER_ROLES role. Super
     # admin keeps the override (escape hatch).
@@ -1351,35 +1378,7 @@ async def approve_indent(
             "current_level": request_obj.current_level,
         }
 
-    # BUG-FE-IND-005 — apply per-line approved_qty overrides from the
-    # approve modal. Without this, every line was approved at requested_qty
-    # regardless of what the approver typed in the modal.
-    if payload and payload.items:
-        line_rows = await db.execute(
-            select(IndentItem).where(IndentItem.indent_id == indent_id)
-        )
-        line_by_id = {l.id: l for l in line_rows.scalars().all()}
-        for it in payload.items:
-            line_id = it.get("id")
-            target = line_by_id.get(line_id)
-            if not target:
-                continue
-            qty = it.get("approved_qty")
-            if qty is None:
-                continue
-            try:
-                qty_dec = Decimal(str(qty))
-                if qty_dec < 0:
-                    continue
-                # Cap at requested_qty — approver shouldn't be able to grant
-                # more than the originator asked for.
-                requested = Decimal(str(target.requested_qty or 0))
-                if qty_dec > requested:
-                    qty_dec = requested
-                target.approved_qty = qty_dec
-            except Exception:
-                continue
-        await db.flush()
+    # overrides were already applied early at the beginning of the function
 
     from app.services.indent_lifecycle import on_indent_approved
     summary = await on_indent_approved(db, indent_id=indent_id, user_id=current_user.id)

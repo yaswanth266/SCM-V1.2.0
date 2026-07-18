@@ -135,7 +135,7 @@ const Items = () => {
       title: 'Readable Code',
       dataIndex: 'readable_code',
       key: 'readable_code',
-      width: 240,
+      width: 200,
       sorter: true,
       fixed: 'left',
       render: (text, record) => (
@@ -146,7 +146,7 @@ const Items = () => {
       title: 'Item Code',
       dataIndex: 'item_code',
       key: 'item_code',
-      width: 130,
+      width: 120,
       sorter: true,
       render: (text, record) => (
         <a onClick={() => navigate(`/masters/items/${record.id}`)}>{text}</a>
@@ -171,7 +171,7 @@ const Items = () => {
       title: 'Item Class',
       dataIndex: 'item_type',
       key: 'item_type',
-      width: 130,
+      width: 120,
       render: (val) => {
         const found = itemTypeOptions.find((t) => t.value === val);
         return found ? found.label : (val || '-');
@@ -192,44 +192,6 @@ const Items = () => {
       render: (text, record) => text || record.primary_uom_name || '-',
     },
     {
-      title: 'Barcode Type',
-      dataIndex: 'barcode_type',
-      key: 'barcode_type',
-      width: 110,
-    },
-    {
-      title: 'Safety Stock',
-      dataIndex: 'safety_stock',
-      key: 'safety_stock',
-      width: 110,
-      align: 'right',
-      render: (val) => val ?? '-',
-    },
-    {
-      title: 'Reorder Level',
-      dataIndex: 'reorder_level',
-      key: 'reorder_level',
-      width: 120,
-      align: 'right',
-      render: (val) => val ?? '-',
-    },
-    {
-      title: 'Purchase Price',
-      dataIndex: 'purchase_price',
-      key: 'purchase_price',
-      width: 130,
-      align: 'right',
-      render: (val) => formatCurrency(val),
-    },
-    {
-      title: 'Selling Price',
-      dataIndex: 'selling_price',
-      key: 'selling_price',
-      width: 130,
-      align: 'right',
-      render: (val) => formatCurrency(val),
-    },
-    {
       title: 'Status',
       dataIndex: 'is_active',
       key: 'status',
@@ -239,13 +201,10 @@ const Items = () => {
         return <StatusTag status={status} />;
       },
     },
-    { title: 'Brand', dataIndex: 'brand', key: 'brand', width: 120 },
-    { title: 'Manufacturer', dataIndex: 'manufacturer', key: 'manufacturer', width: 150 },
-    { title: 'Valuation', dataIndex: 'valuation_method', key: 'valuation_method', width: 100, render: (v) => (v || 'fifo').toUpperCase() },
     {
       title: 'Actions',
       key: 'actions',
-      width: 140,
+      width: 110,
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
@@ -339,7 +298,7 @@ const Items = () => {
         searchPlaceholder="Search by name or code..."
         exportFileName="items"
         toolbar={toolbar}
-        scroll={{ x: 1600 }}
+        scroll={{ x: 1200 }}
         initialSearch={initialSearch}
       />
 

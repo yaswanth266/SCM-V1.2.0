@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -20,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { router } from 'expo-router';
+import { API_BASE_URL } from '../constants/config';
 
 // ─── Custom Premium Vector Icons ───────────────────────────────────────────────
 const Icon = ({ name, size = 18, color = '#7A6D66' }: { name: string; size?: number; color?: string }) => {
@@ -213,7 +214,6 @@ const DropdownSelect = ({
 // ─── Main Indents Component ───────────────────────────────────────────────────
 export default function IndentsScreen() {
   const [token, setToken] = useState<string>('');
-  const [apiUrl, setApiUrl] = useState<string>('');
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -263,7 +263,6 @@ export default function IndentsScreen() {
       try {
         const savedToken = await AsyncStorage.getItem('user_token');
         const savedUserStr = await AsyncStorage.getItem('user_profile');
-        const savedApiUrl = await AsyncStorage.getItem('API_URL');
 
         if (!savedToken || !savedUserStr) {
           router.replace('/');
@@ -272,13 +271,11 @@ export default function IndentsScreen() {
 
         setToken(savedToken);
         setUser(JSON.parse(savedUserStr));
-        const url = savedApiUrl || 'http://10.2.1.31:8000';
-        setApiUrl(url);
 
         // Load lookups
-        fetchLookups(url, savedToken);
+        fetchLookups(API_BASE_URL, savedToken);
         // Load Indents
-        fetchIndents(url, savedToken, 1, searchQuery, activeTab);
+        fetchIndents(API_BASE_URL, savedToken, 1, searchQuery, activeTab);
       } catch (e) {
         console.error('Error loading indents session:', e);
         router.replace('/');
@@ -328,23 +325,23 @@ export default function IndentsScreen() {
 
   const handleRefresh = () => {
     setRefreshing(true);
-    fetchIndents(apiUrl, token, 1, searchQuery, activeTab);
+    fetchIndents(API_BASE_URL, token, 1, searchQuery, activeTab);
   };
 
   const loadMore = () => {
     if (indents.length < total && !loading) {
-      fetchIndents(apiUrl, token, page + 1, searchQuery, activeTab);
+      fetchIndents(API_BASE_URL, token, page + 1, searchQuery, activeTab);
     }
   };
 
   const handleSearchChange = (val: string) => {
     setSearchQuery(val);
-    fetchIndents(apiUrl, token, 1, val, activeTab);
+    fetchIndents(API_BASE_URL, token, 1, val, activeTab);
   };
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
-    fetchIndents(apiUrl, token, 1, searchQuery, tab);
+    fetchIndents(API_BASE_URL, token, 1, searchQuery, tab);
   };
 
   const fetchLookups = async (apiBase: string, authToken: string) => {
@@ -377,7 +374,7 @@ export default function IndentsScreen() {
     setDetailLoading(true);
     setDetailModalVisible(true);
     try {
-      const res = await axios.get(`${apiUrl}/api/v1/indent/indents/${indentId}`, {
+      const res = await axios.get(`${API_BASE_URL}/api/v1/indent/indents/${indentId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setSelectedIndent(res.data);
@@ -404,7 +401,7 @@ export default function IndentsScreen() {
         text: 'Submit',
         onPress: async () => {
           try {
-            await axios.post(`${apiUrl}/api/v1/indent/indents/${indentId}/submit`, {}, {
+            await axios.post(`${API_BASE_URL}/api/v1/indent/indents/${indentId}/submit`, {}, {
               headers: { Authorization: `Bearer ${token}` },
             });
             Alert.alert('Success', 'Indent submitted successfully.');
@@ -449,7 +446,7 @@ export default function IndentsScreen() {
               approved_qty: parseFloat(approveOverrides[id] || '0'),
             }));
             await axios.post(
-              `${apiUrl}/api/v1/indent/indents/${selectedIndent.id}/approve`,
+              `${API_BASE_URL}/api/v1/indent/indents/${selectedIndent.id}/approve`,
               { items: itemsOverride },
               { headers: { Authorization: `Bearer ${token}` } }
             );
@@ -475,7 +472,7 @@ export default function IndentsScreen() {
         onPress: async () => {
           try {
             await axios.post(
-              `${apiUrl}/api/v1/indent/indents/${selectedIndent.id}/reject`,
+              `${API_BASE_URL}/api/v1/indent/indents/${selectedIndent.id}/reject`,
               {},
               { headers: { Authorization: `Bearer ${token}` } }
             );
@@ -565,7 +562,7 @@ export default function IndentsScreen() {
 
     setItemSearchLoading(true);
     try {
-      const response = await axios.get(`${apiUrl}/api/v1/masters/items`, {
+      const response = await axios.get(`${API_BASE_URL}/api/v1/masters/items`, {
         headers: { Authorization: `Bearer ${token}` },
         params: { search: text, page_size: 20, is_active: true, transactable: true },
       });
@@ -639,18 +636,18 @@ export default function IndentsScreen() {
 
       let id = formIndentId;
       if (formIsNew) {
-        const res = await axios.post(`${apiUrl}/api/v1/indent/indents`, payload, {
+        const res = await axios.post(`${API_BASE_URL}/api/v1/indent/indents`, payload, {
           headers: { Authorization: `Bearer ${token}` },
         });
         id = res.data.id || res.data.data?.id;
       } else {
-        await axios.put(`${apiUrl}/api/v1/indent/indents/${formIndentId}`, payload, {
+        await axios.put(`${API_BASE_URL}/api/v1/indent/indents/${formIndentId}`, payload, {
           headers: { Authorization: `Bearer ${token}` },
         });
       }
 
       if (submitForApproval && id) {
-        await axios.post(`${apiUrl}/api/v1/indent/indents/${id}/submit`, {}, {
+        await axios.post(`${API_BASE_URL}/api/v1/indent/indents/${id}/submit`, {}, {
           headers: { Authorization: `Bearer ${token}` },
         });
         Alert.alert('Success', 'Indent saved and submitted for approval.');

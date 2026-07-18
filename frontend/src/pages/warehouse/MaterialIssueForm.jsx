@@ -48,7 +48,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
   const [warehouses, setWarehouses] = useState([]);
   const [allWarehouses, setAllWarehouses] = useState([]);
   const [indentOptions, setIndentOptions] = useState([]);
-  const [mrOptions, setMrOptions] = useState([]);
+
   const [uomOptions, setUomOptions] = useState([]);
   const [userOptions, setUserOptions] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -206,23 +206,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
     }
   }, [form]);
 
-  const loadMROptions = useCallback(async (search = '') => {
-    try {
-      const res = await api.get('/procurement/material-requests', {
-        params: { page_size: 50, search },
-      });
-      const data = res.data;
-      const items = data.items || data.data || data || [];
-      setMrOptions(
-        items.map((mr) => ({
-          label: `${mr.mr_number} - ${mr.department || ''}`,
-          value: mr.id,
-        }))
-      );
-    } catch (err) {
-      console.error('Error loading MR options:', err);
-    }
-  }, []);
+
 
   const refreshStockForItems = useCallback(async (warehouseId, itemIds) => {
     if (!warehouseId || !itemIds || itemIds.length === 0) {
@@ -433,30 +417,33 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         service_code: ind.service_code || undefined,
       });
 
-      const lines = (ind.items || []).map((it) => ({
-        key: `${it.id}-${Date.now()}-${Math.random()}`,
-        item_id: it.item_id,
-        item_name: it.item_name || it.name || '',
-        item_code: it.item_code || '',
-        item_type: it.item_type || '',
-        uom_id: it.uom_id || null,
-        qty: Math.max(
-          Number(
-            it.issue_remaining_qty ?? (
-              (Number(it.approved_qty ?? it.requested_qty) || 0)
-              - (Number(it.issued_qty) || 0)
-            ),
-          ) || 0,
-          0,
-        ),
-        batch_id: null,
-        bin_id: null,
-        rate: Number(it.rate) || Number(it.purchase_price) || 0,
-        amount: 0,
-        has_batch: !!it.has_batch,
-        has_serial: !!it.has_serial,
-        serial_numbers: [],
-      }));
+      const lines = (ind.items || [])
+        .map((it) => ({
+          key: `${it.id}-${Date.now()}-${Math.random()}`,
+          item_id: it.item_id,
+          item_name: it.item_name || it.name || '',
+          item_code: it.item_code || '',
+          item_type: it.item_type || '',
+          uom_id: it.uom_id || null,
+          qty: Math.max(
+            Number(
+              it.issue_remaining_qty ?? (
+                (Number(it.approved_qty ?? it.requested_qty) || 0)
+                - (Number(it.issued_qty) || 0)
+              ),
+            ) || 0,
+            0,
+          ),
+          batch_id: null,
+          bin_id: null,
+          rate: Number(it.rate) || Number(it.purchase_price) || 0,
+          amount: 0,
+          has_batch: !!it.has_batch,
+          has_serial: !!it.has_serial,
+          serial_numbers: [],
+        }))
+        // Exclude lines already fully issued — nothing left to issue for them
+        .filter((line) => line.qty > 0);
 
       setIssueItems(lines.length > 0 ? lines : [createEmptyItem()]);
       const itemIds = lines.map((l) => l.item_id).filter(Boolean);
@@ -572,7 +559,6 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         warehouse_id: data.warehouse_id,
         destination_warehouse_id: data.destination_warehouse_id,
         indent_id: data.indent_id,
-        mr_id: data.mr_id,
         department: data.department,
         issued_to: data.issued_to,
         issue_date: data.issue_date ? dayjs(data.issue_date) : null,
@@ -672,7 +658,6 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
   useEffect(() => {
     loadLookups();
     loadIndentOptions();
-    loadMROptions();
     loadVehicleOptions();
     if (!isNew) {
       fetchRecord();
@@ -688,7 +673,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         prefillFromIndent(Number(indentId));
       }
     }
-  }, [id, isNew, fetchRecord, loadLookups, loadIndentOptions, loadMROptions, form, location.search, prefillFromIndent, loadVehicleOptions]);
+  }, [id, isNew, fetchRecord, loadLookups, loadIndentOptions, form, location.search, prefillFromIndent, loadVehicleOptions]);
 
   useEffect(() => {
     if (templateType) {
@@ -1323,7 +1308,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
             <Descriptions.Item label="Destination Warehouse">{recordData.destination_warehouse_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="Department">{recordData.department || '-'}</Descriptions.Item>
             <Descriptions.Item label="Issued To">{recordData.issued_to_name || recordData.issued_to || '-'}</Descriptions.Item>
-            <Descriptions.Item label="MR Reference">{recordData.mr_number || recordData.mr_id || '-'}</Descriptions.Item>
+
             <Descriptions.Item label="Indent Reference">{recordData.indent_number || recordData.indent_id || '-'}</Descriptions.Item>
             <Descriptions.Item label="Vehicle Code">{recordData.vehicle_code || '-'}</Descriptions.Item>
             <Descriptions.Item label="Vehicle Number">{recordData.vehicle_number || '-'}</Descriptions.Item>
@@ -1992,18 +1977,6 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
                       onFocus={() => loadIndentOptions()}
                       onSearch={(v) => loadIndentOptions(v)}
                       onChange={(v) => prefillFromIndent(v)}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={8}>
-                  <Form.Item name="mr_id" label="Material Request">
-                    <Select
-                      options={mrOptions}
-                      placeholder="Select MR (optional)"
-                      showSearch
-                      optionFilterProp="label"
-                      allowClear
-                      onSearch={(v) => loadMROptions(v)}
                     />
                   </Form.Item>
                 </Col>

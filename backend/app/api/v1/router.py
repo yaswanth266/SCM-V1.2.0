@@ -369,7 +369,13 @@ async def stock_balance_summary_alias(
         if warehouse_id is not None:
             stmt = stmt.where(StockBalance.warehouse_id == warehouse_id)
             
-        if not show_zero_stock:
+        if show_zero_stock:
+            stmt = stmt.where(
+                StockBalance.available_qty == 0,
+                StockBalance.reserved_qty == 0,
+                StockBalance.transit_qty == 0
+            )
+        else:
             stmt = stmt.where(
                 or_(
                     StockBalance.available_qty > 0,

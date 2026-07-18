@@ -123,7 +123,7 @@ class IndentItemResponse(BaseModel):
     id: int
     item_id: int
     requested_qty: Decimal
-    approved_qty: Decimal
+    approved_qty: Optional[Decimal] = None
     issued_qty: Decimal
     uom_id: int
     remarks: Optional[str] = None
