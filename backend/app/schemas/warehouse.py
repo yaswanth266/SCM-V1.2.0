@@ -316,7 +316,6 @@ class MaterialIssueItemCreate(BaseModel):
         return v
 
 class MaterialIssueCreate(BaseModel):
-    mr_id: Optional[int] = None
     indent_id: Optional[int] = None
     warehouse_id: int
     destination_warehouse_id: Optional[int] = None
@@ -351,7 +350,6 @@ class MaterialIssueCreate(BaseModel):
         return v
 
 class MaterialIssueUpdate(BaseModel):
-    mr_id: Optional[int] = None
     indent_id: Optional[int] = None
     warehouse_id: Optional[int] = None
     destination_warehouse_id: Optional[int] = None
@@ -409,7 +407,6 @@ class MaterialIssueItemResponse(BaseModel):
 class MaterialIssueResponse(BaseModel):
     id: int
     issue_number: str
-    mr_id: Optional[int] = None
     indent_id: Optional[int] = None
     indent_number: Optional[str] = None
     warehouse_id: int

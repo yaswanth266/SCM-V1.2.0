@@ -96,7 +96,11 @@ api.interceptors.request.use(
     }
 
     const token = localStorage.getItem('token');
-    if (token) {
+    const isPublicEndpoint = config.url && (
+      config.url.includes('/auth/login') || 
+      config.url.includes('/auth/refresh-token')
+    );
+    if (token && !isPublicEndpoint) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     if (!config.headers['X-Request-Id']) {

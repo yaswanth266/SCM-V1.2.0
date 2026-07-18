@@ -119,14 +119,11 @@ async def _upstream_for(db, type_: str, id_: int) -> list[dict]:
             if d: out.append(d)
     elif type_ == "material_issue":
         row = (await db.execute(
-            select(MaterialIssue.indent_id, MaterialIssue.mr_id).where(MaterialIssue.id == id_)
+            select(MaterialIssue.indent_id).where(MaterialIssue.id == id_)
         )).first()
         if row:
             if row.indent_id:
                 d = await _doc_summary(db, "indent", row.indent_id)
-                if d: out.append(d)
-            if row.mr_id:
-                d = await _doc_summary(db, "material_request", row.mr_id)
                 if d: out.append(d)
     elif type_ == "purchase_return":
         row = (await db.execute(

@@ -237,7 +237,7 @@ async def on_indent_approved(
 
     # Default approved_qty = requested_qty if blank (so issue can pull min(requested, available))
     for line in indent.items:
-        if not line.approved_qty or line.approved_qty == 0:
+        if line.approved_qty is None:
             line.approved_qty = line.requested_qty
 
     stock_check = await check_stock_for_indent(db, indent)
@@ -246,12 +246,13 @@ async def on_indent_approved(
 
     issue_id = None
 
-    if fulfillable:
-        mi = await auto_create_issue_for_indent(
-            db, indent=indent, fulfill_lines=fulfillable, user_id=user_id,
-        )
-        if mi:
-            issue_id = mi.id
+    # Auto-creation of draft MaterialIssue is disabled as per user request.
+    # if fulfillable:
+    #     mi = await auto_create_issue_for_indent(
+    #         db, indent=indent, fulfill_lines=fulfillable, user_id=user_id,
+    #     )
+    #     if mi:
+    #         issue_id = mi.id
     # Short lines: no auto-MR. Purchase Manager picks approved indents from
     # the demand pool and creates an MR manually.
 
@@ -395,16 +396,17 @@ async def _try_fulfill_one_indent(
 
     fulfillable_now = [p for p in pending if p["can_fulfill"]]
     out = []
-    if fulfillable_now:
-        mi = await auto_create_issue_for_indent(
-            db, indent=indent, fulfill_lines=fulfillable_now, user_id=user_id,
-        )
-        if mi:
-            out.append({
-                "indent_id": indent.id,
-                "indent_number": indent.indent_number,
-                "auto_issue_id": mi.id,
-                "issue_number": mi.issue_number,
-                "lines": len(fulfillable_now),
-            })
+    # Auto-creation of draft MaterialIssue is disabled as per user request.
+    # if fulfillable_now:
+    #     mi = await auto_create_issue_for_indent(
+    #         db, indent=indent, fulfill_lines=fulfillable_now, user_id=user_id,
+    #     )
+    #     if mi:
+    #         out.append({
+    #             "indent_id": indent.id,
+    #             "indent_number": indent.indent_number,
+    #             "auto_issue_id": mi.id,
+    #             "issue_number": mi.issue_number,
+    #             "lines": len(fulfillable_now),
+    #         })
     return out

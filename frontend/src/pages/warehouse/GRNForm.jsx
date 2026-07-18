@@ -776,26 +776,86 @@ const GRNForm = () => {
           </div>
         </Card>
 
-        <Card style={{ marginBottom: 16 }}>
-          <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
-            <Descriptions.Item label="GRN Number"><Text strong>{grn.grn_number}</Text></Descriptions.Item>
-            <Descriptions.Item label="GRN Date">{formatDate(grn.grn_date)}</Descriptions.Item>
-            <Descriptions.Item label="Status"><StatusTag status={grn.status} /></Descriptions.Item>
-            <Descriptions.Item label="Receipt Type"><Tag>{typeMap[grn.receipt_type] || grn.receipt_type || '-'}</Tag></Descriptions.Item>
-            <Descriptions.Item label="Vendor">{grn.vendor_name || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Warehouse">{grn.warehouse_name || '-'}</Descriptions.Item>
-            <Descriptions.Item label="PO Reference">{grn.po_number || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Inward Reference">{grn.inward_number || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Supplier Invoice">{grn.supplier_invoice || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Supplier Invoice Date">{formatDate(grn.supplier_invoice_date)}</Descriptions.Item>
-            <Descriptions.Item label="Vehicle Number">{grn.vehicle_number || '-'}</Descriptions.Item>
-            <Descriptions.Item label="LR Number">{grn.lr_number || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Total Qty">{formatNumber(grn.total_qty)}</Descriptions.Item>
-            <Descriptions.Item label="Total Amount">{formatCurrency(grn.total_amount)}</Descriptions.Item>
-            <Descriptions.Item label="Created By">{grn.created_by_name || grn.created_by || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Created At">{formatDateTime(grn.created_at)}</Descriptions.Item>
-            <Descriptions.Item label="Remarks" span={3}>{grn.remarks || '-'}</Descriptions.Item>
-          </Descriptions>
+        <Card title="Goods Receipt Note Details" style={{ marginBottom: 16 }} styles={{ body: { padding: '24px 24px 12px 24px' } }}>
+          <Row gutter={[24, 16]}>
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>GRN Number</Text>
+              <Text strong style={{ fontSize: 14 }}>{grn.grn_number || '-'}</Text>
+            </Col>
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>GRN Date</Text>
+              <Text style={{ fontSize: 14 }}>{formatDate(grn.grn_date) || '-'}</Text>
+            </Col>
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Status</Text>
+              <div style={{ marginTop: 2 }}><StatusTag status={grn.status} /></div>
+            </Col>
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Receipt Type</Text>
+              <div style={{ marginTop: 2 }}>
+                <Tag color="blue">{typeMap[grn.receipt_type] || grn.receipt_type || '-'}</Tag>
+              </div>
+            </Col>
+
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Vendor</Text>
+              <Text style={{ fontSize: 14 }}>{grn.vendor_name || '-'}</Text>
+            </Col>
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Warehouse</Text>
+              <Text style={{ fontSize: 14 }}>{grn.warehouse_name || '-'}</Text>
+            </Col>
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>PO Reference</Text>
+              <Text style={{ fontSize: 14 }}>{grn.po_number || '-'}</Text>
+            </Col>
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Inward Reference</Text>
+              <Text style={{ fontSize: 14 }}>{grn.inward_number || '-'}</Text>
+            </Col>
+
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Supplier Invoice</Text>
+              <Text style={{ fontSize: 14 }}>{grn.supplier_invoice || '-'}</Text>
+            </Col>
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Supplier Invoice Date</Text>
+              <Text style={{ fontSize: 14 }}>{formatDate(grn.supplier_invoice_date) || '-'}</Text>
+            </Col>
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Vehicle Number</Text>
+              <Text style={{ fontSize: 14 }}>{grn.vehicle_number || '-'}</Text>
+            </Col>
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>LR Number</Text>
+              <Text style={{ fontSize: 14 }}>{grn.lr_number || '-'}</Text>
+            </Col>
+
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Total Qty</Text>
+              <Text strong style={{ fontSize: 14 }}>{formatNumber(grn.total_qty) || '0'}</Text>
+            </Col>
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Total Amount</Text>
+              <Text strong style={{ fontSize: 14, color: '#eb2f96' }}>{formatCurrency(grn.total_amount) || '0.00'}</Text>
+            </Col>
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Received By</Text>
+              <Text style={{ fontSize: 14 }}>{grn.received_by_name || grn.received_by || '-'}</Text>
+            </Col>
+            <Col xs={12} sm={8} md={6}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Created At</Text>
+              <Text style={{ fontSize: 14 }}>{formatDateTime(grn.created_at) || '-'}</Text>
+            </Col>
+
+            <Col span={24}>
+              <Divider style={{ margin: '8px 0 12px 0' }} />
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Remarks</Text>
+              <Text style={{ fontSize: 14, display: 'block', fontStyle: grn.remarks ? 'normal' : 'italic' }}>
+                {grn.remarks || 'No remarks provided.'}
+              </Text>
+            </Col>
+          </Row>
         </Card>
 
         <Card>

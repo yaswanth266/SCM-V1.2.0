@@ -9,7 +9,6 @@ class MaterialIssue(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     issue_number = Column(String(50), unique=True, nullable=False)
-    mr_id = Column(BigInteger, ForeignKey("material_requests.id"))
     indent_id = Column(BigInteger, ForeignKey("indents.id"))
     warehouse_id = Column(BigInteger, ForeignKey("warehouses.id"), nullable=False)
     destination_warehouse_id = Column(BigInteger, ForeignKey("warehouses.id"), nullable=True)
@@ -29,7 +28,6 @@ class MaterialIssue(Base):
     # Wave 5 — needed for ordering / "last edited" UX (BUG-ISS-014).
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
-    material_request = relationship("MaterialRequest")
     indent = relationship("Indent")
     project = relationship("Project")
     warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])

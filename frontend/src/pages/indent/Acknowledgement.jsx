@@ -5,7 +5,7 @@ import {
   Form, Input, InputNumber, Table, Typography, Tag, Spin, Empty, Badge,
 } from 'antd';
 import {
-  CheckCircleOutlined, EyeOutlined, ScanOutlined,
+  EyeOutlined, ScanOutlined,
   ArrowLeftOutlined, InboxOutlined, IdcardOutlined, UserOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -37,9 +37,7 @@ const Acknowledgement = () => {
     [filterStatus]
   );
 
-  const handleOpenAckDrawer = () => {
-    navigate('/indent/acknowledgement/new');
-  };
+
 
   const handleViewDetail = async (record) => {
     setDetailLoading(true);
@@ -245,9 +243,7 @@ const Acknowledgement = () => {
   // LIST VIEW
   return (
     <div>
-      <PageHeader title="Acknowledgement" subtitle="Field staff goods receipt acknowledgement">
-        <Button type="primary" icon={<CheckCircleOutlined />} onClick={handleOpenAckDrawer}>Acknowledge Receipt</Button>
-      </PageHeader>
+      <PageHeader title="Acknowledgement" subtitle="Field staff goods receipt acknowledgement" />
 
       <DataTable
         key={refreshKey}

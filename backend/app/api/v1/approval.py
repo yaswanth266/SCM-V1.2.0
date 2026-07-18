@@ -103,7 +103,7 @@ class ApprovalItemOverride(BaseModel):
 
 
 class ApprovalActionRequest(BaseModel):
-    action: str  # approved, rejected, on_hold, returned
+    action: str  # approved, rejected, on_hold, returned, unhold
     comments: Optional[str] = None
     item_overrides: Optional[List[ApprovalItemOverride]] = None
 
@@ -702,22 +702,103 @@ async def get_pending_steps(
 ):
     """Get approval workflow steps/history for a request."""
     result = await db.execute(
-        select(ApprovalRequest).options(selectinload(ApprovalRequest.history))
+        select(ApprovalRequest)
+        .options(selectinload(ApprovalRequest.history))
         .where(ApprovalRequest.id == request_id)
     )
     req = result.scalar_one_or_none()
     if not req:
         raise HTTPException(status_code=404, detail="Approval request not found")
 
+    # Fetch workflow levels
+    levels_result = await db.execute(
+        select(ApprovalLevel)
+        .options(
+            selectinload(ApprovalLevel.approver_role),
+            selectinload(ApprovalLevel.approver_user),
+        )
+        .where(ApprovalLevel.workflow_id == req.workflow_id)
+        .order_by(ApprovalLevel.level.asc())
+    )
+    levels = levels_result.scalars().all()
+
+    # Fetch action_by user names for history actions
+    action_by_ids = {h.action_by for h in (req.history or []) if h.action_by}
+    user_map = {}
+    if action_by_ids:
+        users_result = await db.execute(
+            select(User.id, User.username, User.first_name, User.last_name)
+            .where(User.id.in_(list(action_by_ids)))
+        )
+        for row in users_result:
+            name = f"{row.first_name or ''} {row.last_name or ''}".strip() or row.username
+            user_map[row.id] = name
+
     steps = []
-    for h in (req.history or []):
-        steps.append({
-            "level": h.level,
-            "action": h.action,
-            "action_by": h.action_by,
-            "action_date": h.action_date,
-            "comments": h.comments,
-        })
+    
+    if not levels:
+        # Fallback to history rows only if no levels are configured
+        for h in (req.history or []):
+            action_status = h.action
+            if action_status == "on_hold":
+                action_status = "pending"
+            steps.append({
+                "level": h.level,
+                "title": f"Level {h.level} Approval",
+                "status": action_status,
+                "approver_name": user_map.get(h.action_by, f"User {h.action_by}"),
+                "action_date": h.action_date,
+                "remarks": h.comments,
+            })
+    else:
+        for lvl in levels:
+            # Find history rows for this level
+            lvl_hist = [h for h in (req.history or []) if h.level == lvl.level]
+            
+            # Identify target role / user name from level definition
+            role_name = lvl.approver_role.name if lvl.approver_role else None
+            user_name = None
+            if lvl.approver_user:
+                user_name = f"{lvl.approver_user.first_name or ''} {lvl.approver_user.last_name or ''}".strip() or lvl.approver_user.username
+            
+            target_approver = user_name or role_name or "Assigned Approver"
+            
+            if lvl_hist:
+                # Use latest history action for this level
+                latest_action = sorted(lvl_hist, key=lambda x: x.action_date or datetime.min)[-1]
+                action_status = latest_action.action
+                if action_status == "on_hold":
+                    action_status = "pending"
+                
+                # Use actor name as approver
+                actor_name = user_map.get(latest_action.action_by, f"User {latest_action.action_by}")
+                steps.append({
+                    "level": lvl.level,
+                    "title": f"Level {lvl.level} ({role_name or 'Approver'})",
+                    "status": action_status,
+                    "approver_name": actor_name,
+                    "role": role_name,
+                    "action_date": latest_action.action_date,
+                    "remarks": latest_action.comments,
+                })
+            else:
+                # No action yet
+                status = "pending"
+                if req.status in ("approved", "rejected", "cancelled"):
+                    status = "skipped"
+                elif lvl.level < req.current_level:
+                    status = "skipped"
+                
+                steps.append({
+                    "level": lvl.level,
+                    "title": f"Level {lvl.level} ({role_name or 'Approver'})",
+                    "status": status,
+                    "approver_name": target_approver if status == "pending" else None,
+                    "role": role_name,
+                    "action_date": None,
+                    "remarks": None,
+                })
+                
     return steps
 
 
@@ -767,11 +848,23 @@ async def hold_pending(
     return await process_action(request_id=request_id, payload=action_payload, db=db, current_user=current_user)
 
 
+@router.post("/pending/{request_id}/unhold")
+async def unhold_pending(
+    request_id: int,
+    payload: FrontendActionPayload = FrontendActionPayload(),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Resume a pending request that was on hold (frontend-compatible alias)."""
+    action_payload = ApprovalActionRequest(action="unhold", comments=payload.comments)
+    return await process_action(request_id=request_id, payload=action_payload, db=db, current_user=current_user)
+
+
 class BulkActionPayload(BaseModel):
     """Schema for /pending/bulk-action. Replaces `payload: dict` with a strict
     validator so callers can't pass arbitrary keys or non-list ids."""
     ids: List[int]
-    action: str  # "approve" | "reject" | "hold"
+    action: str  # "approve" | "reject" | "hold" | "unhold"
     comments: Optional[str] = None
 
     # BUG-APR-021 — was previously a bare @classmethod with no
@@ -780,8 +873,8 @@ class BulkActionPayload(BaseModel):
     @field_validator("action")
     @classmethod
     def _val_action(cls, v: str) -> str:
-        if v not in ("approve", "reject", "hold"):
-            raise ValueError("action must be approve, reject or hold")
+        if v not in ("approve", "reject", "hold", "unhold"):
+            raise ValueError("action must be approve, reject, hold or unhold")
         return v
 
 
@@ -797,14 +890,14 @@ async def bulk_action(
     `can_user_approve` per-request. The schema caps at a reasonable size so
     this can't be used to trigger thousands of SQL writes in one call.
     """
-    if payload.action not in ("approve", "reject", "hold"):
-        raise HTTPException(status_code=422, detail="action must be approve, reject or hold")
+    if payload.action not in ("approve", "reject", "hold", "unhold"):
+        raise HTTPException(status_code=422, detail="action must be approve, reject, hold or unhold")
     if not payload.ids:
         raise HTTPException(status_code=422, detail="ids list must not be empty")
     if len(payload.ids) > 100:
         raise HTTPException(status_code=422, detail="bulk action limited to 100 ids per call")
 
-    action_map = {"approve": "approved", "reject": "rejected", "hold": "on_hold"}
+    action_map = {"approve": "approved", "reject": "rejected", "hold": "on_hold", "unhold": "unhold"}
     actual_action = action_map[payload.action]
 
     # BUG-APR-019 — wrap each request in a SAVEPOINT so a failure on one
@@ -1302,6 +1395,8 @@ async def _fetch_document_detail(db, document_type: str, document_id: int):
                 item_data["rate"] = float(item.rate)
             if hasattr(item, "amount") and item.amount:
                 item_data["amount"] = float(item.amount)
+            if hasattr(item, "approved_qty") and getattr(item, "approved_qty", None) is not None:
+                item_data["approved_qty"] = float(item.approved_qty)
             # Try to get item name from relationship
             try:
                 if hasattr(item, "item") and item.item:

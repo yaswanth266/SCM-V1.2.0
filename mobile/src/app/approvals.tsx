@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { router } from 'expo-router';
+import { API_BASE_URL } from '../constants/config';
 
 // ─── Custom Premium Vector Icons ───────────────────────────────────────────────
 const Icon = ({ name, size = 18, color = '#7A6D66' }: { name: string; size?: number; color?: string }) => {
@@ -135,7 +136,6 @@ const formatDateTime = (dateStr: string | null | undefined): string => {
 
 export default function ApprovalsScreen() {
   const [token, setToken] = useState<string>('');
-  const [apiUrl, setApiUrl] = useState<string>('');
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -164,7 +164,6 @@ export default function ApprovalsScreen() {
       try {
         const savedToken = await AsyncStorage.getItem('user_token');
         const savedUserStr = await AsyncStorage.getItem('user_profile');
-        const savedApiUrl = await AsyncStorage.getItem('API_URL');
 
         if (!savedToken || !savedUserStr) {
           router.replace('/');
@@ -173,10 +172,8 @@ export default function ApprovalsScreen() {
 
         setToken(savedToken);
         setUser(JSON.parse(savedUserStr));
-        const url = savedApiUrl || 'http://10.2.1.31:8000';
-        setApiUrl(url);
 
-        fetchApprovals(url, savedToken, 1, activeTab);
+        fetchApprovals(API_BASE_URL, savedToken, 1, activeTab);
       } catch (e) {
         console.error(e);
         router.replace('/');
@@ -184,6 +181,7 @@ export default function ApprovalsScreen() {
     };
     loadSession();
   }, []);
+
 
   // ─── Fetch List ─────────────────────────────────────────────────────────────
   const fetchApprovals = async (
@@ -223,18 +221,18 @@ export default function ApprovalsScreen() {
 
   const handleRefresh = () => {
     setRefreshing(true);
-    fetchApprovals(apiUrl, token, 1, activeTab);
+    fetchApprovals(API_BASE_URL, token, 1, activeTab);
   };
 
   const loadMore = () => {
     if (approvals.length < total && !loading) {
-      fetchApprovals(apiUrl, token, page + 1, activeTab);
+      fetchApprovals(API_BASE_URL, token, page + 1, activeTab);
     }
   };
 
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
-    fetchApprovals(apiUrl, token, 1, tab);
+    fetchApprovals(API_BASE_URL, token, 1, tab);
   };
 
   // ─── Fetch Details ──────────────────────────────────────────────────────────
@@ -249,10 +247,10 @@ export default function ApprovalsScreen() {
 
     try {
       const [detailRes, stepsRes] = await Promise.allSettled([
-        axios.get(`${apiUrl}/api/v1/approvals/pending/${record.id}/detail`, {
+        axios.get(`${API_BASE_URL}/api/v1/approvals/pending/${record.id}/detail`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
-        axios.get(`${apiUrl}/api/v1/approvals/pending/${record.id}/steps`, {
+        axios.get(`${API_BASE_URL}/api/v1/approvals/pending/${record.id}/steps`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
       ]);
@@ -323,7 +321,7 @@ export default function ApprovalsScreen() {
               }
 
               await axios.post(
-                `${apiUrl}/api/v1/approvals/pending/${selectedRecord.id}/${action}`,
+                `${API_BASE_URL}/api/v1/approvals/pending/${selectedRecord.id}/${action}`,
                 body,
                 { headers: { Authorization: `Bearer ${token}` } }
               );

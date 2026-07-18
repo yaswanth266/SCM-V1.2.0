@@ -6,7 +6,7 @@ import {
 } from 'antd';
 import {
   CheckOutlined, CloseOutlined, PauseCircleOutlined, EyeOutlined,
-  MailOutlined, ReloadOutlined, CheckCircleOutlined,
+  MailOutlined, ReloadOutlined, CheckCircleOutlined, PlayCircleOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import PageHeader from '../../components/PageHeader';
@@ -198,8 +198,17 @@ const PendingApprovals = () => {
             .map(([id, v]) => ({ item_id: Number(id), approved_qty: Number(v) }));
         }
         await api.post(`/approvals/pending/${actionTarget.id}/${actionType}`, body);
+        const actionLabelPast = 
+          actionType === 'approve' 
+            ? 'approved' 
+            : actionType === 'reject' 
+              ? 'rejected' 
+              : actionType === 'unhold'
+                ? 'unheld'
+                : 'put on hold';
+
         message.success(
-          `Document ${actionType === 'approve' ? 'approved' : actionType === 'reject' ? 'rejected' : 'put on hold'} successfully`
+          `Document ${actionLabelPast} successfully`
         );
       } else {
         // Bulk action
@@ -220,8 +229,18 @@ const PendingApprovals = () => {
         const data = bulkRes?.data || {};
         const okCount = (data.succeeded && data.succeeded.length) ?? 0;
         const failCount = (data.failed && data.failed.length) ?? 0;
+        
+        const actionLabelPast = 
+          actionType === 'approve' 
+            ? 'approved' 
+            : actionType === 'reject' 
+              ? 'rejected' 
+              : actionType === 'unhold'
+                ? 'unheld'
+                : 'put on hold';
+
         if (failCount === 0) {
-          message.success(`${okCount} document(s) ${actionType}d successfully`);
+          message.success(`${okCount} document(s) ${actionLabelPast} successfully`);
         } else if (okCount === 0) {
           message.error(
             `Bulk ${actionType} failed for all ${failCount} document(s). ` +
@@ -229,7 +248,7 @@ const PendingApprovals = () => {
           );
         } else {
           message.warning(
-            `${okCount} ${actionType}d, ${failCount} failed. ` +
+            `${okCount} ${actionLabelPast}, ${failCount} failed. ` +
             `First failure: ${data.failed?.[0]?.error || 'unknown'}`
           );
         }
@@ -266,6 +285,14 @@ const PendingApprovals = () => {
       return;
     }
     openActionModal('approve', null);
+  };
+
+  const handleBulkUnhold = () => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('Please select at least one item');
+      return;
+    }
+    openActionModal('unhold', null);
   };
 
   // Hide Document Type column when the user only sees one type — it's
@@ -427,15 +454,27 @@ const PendingApprovals = () => {
                 onClick={() => openActionModal('reject', record)}
               />
             </Tooltip>
-            <Tooltip title="Put on Hold">
-              <Button
-                type="link"
-                size="small"
-                style={{ color: '#faad14' }}
-                icon={<PauseCircleOutlined />}
-                onClick={() => openActionModal('hold', record)}
-              />
-            </Tooltip>
+            {record.status === 'on_hold' ? (
+              <Tooltip title="Unhold">
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ color: '#1677ff' }}
+                  icon={<PlayCircleOutlined />}
+                  onClick={() => openActionModal('unhold', record)}
+                />
+              </Tooltip>
+            ) : (
+              <Tooltip title="Put on Hold">
+                <Button
+                  type="link"
+                  size="small"
+                  style={{ color: '#faad14' }}
+                  icon={<PauseCircleOutlined />}
+                  onClick={() => openActionModal('hold', record)}
+                />
+              </Tooltip>
+            )}
           </Space>
         );
       },
@@ -485,14 +524,26 @@ const PendingApprovals = () => {
   const toolbar = (
     <Space style={{ marginLeft: 12 }}>
       {selectedRowKeys.length > 0 && (
-        <Button
-          type="primary"
-          icon={<CheckCircleOutlined />}
-          onClick={handleBulkApprove}
-          style={{ background: '#52c41a', borderColor: '#52c41a' }}
-        >
-          Bulk Approve ({selectedRowKeys.length})
-        </Button>
+        <>
+          <Button
+            type="primary"
+            icon={<CheckCircleOutlined />}
+            onClick={handleBulkApprove}
+            style={{ background: '#52c41a', borderColor: '#52c41a' }}
+          >
+            Bulk Approve ({selectedRowKeys.length})
+          </Button>
+          {activeStatus === 'on_hold' && (
+            <Button
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              onClick={handleBulkUnhold}
+              style={{ background: '#1677ff', borderColor: '#1677ff' }}
+            >
+              Bulk Unhold ({selectedRowKeys.length})
+            </Button>
+          )}
+        </>
       )}
     </Space>
   );
@@ -650,13 +701,23 @@ const PendingApprovals = () => {
               >
                 Reject
               </Button>
-              <Button
-                style={{ color: '#faad14', borderColor: '#faad14' }}
-                icon={<PauseCircleOutlined />}
-                onClick={() => openActionModal('hold', selectedRecord)}
-              >
-                Hold
-              </Button>
+              {selectedRecord.status === 'on_hold' ? (
+                <Button
+                  style={{ color: '#1677ff', borderColor: '#1677ff' }}
+                  icon={<PlayCircleOutlined />}
+                  onClick={() => openActionModal('unhold', selectedRecord)}
+                >
+                  Unhold
+                </Button>
+              ) : (
+                <Button
+                  style={{ color: '#faad14', borderColor: '#faad14' }}
+                  icon={<PauseCircleOutlined />}
+                  onClick={() => openActionModal('hold', selectedRecord)}
+                >
+                  Hold
+                </Button>
+              )}
             </Space>
           )
         }
@@ -683,9 +744,11 @@ const PendingApprovals = () => {
                   <Descriptions.Item label="Requested At">
                     {formatDateTime(selectedRecord.requested_at)}
                   </Descriptions.Item>
-                  <Descriptions.Item label="Amount">
-                    {selectedRecord.amount != null ? formatCurrency(selectedRecord.amount) : '-'}
-                  </Descriptions.Item>
+                  {selectedRecord.document_type !== 'indent' && (
+                    <Descriptions.Item label="Amount">
+                      {selectedRecord.amount != null ? formatCurrency(selectedRecord.amount) : '-'}
+                    </Descriptions.Item>
+                  )}
                   <Descriptions.Item label="Priority">
                     <StatusTag status={(selectedRecord.priority || 'normal').toLowerCase()} />
                   </Descriptions.Item>
@@ -764,7 +827,7 @@ const PendingApprovals = () => {
                         const requested = Number(r.qty ?? r.requested_qty ?? 0);
                         const current = qtyOverrides[r.id] != null
                           ? qtyOverrides[r.id]
-                          : Number(r.approved_qty || requested);
+                          : Number(r.approved_qty ?? requested);
                         return (
                           <Input
                             type="number"
@@ -856,21 +919,30 @@ const PendingApprovals = () => {
         )}
       </Drawer>
 
-      {/* Action Modal (Approve/Reject/Hold) */}
+      {/* Action Modal (Approve/Reject/Hold/Unhold) */}
       <Modal
         title={
           actionType === 'approve'
             ? 'Approve Document'
             : actionType === 'reject'
               ? 'Reject Document'
-              : 'Put Document on Hold'
+              : actionType === 'unhold'
+                ? 'Unhold Document'
+                : 'Put Document on Hold'
         }
         open={actionModalOpen}
         onCancel={() => { setActionModalOpen(false); setActionComment(''); setActionTarget(null); }}
         onOk={handleAction}
         confirmLoading={actionSubmitting}
+        zIndex={1100}
         okText={
-          actionType === 'approve' ? 'Approve' : actionType === 'reject' ? 'Reject' : 'Hold'
+          actionType === 'approve' 
+            ? 'Approve' 
+            : actionType === 'reject' 
+              ? 'Reject' 
+              : actionType === 'unhold'
+                ? 'Unhold'
+                : 'Hold'
         }
         okButtonProps={{
           danger: actionType === 'reject',
@@ -878,13 +950,15 @@ const PendingApprovals = () => {
             ? { background: '#52c41a', borderColor: '#52c41a' }
             : actionType === 'hold'
               ? { background: '#faad14', borderColor: '#faad14', color: '#fff' }
-              : undefined,
+              : actionType === 'unhold'
+                ? { background: '#1677ff', borderColor: '#1677ff', color: '#fff' }
+                : undefined,
         }}
       >
         {actionTarget ? (
           <div style={{ marginBottom: 16 }}>
             <Text>
-              {actionType === 'approve' ? 'Approving' : actionType === 'reject' ? 'Rejecting' : 'Holding'}{' '}
+              {actionType === 'approve' ? 'Approving' : actionType === 'reject' ? 'Rejecting' : actionType === 'unhold' ? 'Unholding' : 'Holding'}{' '}
               <Text strong>{formatDocNumber(actionTarget.document_number, actionTarget.requested_at)}</Text>
               {actionTarget.total_levels > 1 && actionType === 'approve' && (
                 <Tag style={{ marginLeft: 8, backgroundColor: '#1677ff', borderColor: '#1677ff', color: '#fff' }}>

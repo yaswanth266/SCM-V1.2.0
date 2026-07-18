@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { router } from 'expo-router';
+import { API_BASE_URL } from '../constants/config';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 
 // ─── Custom Premium Vector Icons ───────────────────────────────────────────────
@@ -99,7 +100,6 @@ const Feather = ({ name, size, color }: { name: string; size?: number; color?: s
 
 export default function LogisticsAcknowledgementScreen() {
   const [token, setToken] = useState<string>('');
-  const [apiUrl, setApiUrl] = useState<string>('');
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [submitting, setSubmitting] = useState<boolean>(false);
@@ -151,7 +151,6 @@ export default function LogisticsAcknowledgementScreen() {
       try {
         const savedToken = await AsyncStorage.getItem('user_token');
         const savedUserStr = await AsyncStorage.getItem('user_profile');
-        const savedApiUrl = await AsyncStorage.getItem('API_URL');
 
         if (!savedToken || !savedUserStr) {
           router.replace('/');
@@ -159,11 +158,10 @@ export default function LogisticsAcknowledgementScreen() {
         }
 
         const parsedUser = JSON.parse(savedUserStr);
-        const activeApiUrl = savedApiUrl || 'http://10.2.1.31:8000';
+        const activeApiUrl = API_BASE_URL;
 
         setToken(savedToken);
         setUser(parsedUser);
-        setApiUrl(activeApiUrl);
 
         // Pre-fill signatory details
         setAcknowledgedByName(`${parsedUser.first_name || ''} ${parsedUser.last_name || ''}`.trim() || parsedUser.username || '');
@@ -194,7 +192,7 @@ export default function LogisticsAcknowledgementScreen() {
 
     try {
       const response = await axios.get(
-        `${apiUrl}/api/v1/consignment/scan-any/${encodeURIComponent(code.trim())}`,
+        `${API_BASE_URL}/api/v1/consignment/scan-any/${encodeURIComponent(code.trim())}`,
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
@@ -243,7 +241,7 @@ export default function LogisticsAcknowledgementScreen() {
     setSubmitting(true);
     try {
       await axios.post(
-        `${apiUrl}/api/v1/consignment/${consignmentData.id}/deliver`,
+        `${API_BASE_URL}/api/v1/consignment/${consignmentData.id}/deliver`,
         {},
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -332,7 +330,7 @@ export default function LogisticsAcknowledgementScreen() {
       };
 
       await axios.post(
-        `${apiUrl}/api/v1/consignment/acknowledge`,
+        `${API_BASE_URL}/api/v1/consignment/acknowledge`,
         payload,
         { headers: { Authorization: `Bearer ${token}` } }
       );

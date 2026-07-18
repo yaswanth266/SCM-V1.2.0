@@ -46,7 +46,7 @@ class IndentItem(Base):
     indent_id = Column(BigInteger, ForeignKey("indents.id", ondelete="CASCADE"), nullable=False)
     item_id = Column(BigInteger, ForeignKey("items.id"), nullable=False)
     requested_qty = Column(Numeric(15, 3), nullable=False)
-    approved_qty = Column(Numeric(15, 3), default=0)
+    approved_qty = Column(Numeric(15, 3), nullable=True)
     issued_qty = Column(Numeric(15, 3), default=0)
     uom_id = Column(BigInteger, ForeignKey("uom.id"), nullable=False)
     remarks = Column(Text)

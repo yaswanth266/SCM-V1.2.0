@@ -67,7 +67,7 @@ const ParadoxTimer = ({ moduleName, description }) => {
         pointerEvents: 'none',
       }} />
 
-      <Card className="paradox-card" bordered={false}>
+      <Card className="paradox-card" variant="borderless">
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
           {/* Rotating Hourglass Icon */}
           <div style={{ display: 'inline-block', margin: '0 auto' }}>
