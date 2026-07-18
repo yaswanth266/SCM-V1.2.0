@@ -154,7 +154,7 @@ async def drop_and_recreate_tables():
 
     async with engine.connect() as conn:
         await conn.execute(text("SET FOREIGN_KEY_CHECKS = 0"))
-        for table in ("positions", "employees", "offices", "projects"):
+        for table in ("position_reporting", "positions", "employees", "offices", "projects"):
             await conn.execute(text(f"DROP TABLE IF EXISTS `{table}`"))
             print(f"  Dropped {table}")
         await conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
@@ -166,6 +166,16 @@ async def drop_and_recreate_tables():
         await conn.run_sync(Office.__table__.create)
         await conn.run_sync(Position.__table__.create)
         await conn.run_sync(Employee.__table__.create)
+        # Create position_reporting junction table
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS position_reporting (
+                position_id BIGINT NOT NULL,
+                parent_position_id BIGINT NOT NULL,
+                PRIMARY KEY (position_id, parent_position_id),
+                CONSTRAINT fk_pos_rep_position FOREIGN KEY (position_id) REFERENCES positions(id) ON DELETE CASCADE,
+                CONSTRAINT fk_pos_rep_parent FOREIGN KEY (parent_position_id) REFERENCES positions(id) ON DELETE CASCADE
+            )
+        """))
         await conn.execute(text("SET FOREIGN_KEY_CHECKS = 1"))
         print("  Recreated all tables with current model schema")
 
@@ -446,24 +456,31 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
         office_id = office_map.get(office_name)
 
         # Collect parent relationship to resolve later
-        reporting_to = pos.get("reporting_to") or []
-        if reporting_to and isinstance(reporting_to, list) and len(reporting_to) > 0:
-            rt = reporting_to[0]
-            if isinstance(rt, dict):
-                import re
-                parent_name = rt.get("position_name") or rt.get("name") or ""
-                parent_code = rt.get("code") or rt.get("position_code")
-                if not parent_code and parent_name:
-                    parent_code = re.sub(r"[^a-zA-Z0-9]+", "-", parent_name).strip("-").upper()
-                else:
-                    parent_code = (parent_code or "").upper()
-                
-                if parent_code or parent_name:
+        reporting_to = pos.get("reporting_to_details") or pos.get("reporting_to") or []
+        if isinstance(reporting_to, list):
+            for rt in reporting_to:
+                if isinstance(rt, dict):
+                    import re
+                    parent_name = rt.get("position_name") or rt.get("name") or ""
+                    parent_code = rt.get("code") or rt.get("position_code")
+                    if not parent_code and parent_name:
+                        parent_code = re.sub(r"[^a-zA-Z0-9]+", "-", parent_name).strip("-").upper()
+                    else:
+                        parent_code = (parent_code or "").upper()
+                    
+                    if parent_code or parent_name:
+                        parent_relations.append({
+                            "child_code": code,
+                            "parent_code": parent_code,
+                            "parent_name": parent_name,
+                            "parent_details": rt
+                        })
+                elif isinstance(rt, (int, float)):
                     parent_relations.append({
                         "child_code": code,
-                        "parent_code": parent_code,
-                        "parent_name": parent_name,
-                        "parent_details": rt
+                        "parent_code": None,
+                        "parent_name": None,
+                        "parent_details": {"id": int(rt)}
                     })
 
         role_details = pos.get("role_details") or {}
@@ -518,6 +535,10 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
             await db.commit()
 
     # Positions from positions API for missed ones
+    # Build project name map for positions API lookup
+    proj_name_res = await db.execute(text("SELECT id, LOWER(name) FROM projects"))
+    project_name_map = {r[1].strip(): r[0] for r in proj_name_res.all() if r[1]}
+
     record_count = 0
     for pos_row in position_rows:
         code = (_text(pos_row, "code") or "").upper()
@@ -525,24 +546,31 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
             continue
         
         # Collect parent relationship to resolve later
-        reporting_to = pos_row.get("reporting_to") or []
-        if reporting_to and isinstance(reporting_to, list) and len(reporting_to) > 0:
-            rt = reporting_to[0]
-            if isinstance(rt, dict):
-                import re
-                parent_name = rt.get("position_name") or rt.get("name") or ""
-                parent_code = rt.get("code") or rt.get("position_code")
-                if not parent_code and parent_name:
-                    parent_code = re.sub(r"[^a-zA-Z0-9]+", "-", parent_name).strip("-").upper()
-                else:
-                    parent_code = (parent_code or "").upper()
-                
-                if parent_code or parent_name:
+        reporting_to = pos_row.get("reporting_to_details") or pos_row.get("reporting_to") or []
+        if isinstance(reporting_to, list):
+            for rt in reporting_to:
+                if isinstance(rt, dict):
+                    import re
+                    parent_name = rt.get("position_name") or rt.get("name") or ""
+                    parent_code = rt.get("code") or rt.get("position_code")
+                    if not parent_code and parent_name:
+                        parent_code = re.sub(r"[^a-zA-Z0-9]+", "-", parent_name).strip("-").upper()
+                    else:
+                        parent_code = (parent_code or "").upper()
+                    
+                    if parent_code or parent_name:
+                        parent_relations.append({
+                            "child_code": code,
+                            "parent_code": parent_code,
+                            "parent_name": parent_name,
+                            "parent_details": rt
+                        })
+                elif isinstance(rt, (int, float)):
                     parent_relations.append({
                         "child_code": code,
-                        "parent_code": parent_code,
-                        "parent_name": parent_name,
-                        "parent_details": rt
+                        "parent_code": None,
+                        "parent_name": None,
+                        "parent_details": {"id": int(rt)}
                     })
 
         if code in position_map:
@@ -558,16 +586,22 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
         if not local_role_id and role_name:
             local_role_id = role_name_to_id.get(role_name.lower())
 
+        project_name_str = (_text(pos_row, "project_name") or "").lower().strip()
+        project_id = project_name_map.get(project_name_str)
+        
+        office_name_str = (_text(pos_row, "office_name") or "").lower().strip()
+        office_id = office_map.get(office_name_str)
+
         try:
             pos_id = _int(pos_row.get("id")) or _int(pos_row.get("position_id"))
             r = await db.execute(
                 text("""INSERT INTO positions
                     (id, name, code, role_name, role_id, level_name, level_rank,
                      department, section, job_name, job_family_name, job_family_id,
-                     role_type_id, status, start_date, created_at, updated_at)
+                     role_type_id, status, start_date, project_id, office_id, created_at, updated_at)
                     VALUES (:id, :name, :code, :role_name, :role_id, :level_name, :level_rank,
                             :department, :section, :job_name, :job_family_name, :job_family_id,
-                            :role_type_id, :status, :start_date, NOW(), NOW())"""),
+                            :role_type_id, :status, :start_date, :project_id, :office_id, NOW(), NOW())"""),
                 {"id": pos_id, "name": name, "code": code,
                  "role_name": _text(pos_row, "role_name") or _text(role_details, "name"),
                  "role_id": local_role_id,
@@ -580,7 +614,9 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
                  "job_family_id": _int(pos_row.get("job_family_id")),
                  "role_type_id": _int(pos_row.get("role_type_id")),
                  "status": _text(pos_row, "status") or "active",
-                 "start_date": _date(pos_row.get("start_date"))}
+                 "start_date": _date(pos_row.get("start_date")),
+                 "project_id": project_id,
+                 "office_id": office_id}
             )
             position_map[code] = pos_id or r.lastrowid
             stats["positions"] += 1
@@ -602,12 +638,26 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
     # ---- HIERARCHY RESOLUTION AND LINKING (Pass 2) ----
     print("  Resolving position hierarchy using normalized key matching...")
     normalized_to_id = {}
-    for pos_code, db_id in position_map.items():
-        norm_key = normalize_position_key(pos_code)
-        if norm_key:
-            normalized_to_id[norm_key] = db_id
+    normalized_name_to_id = {}
+    db_positions = (await db.execute(text("SELECT id, code, name FROM positions"))).all()
+    for pid, pcode, pname in db_positions:
+        if pcode:
+            norm_code = normalize_position_key(pcode)
+            if norm_code:
+                normalized_to_id[norm_code] = pid
+        if pname:
+            norm_name = normalize_position_key(pname)
+            if norm_name:
+                normalized_name_to_id[norm_name] = pid
 
     record_count = 0
+    # Clear all existing position reporting mappings
+    try:
+        await db.execute(text("DELETE FROM position_reporting"))
+    except Exception as e:
+        print(f"  WARN: Could not clear position_reporting table: {e}")
+
+    set_primary = set()
     for rel in parent_relations:
         child_code = rel["child_code"]
         parent_code = rel["parent_code"]
@@ -620,43 +670,43 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
 
         parent_id = None
 
-        # 1. Try exact code match in position_map
-        if parent_code:
+        # 1. Try exact ID match if present in API response
+        p_id_from_api = rt.get("id") or rt.get("position_id")
+        if p_id_from_api:
+            p_id_from_api = _int(p_id_from_api)
+            if p_id_from_api in [p[0] for p in db_positions]:
+                parent_id = p_id_from_api
+
+        # 2. Try exact code match in position_map
+        if not parent_id and parent_code:
             parent_id = position_map.get(parent_code)
 
-        # 2. Try normalized match by parent_code
+        # 3. Try normalized match by parent_code
         if not parent_id and parent_code:
             norm_parent_code = normalize_position_key(parent_code)
             parent_id = normalized_to_id.get(norm_parent_code)
 
-        # 3. Try normalized match by parent_name
+        # 4. Try normalized match by parent_name
         if not parent_id and parent_name:
             norm_parent_name = normalize_position_key(parent_name)
-            parent_id = normalized_to_id.get(norm_parent_name)
-
-        # 4. Fallback: Log warning and leave parent_position_id as NULL
-        if not parent_id:
-            print(f"""
-WARNING: Parent position not found.
-
-Child Position:
-{child_code}
-
-Expected Parent Code:
-{parent_code or 'N/A'}
-
-Expected Parent Name:
-{parent_name or 'N/A'}
-
-No synthetic records were created.
-parent_position_id left NULL.
-""")
-            continue
+            parent_id = normalized_name_to_id.get(norm_parent_name)
 
         if parent_id and child_id != parent_id:
             try:
+                # Set the first parent as the primary parent_position_id
+                if child_id not in set_primary:
+                    await db.execute(
+                        text("UPDATE positions SET parent_position_id = :pid WHERE id = :cid"),
+                        {"cid": child_id, "pid": parent_id}
+                    )
+                    set_primary.add(child_id)
+                
+                # Insert into junction table
                 await db.execute(
-                    text("UPDATE positions SET parent_position_id = :pid WHERE id = :cid AND parent_position_id IS NULL"),
+                    text("""
+                        INSERT IGNORE INTO position_reporting (position_id, parent_position_id)
+                        VALUES (:cid, :pid)
+                    """),
                     {"cid": child_id, "pid": parent_id}
                 )
             except Exception as e:
