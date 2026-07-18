@@ -425,6 +425,7 @@ class ItemCreate(BaseModel):
     is_narcotic: bool = False
     requires_prescription: bool = False
     requires_cold_chain: bool = False
+    requires_quality_inspection: bool = False
     min_storage_temp_c: Optional[Decimal] = None
     max_storage_temp_c: Optional[Decimal] = None
     regulatory_notes: Optional[str] = None
@@ -595,6 +596,7 @@ class ItemUpdate(BaseModel):
     is_narcotic: Optional[bool] = None
     requires_prescription: Optional[bool] = None
     requires_cold_chain: Optional[bool] = None
+    requires_quality_inspection: Optional[bool] = None
     min_storage_temp_c: Optional[Decimal] = None
     max_storage_temp_c: Optional[Decimal] = None
     regulatory_notes: Optional[str] = None
@@ -691,6 +693,7 @@ class ItemResponse(BaseModel):
     is_narcotic: Optional[bool] = None
     requires_prescription: Optional[bool] = None
     requires_cold_chain: Optional[bool] = None
+    requires_quality_inspection: Optional[bool] = None
     min_storage_temp_c: Optional[Decimal] = None
     max_storage_temp_c: Optional[Decimal] = None
     regulatory_notes: Optional[str] = None

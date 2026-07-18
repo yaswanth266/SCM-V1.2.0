@@ -147,7 +147,7 @@ class IndentResponse(BaseModel):
     source_bom_id: Optional[int] = None
     source_bom_code: Optional[str] = None
     source_bom_name: Optional[str] = None
-    warehouse_id: int
+    warehouse_id: Optional[int] = None
     indent_date: datetime
     required_date: Optional[datetime] = None
     department: Optional[str] = None

@@ -141,6 +141,7 @@ class GRNItemResponse(BaseModel):
     amount: Decimal
     qi_status: str
     item_type: Optional[str] = None
+    requires_quality_inspection: bool = False
     serial_numbers: List[str] = []
     model_config = {"from_attributes": True}
 
@@ -190,6 +191,9 @@ class QICreate(BaseModel):
     status: Optional[str] = "completed"
     remarks: Optional[str] = None
     items: List[QIItemCreate]
+
+class QIUpdate(QICreate):
+    pass
 
 class QIItemResponse(BaseModel):
     id: int

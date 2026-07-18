@@ -172,22 +172,24 @@ const QualityInspectionForm = () => {
       const grnData = res.data;
       setSelectedGRN(grnData);
 
-      const items = (grnData.items || []).map((item, idx) => ({
-        key: item.id || Date.now() + idx,
-        grn_item_id: item.id,
-        item_id: item.item_id,
-        item_name: item.item_name || '',
-        item_code: item.item_code || '',
-        batch_number: item.batch_number || '',
-        received_qty: item.received_qty || 0,
-        inspected_qty: item.received_qty || 0,
-        accepted_qty: item.accepted_qty || 0,
-        rejected_qty: item.rejected_qty || 0,
-        hold_qty: (item.received_qty || 0) - (item.accepted_qty || 0) - (item.rejected_qty || 0),
-        result: 'accepted',
-        rejection_reason: '',
-        remarks: '',
-      }));
+      const items = (grnData.items || [])
+        .filter(item => item.requires_quality_inspection)
+        .map((item, idx) => ({
+          key: item.id || Date.now() + idx,
+          grn_item_id: item.id,
+          item_id: item.item_id,
+          item_name: item.item_name || '',
+          item_code: item.item_code || '',
+          batch_number: item.batch_number || '',
+          received_qty: item.received_qty || 0,
+          inspected_qty: item.received_qty || 0,
+          accepted_qty: item.accepted_qty || 0,
+          rejected_qty: item.rejected_qty || 0,
+          hold_qty: (item.received_qty || 0) - (item.accepted_qty || 0) - (item.rejected_qty || 0),
+          result: 'accepted',
+          rejection_reason: '',
+          remarks: '',
+        }));
       setQiItems(items);
       calculateOverallResult(items);
     } catch (err) {

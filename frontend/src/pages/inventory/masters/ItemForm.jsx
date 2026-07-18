@@ -168,6 +168,7 @@ const ItemForm = () => {
           has_batch: false,
           has_serial: false,
           has_expiry: false,
+          requires_quality_inspection: false,
           barcode_type: 'auto',
           valuation_method: 'fifo',
           category_id: undefined,
@@ -1379,18 +1380,23 @@ const ItemForm = () => {
                 children: (
                   <>
                     <Row gutter={16}>
-                      <Col span={8}>
+                      <Col span={6}>
                         <Form.Item name="has_batch" label="Has Batch" valuePropName="checked">
                           <Switch />
                         </Form.Item>
                       </Col>
-                      <Col span={8}>
+                      <Col span={6}>
                         <Form.Item name="has_serial" label="Has Serial" valuePropName="checked">
                           <Switch />
                         </Form.Item>
                       </Col>
-                      <Col span={8}>
+                      <Col span={6}>
                         <Form.Item name="has_expiry" label="Has Expiry" valuePropName="checked">
+                          <Switch />
+                        </Form.Item>
+                      </Col>
+                      <Col span={6}>
+                        <Form.Item name="requires_quality_inspection" label="Requires QI" valuePropName="checked">
                           <Switch />
                         </Form.Item>
                       </Col>

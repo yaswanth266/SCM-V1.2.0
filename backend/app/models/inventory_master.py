@@ -194,6 +194,7 @@ class Item(Base):
     is_narcotic = Column(Boolean, default=False)
     requires_prescription = Column(Boolean, default=False)
     requires_cold_chain = Column(Boolean, default=False)
+    requires_quality_inspection = Column(Boolean, default=False)
     min_storage_temp_c = Column(Numeric(5, 2))
     max_storage_temp_c = Column(Numeric(5, 2))
     regulatory_notes = Column(Text)
