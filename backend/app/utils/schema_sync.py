@@ -1267,6 +1267,31 @@ async def ensure_material_issue_schema(session: AsyncSession) -> None:
     if "serial_numbers" not in items_columns:
         await conn.execute(text("ALTER TABLE material_issue_items ADD COLUMN serial_numbers JSON NULL"))
 
+    ack_columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'material_acknowledgements'
+        """))).all()
+    }
+    if "photos" not in ack_columns:
+        await conn.execute(text("ALTER TABLE material_acknowledgements ADD COLUMN photos JSON NULL"))
+
+    ack_items_columns = {
+        row[0]
+        for row in (await conn.execute(text("""
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = DATABASE()
+              AND table_name = 'material_acknowledgement_items'
+        """))).all()
+    }
+    if "photos" not in ack_items_columns:
+        await conn.execute(text("ALTER TABLE material_acknowledgement_items ADD COLUMN photos JSON NULL"))
+
+
 
 async def ensure_logistics_so_schema(session: AsyncSession) -> None:
     if not _should_sync("logistics_so_schema"):

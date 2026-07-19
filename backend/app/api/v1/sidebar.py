@@ -33,7 +33,7 @@ _ALL_KEYS: Set[str] = {
     'warehouse-floor-plan',
     'warehouse-gate-entry', 'logistics-gate-entry', 'warehouse-grn', 'warehouse-quality-inspection',
     'warehouse-putaway', 'warehouse-purchase-returns',
-    'warehouse-material-issues', 'warehouse-material-inward',
+    'warehouse-material-issues', 'warehouse-vehicle-material-issues', 'warehouse-material-inward',
     'warehouse-material-issues-ap104-consumables', 'warehouse-material-issues-ap104-install',
     'warehouse-dispatch',
     # 2. Inventory
@@ -43,7 +43,7 @@ _ALL_KEYS: Set[str] = {
     'inventory-masters-user-material-mapping', 'inventory-masters-uom', 'inventory-masters-brands', 'inventory-masters-item-types',
     'inventory-masters-item-attributes', 'inventory-masters-category-attribute-mapping', 'inventory-masters-specs',
     'inventory-masters-boms', 'inventory-masters-price-lists',
-    'inventory-stock-balance', 'inventory-stock-ledger',
+    'inventory-stock-balance', 'inventory-vehicle-stock-balance', 'inventory-stock-ledger', 'inventory-vehicle-stock-ledger',
     'inventory-stock-transfer', 'inventory-stock-audit',
     'inventory-replenishment',
     # 3. Procurement
@@ -55,7 +55,7 @@ _ALL_KEYS: Set[str] = {
     'procurement-purchase-orders',
     # 4. Indent
     'indent', 'indent-dashboard', 'indent-reports', 'indent-notifications',
-    'indent-indents', 'indent-acknowledgement',
+    'indent-indents', 'indent-acknowledgement', 'indent-material-acknowledgement',
     # Consumption
     'consumption', 'consumption-entry', 'consumption-reports',
     # Approvals
@@ -271,6 +271,22 @@ async def allowed_keys_for_role(db: AsyncSession, role: Role) -> List[str]:
         elif key == "masters-organization-structure":
             mapped_keys.extend([
                 "settings-masters-organization-structure",
+            ])
+        elif key == "warehouse-material-issues":
+            mapped_keys.extend([
+                "warehouse-vehicle-material-issues",
+            ])
+        elif key == "inventory-stock-balance":
+            mapped_keys.extend([
+                "inventory-vehicle-stock-balance",
+            ])
+        elif key == "inventory-stock-ledger":
+            mapped_keys.extend([
+                "inventory-vehicle-stock-ledger",
+            ])
+        elif key == "indent-acknowledgement":
+            mapped_keys.extend([
+                "indent-material-acknowledgement",
             ])
             
         for k in mapped_keys:

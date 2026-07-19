@@ -106,3 +106,88 @@ class IssueReturnItem(Base):
     issue_return = relationship("IssueReturn", back_populates="items")
     item = relationship("Item")
     uom = relationship("UOM")
+
+
+class VehicleIssue(Base):
+    __tablename__ = "vehicle_issues"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    issue_number = Column(String(50), unique=True, nullable=False)
+    indent_id = Column(BigInteger, ForeignKey("indents.id"), nullable=True)
+    warehouse_id = Column(BigInteger, ForeignKey("warehouses.id"), nullable=False)
+    vehicle_code = Column(String(50), nullable=False)
+    vehicle_number = Column(String(50), nullable=False)
+    issue_date = Column(DateTime, nullable=False)
+    department = Column(String(100))
+    issued_to = Column(BigInteger, ForeignKey("users.id"))
+    status = Column(String(50), default="draft")
+    remarks = Column(Text)
+    issued_by = Column(BigInteger, ForeignKey("users.id"))
+    project_id = Column(BigInteger, ForeignKey("projects.id"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    indent = relationship("Indent")
+    project = relationship("Project")
+    warehouse = relationship("Warehouse", foreign_keys=[warehouse_id])
+    issued_to_user = relationship("User", foreign_keys=[issued_to])
+    issued_by_user = relationship("User", foreign_keys=[issued_by])
+    items = relationship("VehicleIssueItem", back_populates="vehicle_issue", cascade="all, delete-orphan")
+
+
+class VehicleIssueItem(Base):
+    __tablename__ = "vehicle_issue_items"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    vehicle_issue_id = Column(BigInteger, ForeignKey("vehicle_issues.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(BigInteger, ForeignKey("items.id"), nullable=False)
+    batch_id = Column(BigInteger, ForeignKey("batches.id"), nullable=True)
+    qty = Column(Numeric(15, 3), nullable=False)
+    uom_id = Column(BigInteger, ForeignKey("uom.id"), nullable=False)
+    bin_id = Column(BigInteger, ForeignKey("warehouse_bins.id"), nullable=True)
+    rate = Column(Numeric(15, 2), default=0)
+    amount = Column(Numeric(15, 2), default=0)
+    serial_numbers = Column(JSON, nullable=True)
+    batch_number_text = Column(String(100), nullable=True)
+    bin_code_text = Column(String(100), nullable=True)
+
+    vehicle_issue = relationship("VehicleIssue", back_populates="items")
+    item = relationship("Item")
+    uom = relationship("UOM")
+    batch = relationship("Batch")
+    bin = relationship("WarehouseBin")
+
+
+class MaterialAcknowledgement(Base):
+    __tablename__ = "material_acknowledgements"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    acknowledgement_number = Column(String(50), unique=True, nullable=False)
+    vehicle_issue_id = Column(BigInteger, ForeignKey("vehicle_issues.id"), nullable=False)
+    acknowledged_by = Column(BigInteger, ForeignKey("users.id"), nullable=False)
+    employee_code = Column(String(100), nullable=True)
+    remarks = Column(Text, nullable=True)
+    status = Column(String(50), default="acknowledged")
+    acknowledged_at = Column(DateTime, nullable=False)
+    photos = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    vehicle_issue = relationship("VehicleIssue")
+    acknowledger = relationship("User", foreign_keys=[acknowledged_by])
+    items = relationship("MaterialAcknowledgementItem", back_populates="acknowledgement", cascade="all, delete-orphan")
+
+
+class MaterialAcknowledgementItem(Base):
+    __tablename__ = "material_acknowledgement_items"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    acknowledgement_id = Column(BigInteger, ForeignKey("material_acknowledgements.id", ondelete="CASCADE"), nullable=False)
+    item_id = Column(BigInteger, ForeignKey("items.id"), nullable=False)
+    received_qty = Column(Numeric(15, 3), nullable=False)
+    remarks = Column(Text, nullable=True)
+    serial_numbers = Column(JSON, nullable=True)
+    photos = Column(JSON, nullable=True)
+
+    acknowledgement = relationship("MaterialAcknowledgement", back_populates="items")
+    item = relationship("Item")
+

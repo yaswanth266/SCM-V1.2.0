@@ -35,6 +35,8 @@ const DataTable = ({
   summary,
   loading: externalLoading,
   initialSearch = '',
+  onExport,
+  onPrint,
 }) => {
   const [data, setData] = useState(externalData || []);
   const [loading, setLoading] = useState(false);
@@ -183,6 +185,10 @@ const DataTable = ({
   };
 
   const handleExport = () => {
+    if (onExport) {
+      onExport(filteredData);
+      return;
+    }
     const exportData = data.map((row) => {
       const exportRow = {};
       columns.forEach((col) => {
@@ -208,6 +214,14 @@ const DataTable = ({
       return exportRow;
     });
     downloadExcel(exportData, exportFileName);
+  };
+
+  const onPrintClick = () => {
+    if (onPrint) {
+      onPrint(filteredData);
+      return;
+    }
+    handlePrint();
   };
 
   const handleRefresh = () => {
@@ -269,7 +283,7 @@ const DataTable = ({
             <Tooltip title="Print">
               <Button
                 icon={<PrinterOutlined />}
-                onClick={handlePrint}
+                onClick={onPrintClick}
                 disabled={filteredData.length === 0}
               />
             </Tooltip>
