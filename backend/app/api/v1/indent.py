@@ -845,11 +845,7 @@ async def create_indent(
                     .where(Employee.id == current_user.employee_id)
                 )
                 project_id = emp_q.scalars().first()
-    if warehouse_id is None:
-        raise HTTPException(
-            status_code=422,
-            detail="warehouse_id is required (no single warehouse mapped to your account)",
-        )
+    # warehouse_id is now optional as requested
     if payload.source_bom_id:
         bom_res = await db.execute(
             select(BOM).where(BOM.id == payload.source_bom_id, BOM.is_active == True)
@@ -974,7 +970,7 @@ async def update_indent(
         wh_ids = await user_warehouse_ids(db, current_user.id)
         from app.utils.dependencies import get_warehouse_and_descendants
         all_wh_ids = await get_warehouse_and_descendants(db, wh_ids)
-        if indent.warehouse_id not in all_wh_ids:
+        if indent.warehouse_id is not None and indent.warehouse_id not in all_wh_ids:
             raise HTTPException(
                 status_code=403,
                 detail="Not authorized to update this indent",
@@ -1125,19 +1121,18 @@ async def submit_indent(
             detail="You are not authorized to submit this indent",
         )
 
-    # BUG-IND-029 — warehouse must exist and be active. A submission against
-    # a deactivated warehouse should be refused at submit time, not silently
-    # propagated through approval and stock check.
-    from app.models.warehouse import Warehouse as _Wh
-    wh_row = await db.execute(select(_Wh).where(_Wh.id == indent.warehouse_id))
-    wh = wh_row.scalar_one_or_none()
-    if not wh:
-        raise HTTPException(status_code=400, detail="Indent warehouse not found")
-    if not wh.is_active:
-        raise HTTPException(
-            status_code=400,
-            detail="Indent warehouse is inactive — cannot submit",
-        )
+    # BUG-IND-029 — warehouse must exist and be active if specified.
+    if indent.warehouse_id is not None:
+        from app.models.warehouse import Warehouse as _Wh
+        wh_row = await db.execute(select(_Wh).where(_Wh.id == indent.warehouse_id))
+        wh = wh_row.scalar_one_or_none()
+        if not wh:
+            raise HTTPException(status_code=400, detail="Indent warehouse not found")
+        if not wh.is_active:
+            raise HTTPException(
+                status_code=400,
+                detail="Indent warehouse is inactive — cannot submit",
+            )
 
     # Attachment no longer mandatory (2026-04-24 — reverted MoM 2026-04-19 §6).
 
@@ -1760,7 +1755,7 @@ async def convert_indent_to_mr(
     is_admin = bool({"super_admin", "admin"} & role_codes)
     if not is_admin:
         wh_ids = await user_warehouse_ids(db, current_user.id)
-        if indent.warehouse_id not in wh_ids:
+        if indent.warehouse_id is not None and indent.warehouse_id not in wh_ids:
             raise HTTPException(
                 status_code=403,
                 detail="Not authorized to convert this indent (warehouse out of scope)",
@@ -2033,7 +2028,7 @@ async def get_acknowledgement(
     ):
         if not await user_is_managerial(db, current_user.id):
             wh_ids = await user_warehouse_ids(db, current_user.id)
-            if not parent_indent or parent_indent.warehouse_id not in wh_ids:
+            if not parent_indent or (parent_indent.warehouse_id is not None and parent_indent.warehouse_id not in wh_ids):
                 raise HTTPException(
                     status_code=403,
                     detail="Not authorized to view this acknowledgement",
@@ -2157,7 +2152,7 @@ async def _create_acknowledgement(
     if not is_raiser:
         if not await user_is_managerial(db, current_user.id):
             wh_ids = await user_warehouse_ids(db, current_user.id)
-            if indent.warehouse_id not in wh_ids:
+            if indent.warehouse_id is not None and indent.warehouse_id not in wh_ids:
                 raise HTTPException(
                     status_code=403,
                     detail="Not authorized to acknowledge this indent",

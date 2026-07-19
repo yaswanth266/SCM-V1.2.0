@@ -304,6 +304,11 @@ def require_permission(module: str, action: str, resource: str):
                 allowed.add(f"{module}-notifications-{r_key}.{act}.{module}-notifications-{r_key}")
                 allowed.add(f"{module}-dashboard-{r_key}.{act}.{module}-dashboard-{r_key}")
                 
+                # Support nested sub-modules under other modules (e.g. procurement-masters-vendors)
+                if module == "masters":
+                    for system_module in ("procurement", "warehouse", "inventory", "logistics", "outbound", "indent", "consumption", "approvals", "accounts", "assets", "settings"):
+                        allowed.add(f"{system_module}-masters-{r_key}.{act}.{system_module}-masters-{r_key}")
+                
             if module.startswith("warehouse-") or module == "warehouse":
                 allowed.add(f"warehouse-transactions.{act}.warehouse-transactions")
             if module.startswith("inventory-") or module == "inventory":
@@ -357,6 +362,11 @@ async def check_user_has_any_permission(db: AsyncSession, user_id: int, permissi
                 allowed.add(f"{module}-reports-{r_key}.{act}.{module}-reports-{r_key}")
                 allowed.add(f"{module}-notifications-{r_key}.{act}.{module}-notifications-{r_key}")
                 allowed.add(f"{module}-dashboard-{r_key}.{act}.{module}-dashboard-{r_key}")
+                
+                # Support nested sub-modules under other modules (e.g. procurement-masters-vendors)
+                if module == "masters":
+                    for system_module in ("procurement", "warehouse", "inventory", "logistics", "outbound", "indent", "consumption", "approvals", "accounts", "assets", "settings"):
+                        allowed.add(f"{system_module}-masters-{r_key}.{act}.{system_module}-masters-{r_key}")
                 
             if module.startswith("warehouse-") or module == "warehouse":
                 allowed.add(f"warehouse-transactions.{act}.warehouse-transactions")

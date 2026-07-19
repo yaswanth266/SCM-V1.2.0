@@ -365,6 +365,20 @@ async def ensure_organization_structure_schema(session: AsyncSession) -> None:
     await conn.run_sync(Position.__table__.create, checkfirst=True)
     await conn.run_sync(Employee.__table__.create, checkfirst=True)
 
+    # Ensure position_reporting junction table exists
+    try:
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS position_reporting (
+                position_id BIGINT NOT NULL,
+                parent_position_id BIGINT NOT NULL,
+                PRIMARY KEY (position_id, parent_position_id),
+                CONSTRAINT fk_pos_rep_position FOREIGN KEY (position_id) REFERENCES positions(id) ON DELETE CASCADE,
+                CONSTRAINT fk_pos_rep_parent FOREIGN KEY (parent_position_id) REFERENCES positions(id) ON DELETE CASCADE
+            )
+        """))
+    except Exception as exc:
+        print(f"Ignored error creating position_reporting table: {exc}")
+
     # Wave 11C — add HRMS API extra columns if missing
     for col_name, col_ddl in (
         ("job_name", "ALTER TABLE positions ADD COLUMN job_name VARCHAR(100) NULL"),

@@ -11,7 +11,7 @@ class Indent(Base):
     indent_number = Column(String(50), unique=True, nullable=False)
     project_id = Column(BigInteger, ForeignKey("projects.id"))
     source_bom_id = Column(BigInteger, ForeignKey("boms.id"), nullable=True)
-    warehouse_id = Column(BigInteger, ForeignKey("warehouses.id"), nullable=False)
+    warehouse_id = Column(BigInteger, ForeignKey("warehouses.id"), nullable=True)
     indent_date = Column(DateTime, nullable=False)
     required_date = Column(DateTime)
     department = Column(String(100))

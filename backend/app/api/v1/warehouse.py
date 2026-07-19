@@ -19,7 +19,7 @@ from app.models.issue import MaterialIssue, MaterialIssueItem
 from app.models.master import Item, UOM
 from app.schemas.warehouse import (
     GRNCreate, GRNResponse, GRNUpdate,
-    QICreate, QIResponse,
+    QICreate, QIUpdate, QIResponse,
     PutawayCreate, PutawayItemUpdate, PutawayResponse,
     PurchaseReturnCreate, PurchaseReturnUpdate, PurchaseReturnResponse,
     MaterialIssueCreate, MaterialIssueUpdate, MaterialIssueResponse,
@@ -300,6 +300,7 @@ async def get_grn(
         response["items"][i]["item_code"] = gi.item.item_code if gi.item else None
         response["items"][i]["uom_name"] = gi.uom.name if gi.uom else None
         response["items"][i]["item_type"] = gi.item.item_type if gi.item else None
+        response["items"][i]["requires_quality_inspection"] = gi.item.requires_quality_inspection if gi.item else False
         response["items"][i]["has_serial"] = bool(gi.item.has_serial) if gi.item else False
         response["items"][i]["serial_numbers"] = [s.serial_number for s in gi.serials] if hasattr(gi, "serials") else []
     return response
@@ -368,7 +369,7 @@ async def create_grn(
         if item_ids:
             from app.models.master import Item as _Item
             items_q = await db.execute(
-                select(_Item.id, _Item.item_code, _Item.has_batch, _Item.has_expiry, _Item.item_type)
+                select(_Item.id, _Item.item_code, _Item.has_batch, _Item.has_expiry, _Item.item_type, _Item.requires_quality_inspection)
                 .where(_Item.id.in_(item_ids))
             )
             item_meta = {r.id: r for r in items_q.all()}
@@ -535,6 +536,9 @@ async def create_grn(
                         ),
                     )
 
+    accepted_qty = Decimal("0")
+    rejected_qty = Decimal("0")
+    added_grn_items = []
     for item in payload.items:
         # Create or find batch if batch_number provided.
         # BUG-INV-006: race-safe batch upsert. Two concurrent GRNs that
@@ -596,14 +600,27 @@ async def create_grn(
             if po_item:
                 po_item_id = po_item.id
 
+        requires_qi = False
+        if item.item_id in item_meta:
+            requires_qi = getattr(item_meta[item.item_id], "requires_quality_inspection", False)
+
+        item_accepted_qty = Decimal("0")
+        item_rejected_qty = Decimal("0")
+        item_qi_status = "pending"
+
+        if not requires_qi:
+            item_accepted_qty = item.received_qty
+            item_rejected_qty = Decimal("0")
+            item_qi_status = "accepted"
+
         grn_item = GRNItem(
             grn_id=grn.id,
             po_item_id=po_item_id,
             item_id=item.item_id,
             ordered_qty=item.ordered_qty,
             received_qty=item.received_qty,
-            accepted_qty=item.accepted_qty,
-            rejected_qty=item.rejected_qty,
+            accepted_qty=item_accepted_qty,
+            rejected_qty=item_rejected_qty,
             uom_id=item.uom_id,
             batch_id=batch_id,
             batch_number=item.batch_number,
@@ -618,11 +635,15 @@ async def create_grn(
             igst_rate=getattr(item, "igst_rate", Decimal("0")),
             tax_amount=getattr(item, "tax_amount", Decimal("0")),
             weight=getattr(item, "weight", Decimal("0")),
+            qi_status=item_qi_status,
             remarks=item.remarks,
         )
         db.add(grn_item)
+        added_grn_items.append(grn_item)
         await db.flush()
         total_qty += item.received_qty
+        accepted_qty += item_accepted_qty
+        rejected_qty += item_rejected_qty
 
         # Update PO item received qty
         if po_item_id:
@@ -634,15 +655,51 @@ async def create_grn(
                 po_item.received_qty = (po_item.received_qty or Decimal("0")) + item.received_qty
 
     grn.total_qty = total_qty
-    grn.accepted_qty = payload.accepted_qty
-    grn.rejected_qty = payload.rejected_qty
-    # BUG-INV-013/125: honor "save as draft" — was always force-bumped to
-    # pending_qi, even when the FE clearly asked for draft. Now if the caller
-    # asks for draft we respect it and skip the auto-QI creation block below.
+    grn.accepted_qty = accepted_qty
+    grn.rejected_qty = rejected_qty
+    
+    has_qi_items = any(
+        getattr(item_meta.get(item.item_id), "requires_quality_inspection", False)
+        for item in payload.items if item.item_id in item_meta
+    )
+
     if getattr(payload, "is_draft", False):
         grn.status = "draft"
     else:
-        grn.status = "pending_qi"
+        if has_qi_items:
+            grn.status = "pending_qi"
+        else:
+            grn.status = "putaway_pending"
+
+    # Auto-create PutawayOrder for non-QI items if not draft
+    if not getattr(payload, "is_draft", False):
+        non_qi_items = [gi for gi in added_grn_items if gi.accepted_qty and float(gi.accepted_qty) > 0]
+        if non_qi_items:
+            try:
+                pa_number = await generate_number(db, "warehouse", "putaway_order")
+                pa = PutawayOrder(
+                    putaway_number=pa_number,
+                    grn_id=grn.id,
+                    warehouse_id=grn.warehouse_id,
+                    putaway_type="system_directed",
+                    status="draft",
+                    assigned_to=current_user.id,
+                )
+                db.add(pa)
+                await db.flush()
+                for gi in non_qi_items:
+                    db.add(PutawayItem(
+                        putaway_id=pa.id,
+                        grn_item_id=gi.id,
+                        item_id=gi.item_id,
+                        qty=gi.accepted_qty,
+                        uom_id=gi.uom_id,
+                        batch_id=gi.batch_id,
+                        status="pending",
+                    ))
+                await db.flush()
+            except Exception as exc:
+                logger.exception("Putaway auto-create failed for GRN %s: %s", grn.id, exc)
 
     # Update PO status
     if payload.po_id:
@@ -691,7 +748,7 @@ async def submit_grn_for_qi(
     """
     result = await db.execute(
         select(GoodsReceiptNote)
-        .options(selectinload(GoodsReceiptNote.items))
+        .options(selectinload(GoodsReceiptNote.items).selectinload(GRNItem.item))
         .where(GoodsReceiptNote.id == grn_id)
     )
     grn = result.scalar_one_or_none()
@@ -699,7 +756,61 @@ async def submit_grn_for_qi(
         raise HTTPException(status_code=404, detail="GRN not found")
     if grn.status not in ("draft", "pending_qi"):
         raise HTTPException(status_code=400, detail=f"GRN is in '{grn.status}' status. Only draft GRNs can be submitted for QI.")
-    grn.status = "qi_in_progress"
+    
+    # Backfill and update non-QI items to accepted
+    for gi in grn.items:
+        if gi.item and not gi.item.requires_quality_inspection:
+            gi.qi_status = "accepted"
+            gi.accepted_qty = gi.received_qty
+            gi.rejected_qty = Decimal("0")
+
+    await db.flush()
+
+    has_qi_items = False
+    for gi in grn.items:
+        if gi.item and gi.item.requires_quality_inspection:
+            has_qi_items = True
+            break
+
+    if has_qi_items:
+        grn.status = "qi_in_progress"
+    else:
+        grn.status = "putaway_pending"
+
+    # Auto-create PutawayOrder for non-QI items
+    non_qi_items = [gi for gi in grn.items if gi.accepted_qty and float(gi.accepted_qty) > 0]
+    if non_qi_items:
+        try:
+            # Check if PutawayOrder already exists for this GRN
+            existing_pa_res = await db.execute(
+                select(PutawayOrder).where(PutawayOrder.grn_id == grn.id)
+            )
+            existing_pa = existing_pa_res.scalar_one_or_none()
+            if existing_pa is None:
+                pa_number = await generate_number(db, "warehouse", "putaway_order")
+                pa = PutawayOrder(
+                    putaway_number=pa_number,
+                    grn_id=grn.id,
+                    warehouse_id=grn.warehouse_id,
+                    putaway_type="system_directed",
+                    status="draft",
+                    assigned_to=current_user.id,
+                )
+                db.add(pa)
+                await db.flush()
+                for gi in non_qi_items:
+                    db.add(PutawayItem(
+                        putaway_id=pa.id,
+                        grn_item_id=gi.id,
+                        item_id=gi.item_id,
+                        qty=gi.accepted_qty,
+                        uom_id=gi.uom_id,
+                        batch_id=gi.batch_id,
+                        status="pending",
+                    ))
+                await db.flush()
+        except Exception as exc:
+            logger.exception("Putaway auto-create failed during submit-qi for GRN %s: %s", grn.id, exc)
 
     await db.flush()
     return {
@@ -1053,10 +1164,11 @@ async def create_quality_inspection(
     # silently and users wonder why stock never lands.
     try:
         if grn and grn.status == "putaway_pending" and grn.accepted_qty and grn.accepted_qty > 0:
-            existing_pa = await db.execute(
+            existing_pa_res = await db.execute(
                 select(PutawayOrder).where(PutawayOrder.grn_id == grn.id)
             )
-            if existing_pa.scalar_one_or_none() is None:
+            existing_pa = existing_pa_res.scalar_one_or_none()
+            if existing_pa is None:
                 pa_number = await generate_number(db, "warehouse", "putaway_order")
                 pa = PutawayOrder(
                     putaway_number=pa_number,
@@ -1080,6 +1192,26 @@ async def create_quality_inspection(
                             batch_id=gi.batch_id,
                             status="pending",
                         ))
+                await db.flush()
+            else:
+                # PutawayOrder already exists (e.g. created for non-QI items).
+                # Append any accepted items that aren't already in the PutawayOrder.
+                existing_items_res = await db.execute(
+                    select(PutawayItem.grn_item_id).where(PutawayItem.putaway_id == existing_pa.id)
+                )
+                existing_grn_item_ids = {r for r in existing_items_res.scalars().all()}
+                for gi in grn_items:
+                    if gi.accepted_qty and float(gi.accepted_qty) > 0:
+                        if gi.id not in existing_grn_item_ids:
+                            db.add(PutawayItem(
+                                putaway_id=existing_pa.id,
+                                grn_item_id=gi.id,
+                                item_id=gi.item_id,
+                                qty=gi.accepted_qty,
+                                uom_id=gi.uom_id,
+                                batch_id=gi.batch_id,
+                                status="pending",
+                            ))
                 await db.flush()
     except Exception as exc:
         logger.exception(
@@ -1227,6 +1359,20 @@ async def create_putaway_order(
     await db.flush()
 
     for item in payload.items:
+        if item.grn_item_id:
+            grn_item_res = await db.execute(
+                select(GRNItem)
+                .options(selectinload(GRNItem.item))
+                .where(GRNItem.id == item.grn_item_id)
+            )
+            grn_item = grn_item_res.scalar_one_or_none()
+            if grn_item and grn_item.item:
+                if grn_item.item.requires_quality_inspection and grn_item.qi_status != "accepted":
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Item {grn_item.item.item_code} requires quality inspection and has not been accepted yet (current status: {grn_item.qi_status})"
+                    )
+
         resolved_suggested_bin_id = await resolve_or_create_bin(db, payload.warehouse_id, item.suggested_bin_id)
         pi = PutawayItem(
             putaway_id=po.id,
@@ -1892,6 +2038,246 @@ async def create_quality_inspection_alias(
     return await create_quality_inspection(payload=payload, db=db, current_user=current_user)
 
 
+@router.put("/quality-inspections/{qi_id}")
+async def update_quality_inspection(
+    qi_id: int,
+    payload: QIUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_key("warehouse-quality-inspection")),
+):
+    """Edit an existing Quality Inspection, update statuses and quantities, and auto-putaway if completed."""
+    # 1. Fetch the quality inspection
+    result = await db.execute(
+        select(QualityInspection)
+        .options(selectinload(QualityInspection.items))
+        .where(QualityInspection.id == qi_id)
+    )
+    qi = result.scalar_one_or_none()
+    if not qi:
+        raise HTTPException(status_code=404, detail="Quality inspection not found")
+
+    # 2. Check if linked GRN already has active Putaway Orders or is completed
+    grn_result = await db.execute(select(GoodsReceiptNote).where(GoodsReceiptNote.id == qi.grn_id))
+    grn = grn_result.scalar_one_or_none()
+    if grn:
+        if grn.status in ("putaway_done", "completed"):
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot edit quality inspection for a GRN that is already put away or completed."
+            )
+        # Check if putaway order already exists (only allow edit if putaway has not been completed)
+        pa_result = await db.execute(
+            select(PutawayOrder).where(PutawayOrder.grn_id == grn.id)
+        )
+        existing_pas = pa_result.scalars().all()
+        if any(pa.status == "completed" for pa in existing_pas):
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot edit quality inspection as related putaway orders have already been completed."
+            )
+
+    # 3. Validate quantities
+    for item in payload.items:
+        accepted = Decimal(str(item.accepted_qty or 0))
+        rejected = Decimal(str(item.rejected_qty or 0))
+        held = Decimal(str(item.hold_qty or 0))
+        inspected = Decimal(str(item.inspected_qty or 0))
+        if accepted + rejected + held > inspected:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid QI quantities for grn_item {item.grn_item_id}: "
+                    f"accepted({accepted}) + rejected({rejected}) + hold({held}) "
+                    f"= {accepted+rejected+held} exceeds inspected_qty {inspected}"
+                ),
+            )
+
+    # 4. Update the fields on the QI record itself
+    qi.inspection_type = payload.inspection_type
+    qi.inspection_date = payload.inspection_date
+    qi.overall_result = payload.overall_result
+    qi.remarks = payload.remarks
+    qi.inspected_by = current_user.id
+
+    # 5. Track affected GRN items to re-calculate aggregate totals
+    affected_grn_item_ids = {item.grn_item_id for item in payload.items}
+    # Retrieve existing items to include them in the recalculation set
+    old_items_result = await db.execute(
+        select(QualityInspectionItem.grn_item_id).where(QualityInspectionItem.qi_id == qi.id)
+    )
+    for grn_item_id in old_items_result.scalars().all():
+        affected_grn_item_ids.add(grn_item_id)
+
+    # 6. Delete old items and insert new ones
+    from sqlalchemy import delete
+    await db.execute(delete(QualityInspectionItem).where(QualityInspectionItem.qi_id == qi.id))
+    await db.flush()
+
+    for item in payload.items:
+        qi_item = QualityInspectionItem(
+            qi_id=qi.id,
+            grn_item_id=item.grn_item_id,
+            item_id=item.item_id,
+            inspected_qty=item.inspected_qty,
+            accepted_qty=item.accepted_qty,
+            rejected_qty=item.rejected_qty,
+            hold_qty=item.hold_qty,
+            result=item.result,
+            rejection_reason=item.rejection_reason,
+            remarks=item.remarks,
+        )
+        db.add(qi_item)
+    await db.flush()
+
+    # 7. Recalculate GRN items totals
+    for grn_item_id in affected_grn_item_ids:
+        grn_item_res = await db.execute(select(GRNItem).where(GRNItem.id == grn_item_id))
+        grn_item = grn_item_res.scalar_one_or_none()
+        if grn_item:
+            totals_res = await db.execute(
+                select(
+                    func.sum(QualityInspectionItem.accepted_qty),
+                    func.sum(QualityInspectionItem.rejected_qty)
+                ).where(QualityInspectionItem.grn_item_id == grn_item_id)
+            )
+            totals = totals_res.one()
+            grn_item.accepted_qty = totals[0] or Decimal("0")
+            grn_item.rejected_qty = totals[1] or Decimal("0")
+
+            latest_item_res = await db.execute(
+                select(QualityInspectionItem.result)
+                .where(QualityInspectionItem.grn_item_id == grn_item_id)
+                .order_by(QualityInspectionItem.id.desc())
+                .limit(1)
+            )
+            latest_result = latest_item_res.scalar_one_or_none()
+            grn_item.qi_status = latest_result if latest_result else "pending"
+
+    # 8. Recalculate parent GRN totals and status
+    if grn:
+        if payload.status == "completed":
+            grn.status = "putaway_pending"
+        elif payload.status == "in_progress":
+            grn.status = "qi_in_progress"
+        else:
+            grn.status = "pending_qi"
+
+        grn_items_result = await db.execute(select(GRNItem).where(GRNItem.grn_id == grn.id))
+        grn_items = grn_items_result.scalars().all()
+        grn.accepted_qty = sum(float(gi.accepted_qty or 0) for gi in grn_items)
+        grn.rejected_qty = sum(float(gi.rejected_qty or 0) for gi in grn_items)
+
+        await db.flush()
+
+        # 9. Handle Putaway creation/appending when QI completed
+        try:
+            if grn.status == "putaway_pending" and grn.accepted_qty and grn.accepted_qty > 0:
+                existing_pa_res = await db.execute(
+                    select(PutawayOrder).where(PutawayOrder.grn_id == grn.id)
+                )
+                existing_pa = existing_pa_res.scalar_one_or_none()
+                if existing_pa is None:
+                    pa_number = await generate_number(db, "warehouse", "putaway_order")
+                    pa = PutawayOrder(
+                        putaway_number=pa_number,
+                        grn_id=grn.id,
+                        warehouse_id=grn.warehouse_id,
+                        putaway_type="system_directed",
+                        status="draft",
+                        assigned_to=current_user.id,
+                    )
+                    db.add(pa)
+                    await db.flush()
+                    for gi in grn_items:
+                        if gi.accepted_qty and float(gi.accepted_qty) > 0:
+                            db.add(PutawayItem(
+                                putaway_id=pa.id,
+                                grn_item_id=gi.id,
+                                item_id=gi.item_id,
+                                qty=gi.accepted_qty,
+                                uom_id=gi.uom_id,
+                                batch_id=gi.batch_id,
+                                status="pending",
+                            ))
+                    await db.flush()
+                else:
+                    # Append items not in existing PutawayOrder
+                    existing_items_res = await db.execute(
+                        select(PutawayItem.grn_item_id).where(PutawayItem.putaway_id == existing_pa.id)
+                    )
+                    existing_grn_item_ids = {r for r in existing_items_res.scalars().all()}
+                    for gi in grn_items:
+                        if gi.accepted_qty and float(gi.accepted_qty) > 0:
+                            if gi.id not in existing_grn_item_ids:
+                                db.add(PutawayItem(
+                                    putaway_id=existing_pa.id,
+                                    grn_item_id=gi.id,
+                                    item_id=gi.item_id,
+                                    qty=gi.accepted_qty,
+                                    uom_id=gi.uom_id,
+                                    batch_id=gi.batch_id,
+                                    status="pending",
+                                ))
+                    await db.flush()
+        except Exception as exc:
+            logger.exception("Putaway auto-create/update failed for GRN %s: %s", grn.id, exc)
+
+        # 10. Handle Quarantine creation/appending if rejected
+        try:
+            if grn.status == "putaway_pending" and grn.rejected_qty and float(grn.rejected_qty) > 0:
+                from app.models.warehouse import (
+                    WarehouseBin as _Bin, WarehouseRack as _Rack,
+                    WarehouseLine as _Line, WarehouseLocation as _Loc,
+                )
+                q_bin_row = await db.execute(
+                    select(_Bin.id)
+                    .join(_Rack, _Rack.id == _Bin.rack_id)
+                    .join(_Line, _Line.id == _Rack.line_id)
+                    .join(_Loc, _Loc.id == _Line.location_id)
+                    .where(
+                        _Loc.warehouse_id == grn.warehouse_id,
+                        _Line.zone_type == "quarantine",
+                        _Bin.is_active == True,
+                    )
+                    .limit(1)
+                )
+                q_bin_id = q_bin_row.scalar_one_or_none()
+                if q_bin_id:
+                    pa_row = await db.execute(
+                        select(PutawayOrder).where(PutawayOrder.grn_id == grn.id).limit(1)
+                    )
+                    pa = pa_row.scalar_one_or_none()
+                    if pa:
+                        existing_items_res = await db.execute(
+                            select(PutawayItem.grn_item_id, PutawayItem.suggested_bin_id)
+                            .where(PutawayItem.putaway_id == pa.id)
+                        )
+                        existing_q_mappings = {
+                            (r.grn_item_id, r.suggested_bin_id)
+                            for r in existing_items_res.all()
+                        }
+                        for gi in grn_items:
+                            if gi.rejected_qty and float(gi.rejected_qty) > 0:
+                                if (gi.id, q_bin_id) not in existing_q_mappings:
+                                    db.add(PutawayItem(
+                                        putaway_id=pa.id,
+                                        grn_item_id=gi.id,
+                                        item_id=gi.item_id,
+                                        qty=gi.rejected_qty,
+                                        uom_id=gi.uom_id,
+                                        batch_id=gi.batch_id,
+                                        suggested_bin_id=q_bin_id,
+                                        status="pending",
+                                    ))
+                        await db.flush()
+        except Exception as exc:
+            logger.exception("Quarantine auto-create/update failed for GRN %s: %s", grn.id, exc)
+
+    await db.flush()
+    await db.refresh(qi, ["items"])
+    return {"message": "Quality Inspection updated successfully", "id": qi.id}
+
+
 @router.put("/quality-inspections/{qi_id}/complete")
 async def complete_quality_inspection(
     qi_id: int,
@@ -2001,12 +2387,33 @@ async def complete_quality_inspection(
     grn.status = "putaway_pending"
 
     # Check if a putaway already exists for this GRN (idempotent)
-    existing = await db.execute(
+    existing_pa_res = await db.execute(
         select(PutawayOrder).where(PutawayOrder.grn_id == grn.id)
     )
-    if existing.scalar_one_or_none():
+    existing_pa = existing_pa_res.scalar_one_or_none()
+    if existing_pa is not None:
+        # PutawayOrder already exists (e.g. created for non-QI items).
+        # Append any accepted items that aren't already in the PutawayOrder.
+        existing_items_res = await db.execute(
+            select(PutawayItem.grn_item_id).where(PutawayItem.putaway_id == existing_pa.id)
+        )
+        existing_grn_item_ids = {r for r in existing_items_res.scalars().all()}
+        for grn_item in grn.items:
+            accepted = qi_accepted_by_grn_item.get(grn_item.id, Decimal("0"))
+            if accepted <= 0:
+                continue
+            if grn_item.id not in existing_grn_item_ids:
+                pi = PutawayItem(
+                    putaway_id=existing_pa.id,
+                    grn_item_id=grn_item.id,
+                    item_id=grn_item.item_id,
+                    qty=accepted,
+                    uom_id=grn_item.uom_id,
+                    batch_id=getattr(grn_item, "batch_id", None),
+                )
+                db.add(pi)
         await db.flush()
-        return {"success": True, "message": "Quality inspection completed (putaway already exists)"}
+        return {"success": True, "message": "Quality inspection completed (putaway items appended)"}
 
     # BUG-INV-019: build putaway from QI accepted_qty (authoritative source)
     # rather than grn_item.accepted_qty which can be stale.

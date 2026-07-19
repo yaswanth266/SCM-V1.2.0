@@ -120,7 +120,7 @@ const PutawayForm = () => {
     try {
       const res = await api.get(`/warehouse/grn/${grnId}`);
       const data = res.data;
-      const grnItemsList = data.items || [];
+      const grnItemsList = (data.items || []).filter(gi => gi.qi_status === 'accepted');
       setGrnItems(grnItemsList);
 
       const newItems = grnItemsList.map((gi, idx) => ({
@@ -129,7 +129,7 @@ const PutawayForm = () => {
         item_id: gi.item_id,
         item_name: gi.item_name || (gi.item && (gi.item.item_name || gi.item.name)) || '',
         item_code: gi.item_code || (gi.item && gi.item.item_code) || '',
-        qty: gi.received_qty || gi.qty || gi.quantity || 0,
+        qty: gi.accepted_qty || gi.received_qty || gi.qty || gi.quantity || 0,
         uom_id: gi.uom_id,
         uom_name: gi.uom || gi.uom_name || (gi.item && gi.item.uom) || '',
         batch_id: gi.batch_id || null,

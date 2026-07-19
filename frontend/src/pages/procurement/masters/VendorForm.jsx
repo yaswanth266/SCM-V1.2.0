@@ -189,12 +189,23 @@ const VendorForm = () => {
                     </Row>
                     <Row gutter={16}>
                       <Col span={12}>
-                        <Form.Item name="contact_person" label="Contact Person">
+                        <Form.Item
+                          name="contact_person"
+                          label="Contact Person"
+                          rules={[{ required: true, message: 'Contact Person is required' }]}
+                        >
                           <Input placeholder="Contact person name" />
                         </Form.Item>
                       </Col>
                       <Col span={12}>
-                        <Form.Item name="email" label="Email" rules={[{ type: 'email', message: 'Please enter a valid email address' }]}>
+                        <Form.Item
+                          name="email"
+                          label="Email"
+                          rules={[
+                            { required: true, message: 'Email is required' },
+                            { type: 'email', message: 'Please enter a valid email address' }
+                          ]}
+                        >
                           <Input placeholder="email@example.com" />
                         </Form.Item>
                       </Col>
@@ -205,6 +216,7 @@ const VendorForm = () => {
                           name="phone"
                           label="Phone"
                           rules={[
+                            { required: true, message: 'Phone is required' },
                             {
                               validator: (_, value) => {
                                 if (!value) return Promise.resolve();
@@ -225,6 +237,7 @@ const VendorForm = () => {
                           name="alt_phone"
                           label="Alt Phone"
                           rules={[
+                            { required: true, message: 'Alt Phone is required' },
                             {
                               validator: (_, value) => {
                                 if (!value) return Promise.resolve();
@@ -264,30 +277,58 @@ const VendorForm = () => {
                 ),
                 children: (
                   <>
-                    <Form.Item name="address_line1" label="Address Line 1">
+                    <Form.Item
+                      name="address_line1"
+                      label="Address Line 1"
+                      rules={[{ required: true, message: 'Address Line 1 is required' }]}
+                    >
                       <Input placeholder="Street address" />
                     </Form.Item>
-                    <Form.Item name="address_line2" label="Address Line 2">
+                    <Form.Item
+                      name="address_line2"
+                      label="Address Line 2"
+                      rules={[{ required: true, message: 'Address Line 2 is required' }]}
+                    >
                       <Input placeholder="Apartment, suite, etc." />
                     </Form.Item>
                     <Row gutter={16}>
                       <Col span={8}>
-                        <Form.Item name="city" label="City">
+                        <Form.Item
+                          name="city"
+                          label="City"
+                          rules={[{ required: true, message: 'City is required' }]}
+                        >
                           <Input placeholder="City" />
                         </Form.Item>
                       </Col>
                       <Col span={8}>
-                        <Form.Item name="state" label="State">
+                        <Form.Item
+                          name="state"
+                          label="State"
+                          rules={[{ required: true, message: 'State is required' }]}
+                        >
                           <Select placeholder="Select state" allowClear showSearch options={STATES.map((s) => ({ label: s, value: s }))} />
                         </Form.Item>
                       </Col>
                       <Col span={8}>
-                        <Form.Item name="pincode" label="Pincode" rules={[{ pattern: /^[0-9]{5,10}$/, message: 'Pincode must be between 5 and 10 digits' }]}>
+                        <Form.Item
+                          name="pincode"
+                          label="Pincode"
+                          rules={[
+                            { required: true, message: 'Pincode is required' },
+                            { pattern: /^[0-9]{5,10}$/, message: 'Pincode must be between 5 and 10 digits' }
+                          ]}
+                        >
                           <Input placeholder="Pincode" />
                         </Form.Item>
                       </Col>
                     </Row>
-                    <Form.Item name="country" label="Country" initialValue="India">
+                    <Form.Item
+                      name="country"
+                      label="Country"
+                      initialValue="India"
+                      rules={[{ required: true, message: 'Country is required' }]}
+                    >
                       <Input placeholder="Country" />
                     </Form.Item>
                   </>
@@ -333,7 +374,14 @@ const VendorForm = () => {
                     </Row>
                     <Row gutter={16}>
                       <Col span={8}>
-                        <Form.Item name="bank_name" label="Bank Name">
+                        <Form.Item
+                          name="bank_name"
+                          label="Bank Name"
+                          rules={[
+                            { required: true, message: 'Bank Name is required' },
+                            { pattern: /^[a-zA-Z\s.-]+$/, message: 'Bank Name must contain only letters, spaces, hyphens, or dots' }
+                          ]}
+                        >
                           <Input placeholder="Bank name" />
                         </Form.Item>
                       </Col>
@@ -341,7 +389,10 @@ const VendorForm = () => {
                         <Form.Item
                           name="bank_account"
                           label="Bank Account No"
-                          rules={[{ pattern: /^[0-9]{9,18}$/, message: 'Bank Account Number must be between 9 and 18 numeric digits' }]}
+                          rules={[
+                            { required: true, message: 'Bank Account is required' },
+                            { pattern: /^[0-9]{9,18}$/, message: 'Bank Account Number must be between 9 and 18 numeric digits' }
+                          ]}
                         >
                           <Input placeholder="Account number" />
                         </Form.Item>
@@ -350,7 +401,10 @@ const VendorForm = () => {
                         <Form.Item
                           name="bank_ifsc"
                           label="Bank IFSC"
-                          rules={[{ pattern: /^[A-Z]{4}0[A-Z0-9]{6}$/, message: 'Enter a valid 11-character IFSC code' }]}
+                          rules={[
+                            { required: true, message: 'Bank IFSC is required' },
+                            { pattern: /^[A-Z]{4}0[A-Z0-9]{6}$/, message: 'Enter a valid 11-character IFSC code' }
+                          ]}
                         >
                           <Input placeholder="IFSC code" style={{ textTransform: 'uppercase' }} onChange={(e) => form.setFieldsValue({ bank_ifsc: e.target.value.toUpperCase() })} />
                         </Form.Item>
@@ -373,7 +427,11 @@ const VendorForm = () => {
                   <>
                     <Row gutter={16}>
                       <Col span={12}>
-                        <Form.Item name="payment_terms_days" label="Payment Terms (days)">
+                        <Form.Item
+                          name="payment_terms_days"
+                          label="Payment Terms (days)"
+                          rules={[{ required: true, message: 'Payment Terms is required' }]}
+                        >
                           <InputNumber
                             min={0}
                             max={365}
@@ -384,7 +442,11 @@ const VendorForm = () => {
                         </Form.Item>
                       </Col>
                       <Col span={12}>
-                        <Form.Item name="credit_limit" label="Credit Limit">
+                        <Form.Item
+                          name="credit_limit"
+                          label="Credit Limit"
+                          rules={[{ required: true, message: 'Credit Limit is required' }]}
+                        >
                           <InputNumber min={0} step={100} style={{ width: '100%' }} placeholder="0.00" />
                         </Form.Item>
                       </Col>
