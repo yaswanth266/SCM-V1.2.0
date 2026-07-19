@@ -1,4 +1,4 @@
-import { Slot, router } from 'expo-router';
+﻿import { Slot, router } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';

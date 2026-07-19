@@ -23,7 +23,11 @@ const vendorApi = axios.create({
 /* Attach Bearer token from vendor localStorage key */
 vendorApi.interceptors.request.use((config) => {
   const token = localStorage.getItem('vendor_token');
-  if (token) {
+  const isPublicEndpoint = config.url && (
+    config.url.includes('/vendor-auth/login') ||
+    config.url.includes('/vendor-auth/refresh-token')
+  );
+  if (token && !isPublicEndpoint) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;

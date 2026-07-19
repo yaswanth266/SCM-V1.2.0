@@ -143,11 +143,7 @@ const Login = () => {
       <section className="bavya-login-brand">
         <div className="grid-overlay" aria-hidden />
         <header className="brand-header">
-          <img src="/bavya-mark.png" alt="" />
-          <div className="wm">
-            <b>BAVYA SCM</b>
-            <span>SUPPLY CHAIN MANAGEMENT</span>
-          </div>
+          <img src="/SCM_640logo1.png" alt="Bavya SCM" />
         </header>
         <div className="brand-hero">
           <h1>
@@ -345,6 +341,7 @@ const Login = () => {
                 <a href="mailto:it@bhspl.in">Contact IT →</a>
               </div>
             </div>
+
           </form>
         </div>
 

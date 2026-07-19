@@ -966,9 +966,10 @@ export default function SupplierPortal() {
       align: 'right',
       width: 130,
       render: (_, r, idx) => {
-        const isEditable = !selectedPoDetails?.comparison?.has_parent || 
+        const isEditable = selectedPoDetails?.comparison?.has_parent && (
           selectedPoDetails.comparison.added_item_ids?.includes(r.item_id) || 
-          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items);
+          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items)
+        );
         return (
           <Form.Item
             name={['items', idx, 'rate']}
@@ -994,9 +995,10 @@ export default function SupplierPortal() {
       align: 'right',
       width: 90,
       render: (_, r, idx) => {
-        const isEditable = !selectedPoDetails?.comparison?.has_parent || 
+        const isEditable = selectedPoDetails?.comparison?.has_parent && (
           selectedPoDetails.comparison.added_item_ids?.includes(r.item_id) || 
-          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items);
+          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items)
+        );
         return (
           <Form.Item
             name={['items', idx, 'discount_pct']}
@@ -1014,9 +1016,10 @@ export default function SupplierPortal() {
       align: 'right',
       width: 85,
       render: (_, r, idx) => {
-        const isEditable = !selectedPoDetails?.comparison?.has_parent || 
+        const isEditable = selectedPoDetails?.comparison?.has_parent && (
           selectedPoDetails.comparison.added_item_ids?.includes(r.item_id) || 
-          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items);
+          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items)
+        );
         return (
           <Form.Item
             name={['items', idx, 'igst_rate']}
@@ -1047,9 +1050,10 @@ export default function SupplierPortal() {
       align: 'right',
       width: 85,
       render: (_, r, idx) => {
-        const isEditable = !selectedPoDetails?.comparison?.has_parent || 
+        const isEditable = selectedPoDetails?.comparison?.has_parent && (
           selectedPoDetails.comparison.added_item_ids?.includes(r.item_id) || 
-          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items);
+          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items)
+        );
         return (
           <Form.Item
             name={['items', idx, 'cgst_rate']}
@@ -1080,9 +1084,10 @@ export default function SupplierPortal() {
       align: 'right',
       width: 85,
       render: (_, r, idx) => {
-        const isEditable = !selectedPoDetails?.comparison?.has_parent || 
+        const isEditable = selectedPoDetails?.comparison?.has_parent && (
           selectedPoDetails.comparison.added_item_ids?.includes(r.item_id) || 
-          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items);
+          (selectedPoDetails.comparison.modified_items && String(r.item_id) in selectedPoDetails.comparison.modified_items)
+        );
         return (
           <Form.Item
             name={['items', idx, 'sgst_rate']}

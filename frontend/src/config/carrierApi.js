@@ -15,7 +15,11 @@ const carrierApi = axios.create({
 
 carrierApi.interceptors.request.use((config) => {
   const token = localStorage.getItem('carrier_token');
-  if (token) {
+  const isPublicEndpoint = config.url && (
+    config.url.includes('/carrier-auth/login') ||
+    config.url.includes('/carrier-auth/refresh-token')
+  );
+  if (token && !isPublicEndpoint) {
     config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
   }

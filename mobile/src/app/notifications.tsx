@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { router } from 'expo-router';
+import { API_BASE_URL } from '../constants/config';
 
 // ─── Lightweight Icon Renderer ───────────────────────────────────────────────
 const Icon = ({ name, size = 18, color = '#7A6D66' }: { name: string; size?: number; color?: string }) => {
@@ -82,7 +83,6 @@ function timeAgo(dateStr: string) {
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function Notifications() {
   const [token, setToken]           = useState('');
-  const [apiUrl, setApiUrl]         = useState('');
   const [items, setItems]           = useState<any[]>([]);
   const [loading, setLoading]       = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -91,21 +91,19 @@ export default function Notifications() {
   // Load session
   useEffect(() => {
     const init = async () => {
-      const t   = await AsyncStorage.getItem('user_token');
-      const url = await AsyncStorage.getItem('API_URL');
+      const t = await AsyncStorage.getItem('user_token');
       if (!t) { router.replace('/'); return; }
       setToken(t);
-      setApiUrl(url || 'http://10.2.1.31:8000');
     };
     init();
   }, []);
 
   // Fetch notifications
   const fetchNotifications = useCallback(async (showLoader = true) => {
-    if (!token || !apiUrl) return;
+    if (!token) return;
     if (showLoader) setLoading(true);
     try {
-      const res = await axios.get(`${apiUrl}/api/v1/notifications?page_size=50`, {
+      const res = await axios.get(`${API_BASE_URL}/api/v1/notifications?page_size=50`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setItems(res.data?.items || []);
@@ -115,11 +113,11 @@ export default function Notifications() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [token, apiUrl]);
+  }, [token]);
 
   useEffect(() => {
-    if (token && apiUrl) fetchNotifications();
-  }, [token, apiUrl, fetchNotifications]);
+    if (token) fetchNotifications();
+  }, [token, fetchNotifications]);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -128,7 +126,7 @@ export default function Notifications() {
 
   const markRead = async (id: number) => {
     try {
-      await axios.post(`${apiUrl}/api/v1/notifications/${id}/read`, {}, {
+      await axios.post(`${API_BASE_URL}/api/v1/notifications/${id}/read`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setItems(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
@@ -138,7 +136,7 @@ export default function Notifications() {
   const markAllRead = async () => {
     setMarkingAll(true);
     try {
-      await axios.post(`${apiUrl}/api/v1/notifications/read-all`, {}, {
+      await axios.post(`${API_BASE_URL}/api/v1/notifications/read-all`, {}, {
         headers: { Authorization: `Bearer ${token}` },
       });
       setItems(prev => prev.map(n => ({ ...n, is_read: true })));

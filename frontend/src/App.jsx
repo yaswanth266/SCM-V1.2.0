@@ -132,6 +132,8 @@ const PurchaseReturns = lazy(() => import('./pages/warehouse/PurchaseReturns'));
 const PurchaseReturnForm = lazy(() => import('./pages/warehouse/PurchaseReturnForm'));
 const MaterialIssues = lazy(() => import('./pages/warehouse/MaterialIssues'));
 const MaterialIssueForm = lazy(() => import('./pages/warehouse/MaterialIssueForm'));
+const VehicleMaterialIssues = lazy(() => import('./pages/warehouse/VehicleMaterialIssues'));
+const VehicleMaterialIssueForm = lazy(() => import('./pages/warehouse/VehicleMaterialIssueForm'));
 const TemplateMaterialIssueList = lazy(() => import('./pages/warehouse/TemplateMaterialIssueList'));
 const Picklist = lazy(() => import('./pages/warehouse/Picklist'));
 const PicklistForm = lazy(() => import('./pages/warehouse/PicklistForm'));
@@ -148,7 +150,9 @@ const AcknowledgeDelivery = lazy(() => import('./pages/warehouse/AcknowledgeDeli
 
 /* Inventory */
 const StockBalance = lazy(() => import('./pages/inventory/StockBalance'));
+const VehicleStockBalance = lazy(() => import('./pages/inventory/VehicleStockBalance'));
 const StockLedger = lazy(() => import('./pages/inventory/StockLedger'));
+const VehicleStockLedger = lazy(() => import('./pages/inventory/VehicleStockLedger'));
 const StockTransfer = lazy(() => import('./pages/inventory/StockTransfer'));
 const StockTransferForm = lazy(() => import('./pages/inventory/StockTransferForm'));
 const StockAudit = lazy(() => import('./pages/inventory/StockAudit'));
@@ -163,6 +167,8 @@ const IndentsKanban = lazy(() => import('./pages/indent/IndentsKanban'));
 const IndentForm = lazy(() => import('./pages/indent/IndentForm'));
 const IndentAcknowledgement = lazy(() => import('./pages/indent/Acknowledgement'));
 const AcknowledgementForm = lazy(() => import('./pages/indent/AcknowledgementForm'));
+const MaterialAcknowledgementList = lazy(() => import('./pages/indent/MaterialAcknowledgementList'));
+const MaterialAcknowledgementForm = lazy(() => import('./pages/indent/MaterialAcknowledgementForm'));
 const TemplateIndentList = lazy(() => import('./pages/indent/TemplateIndentList'));
 const TemplateIndentForm = lazy(() => import('./pages/indent/TemplateIndentForm'));
 
@@ -499,6 +505,9 @@ const App = () => {
             <Route path="/warehouse/material-issues" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssues /></KeyRoute>} />
             <Route path="/warehouse/material-issues/new" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssueForm /></KeyRoute>} />
             <Route path="/warehouse/material-issues/:id" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssueForm /></KeyRoute>} />
+            <Route path="/warehouse/vehicle-material-issues" element={<KeyRoute requiredKey="warehouse-material-issues"><VehicleMaterialIssues /></KeyRoute>} />
+            <Route path="/warehouse/vehicle-material-issues/new" element={<KeyRoute requiredKey="warehouse-material-issues"><VehicleMaterialIssueForm /></KeyRoute>} />
+            <Route path="/warehouse/vehicle-material-issues/:id" element={<KeyRoute requiredKey="warehouse-material-issues"><VehicleMaterialIssueForm /></KeyRoute>} />
             <Route path="/warehouse/material-issues/ap104-consumables" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-consumables"><TemplateMaterialIssueList templateType="consumables" title="AP 104 DP / Consumables Issues" /></KeyRoute>} />
             <Route path="/warehouse/material-issues/ap104-consumables/new" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-consumables"><MaterialIssueForm templateType="consumables" title="Create AP 104 DP / Consumables Material Issue" /></KeyRoute>} />
             <Route path="/warehouse/material-issues/ap104-consumables/:id" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-consumables"><MaterialIssueForm templateType="consumables" title="AP 104 DP / Consumables Material Issue" /></KeyRoute>} />
@@ -593,7 +602,9 @@ const App = () => {
             <Route path="/inventory/masters/price-lists/:id/edit" element={<KeyRoute requiredKey="inventory-masters-price-lists"><PriceListForm /></KeyRoute>} />
             <Route path="/inventory/stock" element={<Navigate to="/inventory/stock-balance" replace />} />
             <Route path="/inventory/stock-balance" element={<KeyRoute requiredKey="inventory-stock-balance"><StockBalance /></KeyRoute>} />
+            <Route path="/inventory/vehicle-stock-balance" element={<KeyRoute requiredKey="inventory-stock-balance"><VehicleStockBalance /></KeyRoute>} />
             <Route path="/inventory/stock-ledger" element={<KeyRoute requiredKey="inventory-stock-ledger"><StockLedger /></KeyRoute>} />
+            <Route path="/inventory/vehicle-stock-ledger" element={<KeyRoute requiredKey="inventory-stock-ledger"><VehicleStockLedger /></KeyRoute>} />
             <Route path="/inventory/stock-transfer" element={<KeyRoute requiredKey="inventory-stock-transfer"><StockTransfer /></KeyRoute>} />
             <Route path="/inventory/stock-transfer/new" element={<KeyRoute requiredKey="inventory-stock-transfer"><StockTransferForm /></KeyRoute>} />
             <Route path="/inventory/stock-transfer/:id" element={<KeyRoute requiredKey="inventory-stock-transfer"><StockTransferForm /></KeyRoute>} />
@@ -621,6 +632,9 @@ const App = () => {
 
             <Route path="/indent/acknowledgement" element={<KeyRoute requiredKey="indent-acknowledgement"><IndentAcknowledgement /></KeyRoute>} />
             <Route path="/indent/acknowledgement/new" element={<KeyRoute requiredKey="indent-acknowledgement"><AcknowledgementForm /></KeyRoute>} />
+            <Route path="/indent/material-acknowledgement" element={<KeyRoute requiredKey="indent-acknowledgement"><MaterialAcknowledgementList /></KeyRoute>} />
+            <Route path="/indent/material-acknowledgement/new" element={<KeyRoute requiredKey="indent-acknowledgement"><MaterialAcknowledgementForm /></KeyRoute>} />
+            <Route path="/indent/material-acknowledgement/:id" element={<KeyRoute requiredKey="indent-acknowledgement"><MaterialAcknowledgementForm isViewOnly={true} /></KeyRoute>} />
             <Route path="/indent/reports" element={<KeyRoute requiredKey="indent-reports"><IndentReports /></KeyRoute>} />
             <Route path="/indent/notifications" element={<KeyRoute requiredKey="indent-notifications"><IndentNotifications /></KeyRoute>} />
 

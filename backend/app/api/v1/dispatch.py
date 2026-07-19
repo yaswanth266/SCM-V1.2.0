@@ -270,188 +270,119 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
         res = await db.execute(stmt)
         mdos = res.scalars().all()
         
-        for mdo in mdos:
-            # Check if corresponding DispatchOrder already exists (eager-load items for backfill)
-            stmt_check = select(DispatchOrder).options(
-                selectinload(DispatchOrder.items)
-            ).where(
-                or_(
-                    DispatchOrder.dispatch_number == mdo.mdo_number,
-                    and_(
-                        DispatchOrder.material_issue_id == mdo.material_issue_id,
-                        DispatchOrder.material_issue_id.is_not(None)
-                    )
-                )
-            )
-            res_check = await db.execute(stmt_check)
-            existing = res_check.scalars().first()
-            
-            # Map statuses
-            mapped_dt = normalize_dispatch_type(mdo.dispatch_type)
-            
-            st_map = {
-                "DISPATCHED": "dispatched",
-                "IN_TRANSIT": "in_transit",
-                "TRANSPORTER_ACKNOWLEDGED": "in_transit",
-                "DELIVERED": "delivered",
-                "CONSIGNMENT_RECEIVED": "consignment_received",
-                "COMPLETED": "acknowledged",
-                "ACKNOWLEDGED": "acknowledged",
-                "PARTIALLY_ACKNOWLEDGED": "partially_acknowledged",
-                "PARTIALLY_RECEIVED": "partially_acknowledged"
-            }
-            mapped_st = st_map.get(mdo.status, "in_transit")
-            
-            if not existing:
-                # Try to get POD details from consignment if already present
-                receiver_sig_url = None
-                deliv_photo_urls = None
-                deliv_remarks = None
-                deliv_ack_by_name = None
-                deliv_ack_by_phone = None
-                try:
-                    from app.models.consignment import Consignment
-                    con_stmt = select(Consignment).where(Consignment.mdo_id == mdo.id).limit(1)
-                    con_res = await db.execute(con_stmt)
-                    linked_con = con_res.scalar_one_or_none()
-                    if linked_con:
-                        receiver_sig_url = linked_con.receipt_signature_url
-                        if linked_con.receipt_photos:
-                            deliv_photo_urls = {"photo": linked_con.receipt_photos[0]} if len(linked_con.receipt_photos) > 0 else None
-                        deliv_remarks = linked_con.receipt_remarks
-                        deliv_ack_by_name = linked_con.receiver_name
-                        if linked_con.destination_user_id:
-                            from app.models.user import User
-                            user_stmt = select(User).where(User.id == linked_con.destination_user_id).limit(1)
-                            user_res = await db.execute(user_stmt)
-                            linked_user = user_res.scalar_one_or_none()
-                            if linked_user and linked_user.phone:
-                                deliv_ack_by_phone = linked_user.phone
-                except Exception:
-                    pass
+        # Pre-validate indent_id and material_issue_id existence to prevent foreign key IntegrityErrors
+        valid_indent_ids = set()
+        indent_ids = {m.indent_id for m in mdos if m.indent_id}
+        if indent_ids:
+            res_ind = await db.execute(select(Indent.id).where(Indent.id.in_(list(indent_ids))))
+            valid_indent_ids = set(res_ind.scalars().all())
 
-                # Create standard DispatchOrder
-                disp = DispatchOrder(
-                    dispatch_number=mdo.mdo_number,
-                    warehouse_id=mdo.warehouse_id,
-                    destination_warehouse_id=mdo.destination_warehouse_id,
-                    destination_type="WAREHOUSE" if mdo.destination_warehouse_id else "USER",
-                    dispatch_type=mapped_dt,
-                    dispatch_mode=mdo.dispatch_mode or "direct",
-                    status=mapped_st,
-                    remarks=mdo.special_instructions,
-                    material_issue_id=mdo.material_issue_id,
-                    dispatch_date=mdo.order_date,
-                    expected_delivery_date=mdo.required_delivery_date,
-                    delivery_acknowledged=(mdo.status in ("ACKNOWLEDGED", "COMPLETED", "CONSIGNMENT_RECEIVED", "PARTIALLY_RECEIVED")),
-                    receiver_signature_url=receiver_sig_url,
-                    delivery_photo_urls=deliv_photo_urls,
-                    delivery_remarks=deliv_remarks,
-                    delivery_acknowledged_by_name=deliv_ack_by_name,
-                    delivery_acknowledged_by_phone=deliv_ack_by_phone
-                )
-                db.add(disp)
-                await db.flush()
-                # Fetch MDO's materials directly for both direct and multi-level dispatches
-                stmt_mats = select(LogisticsDispatchMaterial).where(LogisticsDispatchMaterial.mdo_id == mdo.id)
-                res_mats = await db.execute(stmt_mats)
-                mats = res_mats.scalars().all()
-                
-                for mat in mats:
-                    # Carry serial_numbers from MDO material if available
-                    serial_numbers = mat.serial_numbers
-                    # Fallback: pull serial_numbers from the source MaterialIssueItem
-                    if not serial_numbers and mdo.material_issue_id:
-                        try:
-                            mi_item_res = await db.execute(
-                                select(MaterialIssueItem).where(
-                                    MaterialIssueItem.issue_id == mdo.material_issue_id,
-                                    MaterialIssueItem.item_id == mat.material_id
-                                ).limit(1)
+        valid_mi_ids = set()
+        mi_ids = {m.material_issue_id for m in mdos if m.material_issue_id}
+        if mi_ids:
+            res_mi = await db.execute(select(MaterialIssue.id).where(MaterialIssue.id.in_(list(mi_ids))))
+            valid_mi_ids = set(res_mi.scalars().all())
+        for mdo in mdos:
+            try:
+                async with db.begin_nested():
+                    mdo_indent_id = mdo.indent_id if mdo.indent_id in valid_indent_ids else None
+                    mdo_mi_id = mdo.material_issue_id if mdo.material_issue_id in valid_mi_ids else None
+
+                    # Check if corresponding DispatchOrder already exists (eager-load items for backfill)
+                    stmt_check = select(DispatchOrder).options(
+                        selectinload(DispatchOrder.items)
+                    ).where(
+                        or_(
+                            DispatchOrder.dispatch_number == mdo.mdo_number,
+                            and_(
+                                DispatchOrder.material_issue_id == mdo.material_issue_id,
+                                DispatchOrder.material_issue_id.is_not(None)
                             )
-                            mi_item = mi_item_res.scalar_one_or_none()
-                            if mi_item and mi_item.serial_numbers:
-                                serial_numbers = mi_item.serial_numbers
+                        )
+                    )
+                    res_check = await db.execute(stmt_check)
+                    existing = res_check.scalars().first()
+                    
+                    # Map statuses
+                    mapped_dt = normalize_dispatch_type(mdo.dispatch_type)
+                    
+                    st_map = {
+                        "DISPATCHED": "dispatched",
+                        "IN_TRANSIT": "in_transit",
+                        "TRANSPORTER_ACKNOWLEDGED": "in_transit",
+                        "DELIVERED": "delivered",
+                        "CONSIGNMENT_RECEIVED": "consignment_received",
+                        "COMPLETED": "acknowledged",
+                        "ACKNOWLEDGED": "acknowledged",
+                        "PARTIALLY_ACKNOWLEDGED": "partially_acknowledged",
+                        "PARTIALLY_RECEIVED": "partially_acknowledged"
+                    }
+                    mapped_st = st_map.get(mdo.status, "in_transit")
+                    
+                    if not existing:
+                        # Try to get POD details from consignment if already present
+                        receiver_sig_url = None
+                        deliv_photo_urls = None
+                        deliv_remarks = None
+                        deliv_ack_by_name = None
+                        deliv_ack_by_phone = None
+                        try:
+                            from app.models.consignment import Consignment
+                            con_stmt = select(Consignment).where(Consignment.mdo_id == mdo.id).limit(1)
+                            con_res = await db.execute(con_stmt)
+                            linked_con = con_res.scalar_one_or_none()
+                            if linked_con:
+                                receiver_sig_url = linked_con.receipt_signature_url
+                                if linked_con.receipt_photos:
+                                    deliv_photo_urls = {"photo": linked_con.receipt_photos[0]} if len(linked_con.receipt_photos) > 0 else None
+                                deliv_remarks = linked_con.receipt_remarks
+                                deliv_ack_by_name = linked_con.receiver_name
+                                if linked_con.destination_user_id:
+                                    from app.models.user import User
+                                    user_stmt = select(User).where(User.id == linked_con.destination_user_id).limit(1)
+                                    user_res = await db.execute(user_stmt)
+                                    linked_user = user_res.scalar_one_or_none()
+                                    if linked_user and linked_user.phone:
+                                        deliv_ack_by_phone = linked_user.phone
                         except Exception:
                             pass
 
-                    item = DispatchOrderItem(
-                        dispatch_order_id=disp.id,
-                        material_id=mat.material_id,
-                        indent_id=mdo.indent_id,
-                        material_issue_id=mdo.material_issue_id,
-                        requested_quantity=mat.quantity,
-                        approved_quantity=mat.quantity,
-                        dispatched_quantity=mat.quantity,
-                        uom=mat.unit_of_measure,
-                        request_date=mdo.order_date,
-                        serial_numbers=serial_numbers
-                    )
-                    db.add(item)
-                await db.flush()
-
-                # Trigger stock deduction if status is dispatched, in_transit, delivered, acknowledged, consignment_received, or partially_acknowledged
-                if mapped_st in ("dispatched", "in_transit", "delivered", "acknowledged", "consignment_received", "partially_acknowledged", "partially_received"):
-                    await process_dispatch_stock_deduction(db, disp, mdo.created_by or 1)
-            else:
-                existing.expected_delivery_date = mdo.required_delivery_date
-                # Sync dispatch_mode from MDO so acknowledge_delivery picks the right transit warehouse
-                if mdo.dispatch_mode and existing.dispatch_mode != mdo.dispatch_mode:
-                    existing.dispatch_mode = mdo.dispatch_mode
-
-                # Sync POD delivery evidence from linked consignment
-                try:
-                    from app.models.consignment import Consignment
-                    con_stmt = select(Consignment).where(Consignment.mdo_id == mdo.id).limit(1)
-                    con_res = await db.execute(con_stmt)
-                    linked_con = con_res.scalar_one_or_none()
-                    if linked_con:
-                        if linked_con.receipt_signature_url:
-                            existing.receiver_signature_url = linked_con.receipt_signature_url
-                        if linked_con.receipt_photos:
-                            existing.delivery_photo_urls = {"photo": linked_con.receipt_photos[0]} if len(linked_con.receipt_photos) > 0 else None
-                        if linked_con.receipt_remarks:
-                            existing.delivery_remarks = linked_con.receipt_remarks
-                        if linked_con.receiver_name:
-                            existing.delivery_acknowledged_by_name = linked_con.receiver_name
-                        if linked_con.destination_user_id:
-                            from app.models.user import User
-                            user_stmt = select(User).where(User.id == linked_con.destination_user_id).limit(1)
-                            user_res = await db.execute(user_stmt)
-                            linked_user = user_res.scalar_one_or_none()
-                            if linked_user and linked_user.phone:
-                                existing.delivery_acknowledged_by_phone = linked_user.phone
-                except Exception:
-                    pass
-
-                db.add(existing)
-                # Keep status in sync in case status changed
-                if existing.status != mapped_st:
-                    old_status = existing.status
-                    existing.status = mapped_st
-                    existing.delivery_acknowledged = (mdo.status in ("ACKNOWLEDGED", "COMPLETED", "CONSIGNMENT_RECEIVED", "PARTIALLY_RECEIVED"))
-                    await db.flush()
- 
-                    # Trigger stock deduction if transitioning to dispatched, in_transit, delivered, acknowledged, consignment_received, or partially_acknowledged
-                    if mapped_st in ("dispatched", "in_transit", "delivered", "acknowledged", "consignment_received", "partially_acknowledged", "partially_received") and old_status not in ("dispatched", "in_transit", "delivered", "acknowledged", "consignment_received", "partially_acknowledged", "partially_received"):
-                        await process_dispatch_stock_deduction(db, existing, mdo.created_by or existing.dispatched_by or 1)
-
-                # Backfill missing items OR update serial_numbers on existing dispatch items
-                try:
-                    # Fetch MDO's materials directly for both direct and multi-level dispatches
-                    stmt_mats = select(LogisticsDispatchMaterial).where(LogisticsDispatchMaterial.mdo_id == mdo.id)
-                    res_mats = await db.execute(stmt_mats)
-                    mats = res_mats.scalars().all()
-
-                    if not existing.items and mats:
-                        # Dispatch order has no items — backfill from LogisticsDispatchMaterial
+                        # Create standard DispatchOrder
+                        disp = DispatchOrder(
+                            dispatch_number=mdo.mdo_number,
+                            warehouse_id=mdo.warehouse_id,
+                            destination_warehouse_id=mdo.destination_warehouse_id,
+                            destination_type="WAREHOUSE" if mdo.destination_warehouse_id else "USER",
+                            dispatch_type=mapped_dt,
+                            dispatch_mode=mdo.dispatch_mode or "direct",
+                            status=mapped_st,
+                            remarks=mdo.special_instructions,
+                            material_issue_id=mdo_mi_id,
+                            dispatch_date=mdo.order_date,
+                            expected_delivery_date=mdo.required_delivery_date,
+                            delivery_acknowledged=(mdo.status in ("ACKNOWLEDGED", "COMPLETED", "CONSIGNMENT_RECEIVED", "PARTIALLY_RECEIVED")),
+                            receiver_signature_url=receiver_sig_url,
+                            delivery_photo_urls=deliv_photo_urls,
+                            delivery_remarks=deliv_remarks,
+                            delivery_acknowledged_by_name=deliv_ack_by_name,
+                            delivery_acknowledged_by_phone=deliv_ack_by_phone
+                        )
+                        db.add(disp)
+                        await db.flush()
+                        # Fetch MDO's materials directly for both direct and multi-level dispatches
+                        stmt_mats = select(LogisticsDispatchMaterial).where(LogisticsDispatchMaterial.mdo_id == mdo.id)
+                        res_mats = await db.execute(stmt_mats)
+                        mats = res_mats.scalars().all()
+                        
                         for mat in mats:
+                            # Carry serial_numbers from MDO material if available
                             serial_numbers = mat.serial_numbers
-                            if not serial_numbers and mdo.material_issue_id:
+                            # Fallback: pull serial_numbers from the source MaterialIssueItem
+                            if not serial_numbers and mdo_mi_id:
                                 try:
                                     mi_item_res = await db.execute(
                                         select(MaterialIssueItem).where(
-                                            MaterialIssueItem.issue_id == mdo.material_issue_id,
+                                            MaterialIssueItem.issue_id == mdo_mi_id,
                                             MaterialIssueItem.item_id == mat.material_id
                                         ).limit(1)
                                     )
@@ -460,11 +391,12 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
                                         serial_numbers = mi_item.serial_numbers
                                 except Exception:
                                     pass
+
                             item = DispatchOrderItem(
-                                dispatch_order_id=existing.id,
+                                dispatch_order_id=disp.id,
                                 material_id=mat.material_id,
-                                indent_id=mdo.indent_id,
-                                material_issue_id=mdo.material_issue_id,
+                                indent_id=mdo_indent_id,
+                                material_issue_id=mdo_mi_id,
                                 requested_quantity=mat.quantity,
                                 approved_quantity=mat.quantity,
                                 dispatched_quantity=mat.quantity,
@@ -474,34 +406,122 @@ async def sync_mdos_to_dispatches(db: AsyncSession):
                             )
                             db.add(item)
                         await db.flush()
+
+                        # Trigger stock deduction if status is dispatched, in_transit, delivered, acknowledged, consignment_received, or partially_acknowledged
+                        if mapped_st in ("dispatched", "in_transit", "delivered", "acknowledged", "consignment_received", "partially_acknowledged", "partially_received"):
+                            await process_dispatch_stock_deduction(db, disp, mdo.created_by or 1)
                     else:
-                        # Items already exist — just patch missing serial numbers
-                        for mat in mats:
-                            existing_item = next(
-                                (i for i in (existing.items or []) if i.material_id == mat.material_id),
-                                None
-                            )
-                            if existing_item and not existing_item.serial_numbers:
-                                serial_numbers = mat.serial_numbers
-                                if not serial_numbers and mdo.material_issue_id:
-                                    try:
-                                        mi_item_res = await db.execute(
-                                            select(MaterialIssueItem).where(
-                                                MaterialIssueItem.issue_id == mdo.material_issue_id,
-                                                MaterialIssueItem.item_id == mat.material_id
-                                            ).limit(1)
-                                        )
-                                        mi_item = mi_item_res.scalar_one_or_none()
-                                        if mi_item and mi_item.serial_numbers:
-                                            serial_numbers = mi_item.serial_numbers
-                                    except Exception:
-                                        pass
-                                if serial_numbers:
-                                    existing_item.serial_numbers = serial_numbers
-                                    db.add(existing_item)
-                        await db.flush()
-                except Exception:
-                    pass
+                        existing.expected_delivery_date = mdo.required_delivery_date
+                        # Sync dispatch_mode from MDO so acknowledge_delivery picks the right transit warehouse
+                        if mdo.dispatch_mode and existing.dispatch_mode != mdo.dispatch_mode:
+                            existing.dispatch_mode = mdo.dispatch_mode
+
+                        # Sync POD delivery evidence from linked consignment
+                        try:
+                            from app.models.consignment import Consignment
+                            con_stmt = select(Consignment).where(Consignment.mdo_id == mdo.id).limit(1)
+                            con_res = await db.execute(con_stmt)
+                            linked_con = con_res.scalar_one_or_none()
+                            if linked_con:
+                                if linked_con.receipt_signature_url:
+                                    existing.receiver_signature_url = linked_con.receipt_signature_url
+                                if linked_con.receipt_photos:
+                                    existing.delivery_photo_urls = {"photo": linked_con.receipt_photos[0]} if len(linked_con.receipt_photos) > 0 else None
+                                if linked_con.receipt_remarks:
+                                    existing.delivery_remarks = linked_con.receipt_remarks
+                                if linked_con.receiver_name:
+                                    existing.delivery_acknowledged_by_name = linked_con.receiver_name
+                                if linked_con.destination_user_id:
+                                    from app.models.user import User
+                                    user_stmt = select(User).where(User.id == linked_con.destination_user_id).limit(1)
+                                    user_res = await db.execute(user_stmt)
+                                    linked_user = user_res.scalar_one_or_none()
+                                    if linked_user and linked_user.phone:
+                                        existing.delivery_acknowledged_by_phone = linked_user.phone
+                        except Exception:
+                            pass
+
+                        db.add(existing)
+                        # Keep status in sync in case status changed
+                        if existing.status != mapped_st:
+                            old_status = existing.status
+                            existing.status = mapped_st
+                            existing.delivery_acknowledged = (mdo.status in ("ACKNOWLEDGED", "COMPLETED", "CONSIGNMENT_RECEIVED", "PARTIALLY_RECEIVED"))
+                            await db.flush()
+         
+                            # Trigger stock deduction if transitioning to dispatched, in_transit, delivered, acknowledged, consignment_received, or partially_acknowledged
+                            if mapped_st in ("dispatched", "in_transit", "delivered", "acknowledged", "consignment_received", "partially_acknowledged", "partially_received") and old_status not in ("dispatched", "in_transit", "delivered", "acknowledged", "consignment_received", "partially_acknowledged", "partially_received"):
+                                await process_dispatch_stock_deduction(db, existing, mdo.created_by or existing.dispatched_by or 1)
+
+                        # Backfill missing items OR update serial_numbers on existing dispatch items
+                        try:
+                            # Fetch MDO's materials directly for both direct and multi-level dispatches
+                            stmt_mats = select(LogisticsDispatchMaterial).where(LogisticsDispatchMaterial.mdo_id == mdo.id)
+                            res_mats = await db.execute(stmt_mats)
+                            mats = res_mats.scalars().all()
+                            if not existing.items and mats:
+                                # Dispatch order has no items — backfill from LogisticsDispatchMaterial
+                                for mat in mats:
+                                    serial_numbers = mat.serial_numbers
+                                    if not serial_numbers and mdo_mi_id:
+                                        try:
+                                            mi_item_res = await db.execute(
+                                                select(MaterialIssueItem).where(
+                                                    MaterialIssueItem.issue_id == mdo_mi_id,
+                                                    MaterialIssueItem.item_id == mat.material_id
+                                                ).limit(1)
+                                            )
+                                            mi_item = mi_item_res.scalar_one_or_none()
+                                            if mi_item and mi_item.serial_numbers:
+                                                serial_numbers = mi_item.serial_numbers
+                                        except Exception:
+                                            pass
+                                    item = DispatchOrderItem(
+                                        dispatch_order_id=existing.id,
+                                        material_id=mat.material_id,
+                                        indent_id=mdo_indent_id,
+                                        material_issue_id=mdo_mi_id,
+                                        requested_quantity=mat.quantity,
+                                        approved_quantity=mat.quantity,
+                                        dispatched_quantity=mat.quantity,
+                                        uom=mat.unit_of_measure,
+                                        request_date=mdo.order_date,
+                                        serial_numbers=serial_numbers
+                                    )
+                                    db.add(item)
+                                await db.flush()
+                            else:
+                                # Items already exist — just patch missing serial numbers
+                                for mat in mats:
+                                    existing_item = next(
+                                        (i for i in (existing.items or []) if i.material_id == mat.material_id),
+                                        None
+                                    )
+                                    if existing_item and not existing_item.serial_numbers:
+                                        serial_numbers = mat.serial_numbers
+                                        if not serial_numbers and mdo_mi_id:
+                                            try:
+                                                mi_item_res = await db.execute(
+                                                    select(MaterialIssueItem).where(
+                                                        MaterialIssueItem.issue_id == mdo_mi_id,
+                                                        MaterialIssueItem.item_id == mat.material_id
+                                                    ).limit(1)
+                                                )
+                                                mi_item = mi_item_res.scalar_one_or_none()
+                                                if mi_item and mi_item.serial_numbers:
+                                                    serial_numbers = mi_item.serial_numbers
+                                            except Exception:
+                                                pass
+                                        if serial_numbers:
+                                            existing_item.serial_numbers = serial_numbers
+                                            db.add(existing_item)
+                                await db.flush()
+                        except Exception:
+                            pass
+                    await db.flush()
+            except Exception as mdo_sync_err:
+                import logging
+                logging.getLogger(__name__).warning("Error syncing MDO %s to dispatch: %s", mdo.mdo_number, mdo_sync_err)
         
         await db.flush()
     except Exception as e:

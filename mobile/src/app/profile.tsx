@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -14,6 +14,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { router } from 'expo-router';
+import { API_BASE_URL } from '../constants/config';
 
 // ─── Lightweight Icon Renderer ───────────────────────────────────────────────
 const Icon = ({ name, size = 18, color = '#7A6D66' }: { name: string; size?: number; color?: string }) => {
@@ -104,18 +105,15 @@ export default function Profile() {
   const [user, setUser]           = useState<any>(null);
   const [loading, setLoading]     = useState(true);
   const [token, setToken]         = useState('');
-  const [apiUrl, setApiUrl]       = useState('');
   const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
     const init = async () => {
       const savedUser   = await AsyncStorage.getItem('user_profile');
       const savedToken  = await AsyncStorage.getItem('user_token');
-      const savedApiUrl = await AsyncStorage.getItem('API_URL');
       if (!savedToken || !savedUser) { router.replace('/'); return; }
       setUser(JSON.parse(savedUser));
       setToken(savedToken);
-      setApiUrl(savedApiUrl || 'http://10.2.1.31:8000');
       setLoading(false);
     };
     init();
@@ -125,10 +123,10 @@ export default function Profile() {
     if (switching) return;
     setSwitching(true);
     try {
-      await axios.post(`${apiUrl}/api/v1/me/active-position/${positionId}`, {}, {
+      await axios.post(`${API_BASE_URL}/api/v1/me/active-position/${positionId}`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const response = await axios.get(`${apiUrl}/api/v1/auth/me`, {
+      const response = await axios.get(`${API_BASE_URL}/api/v1/auth/me`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const refreshedUser = response.data;
@@ -148,10 +146,10 @@ export default function Profile() {
     if (switching) return;
     setSwitching(true);
     try {
-      await axios.post(`${apiUrl}/api/v1/me/active-role/${roleId}`, {}, {
+      await axios.post(`${API_BASE_URL}/api/v1/me/active-role/${roleId}`, {}, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      const response = await axios.get(`${apiUrl}/api/v1/auth/me`, {
+      const response = await axios.get(`${API_BASE_URL}/api/v1/auth/me`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       const refreshedUser = response.data;

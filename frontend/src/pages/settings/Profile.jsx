@@ -113,13 +113,13 @@ const Profile = () => {
         <Col xs={24} md={12}>
           <Card
             title="General Information"
-            bordered={false}
+            variant="borderless"
             style={{
               borderRadius: '8px',
               boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
               height: '100%',
             }}
-            headStyle={{ borderBottom: '1px solid #F3F4F6', fontWeight: '600' }}
+            styles={{ header: { borderBottom: '1px solid #F3F4F6', fontWeight: '600' } }}
           >
             <Descriptions column={1} size="middle" bordered={false}>
               <Descriptions.Item label={<span><UserOutlined style={{ marginRight: 8, color: '#2563EB' }} /> Username</span>}>
@@ -147,13 +147,13 @@ const Profile = () => {
         <Col xs={24} md={12}>
           <Card
             title="Employment Profile"
-            bordered={false}
+            variant="borderless"
             style={{
               borderRadius: '8px',
               boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
               height: '100%',
             }}
-            headStyle={{ borderBottom: '1px solid #F3F4F6', fontWeight: '600' }}
+            styles={{ header: { borderBottom: '1px solid #F3F4F6', fontWeight: '600' } }}
           >
             <Descriptions column={1} size="middle" bordered={false}>
               <Descriptions.Item label="Employee Code">

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
 from typing import List, Optional
 from sqlalchemy import select, func, and_
@@ -25,6 +25,7 @@ INDENT_SUBMISSION_WINDOW_DAYS = int(os.environ.get("INDENT_SUBMISSION_WINDOW_DAY
 from app.schemas.indent import (
     IndentCreate, IndentUpdate, IndentResponse,
     IndentAcknowledgementCreate, IndentAcknowledgementResponse, AckItemResponse,
+    MaterialAcknowledgementCreate, MaterialAcknowledgementResponse,
 )
 from app.services.number_series import generate_number
 from app.services.approval_service import submit_for_approval
@@ -94,7 +95,7 @@ async def list_indents(
     if template_type:
         query = query.where(Indent.template_type == template_type)
         count_query = count_query.where(Indent.template_type == template_type)
-    else:
+    elif not available_for_issue and not pending_acknowledgement:
         query = query.where(Indent.template_type.is_(None))
         count_query = count_query.where(Indent.template_type.is_(None))
 
@@ -1281,6 +1282,33 @@ async def approve_indent(
             detail=f"Only indents in pending_approval can be approved (current status: {indent.status})",
         )
 
+    # Apply per-line approved_qty overrides early from the Approve modal payload (BUG-FE-IND-005)
+    # both for the workflow path and the direct approval path.
+    if payload and payload.items:
+        line_rows = await db.execute(
+            select(IndentItem).where(IndentItem.indent_id == indent_id)
+        )
+        line_by_id = {l.id: l for l in line_rows.scalars().all()}
+        for it in payload.items:
+            line_id = it.get("id") or it.get("indent_item_id")
+            target = line_by_id.get(line_id)
+            if not target:
+                continue
+            qty = it.get("approved_qty")
+            if qty is None:
+                continue
+            try:
+                qty_dec = Decimal(str(qty))
+                if qty_dec < 0:
+                    continue
+                requested = Decimal(str(target.requested_qty or 0))
+                if qty_dec > requested:
+                    qty_dec = requested
+                target.approved_qty = qty_dec
+            except Exception:
+                continue
+        await db.flush()
+
     # BUG-IND-006 — separation of duties: the originator can never approve
     # their own indent, even if they hold an APPROVER_ROLES role. Super
     # admin keeps the override (escape hatch).
@@ -1346,35 +1374,7 @@ async def approve_indent(
             "current_level": request_obj.current_level,
         }
 
-    # BUG-FE-IND-005 — apply per-line approved_qty overrides from the
-    # approve modal. Without this, every line was approved at requested_qty
-    # regardless of what the approver typed in the modal.
-    if payload and payload.items:
-        line_rows = await db.execute(
-            select(IndentItem).where(IndentItem.indent_id == indent_id)
-        )
-        line_by_id = {l.id: l for l in line_rows.scalars().all()}
-        for it in payload.items:
-            line_id = it.get("id")
-            target = line_by_id.get(line_id)
-            if not target:
-                continue
-            qty = it.get("approved_qty")
-            if qty is None:
-                continue
-            try:
-                qty_dec = Decimal(str(qty))
-                if qty_dec < 0:
-                    continue
-                # Cap at requested_qty — approver shouldn't be able to grant
-                # more than the originator asked for.
-                requested = Decimal(str(target.requested_qty or 0))
-                if qty_dec > requested:
-                    qty_dec = requested
-                target.approved_qty = qty_dec
-            except Exception:
-                continue
-        await db.flush()
+    # overrides were already applied early at the beginning of the function
 
     from app.services.indent_lifecycle import on_indent_approved
     summary = await on_indent_approved(db, indent_id=indent_id, user_id=current_user.id)
@@ -2369,4 +2369,313 @@ async def _create_acknowledgement(
         pass
 
     return {"id": ack.id, "status": ack_status, "message": "Acknowledgement recorded successfully"}
+
+
+# ==================== MATERIAL ACKNOWLEDGEMENT (VEHICLE) ROUTES ====================
+
+@ack_router.post("/material-acknowledgements", status_code=201)
+async def create_material_acknowledgement(
+    payload: MaterialAcknowledgementCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a new material acknowledgement for a vehicle issue and update vehicle stock balance."""
+    from app.models.issue import VehicleIssue, VehicleIssueItem, MaterialAcknowledgement, MaterialAcknowledgementItem
+    from app.models.stock import StockBalance, VehicleStockBalance
+    from app.services.stock_service import post_stock_ledger, release_reservation, post_vehicle_stock_ledger
+    from app.services.number_series import generate_number
+    from decimal import Decimal
+    from datetime import datetime, timezone
+    from app.models.indent import IndentAcknowledgementItem
+
+    # Row lock on VehicleIssue
+    result = await db.execute(
+        select(VehicleIssue)
+        .options(selectinload(VehicleIssue.items))
+        .where(VehicleIssue.id == payload.vehicle_issue_id)
+        .with_for_update()
+    )
+    vi = result.scalar_one_or_none()
+    if not vi:
+        raise HTTPException(status_code=404, detail="Vehicle issue not found")
+
+    if vi.status != "issued":
+        raise HTTPException(status_code=400, detail=f"Vehicle issue is not in 'issued' status (current status: {vi.status})")
+
+    # Generate acknowledgement number
+    ack_number = await generate_number(db, "indent", "material_acknowledgement")
+
+    ack = MaterialAcknowledgement(
+        acknowledgement_number=ack_number,
+        vehicle_issue_id=vi.id,
+        acknowledged_by=current_user.id,
+        employee_code=payload.employee_code or current_user.employee_code,
+        remarks=payload.remarks,
+        status="acknowledged",
+        acknowledged_at=datetime.now(timezone.utc),
+        photos=payload.photos,
+    )
+    db.add(ack)
+    await db.flush()
+
+    # Create payload items map
+    payload_items_map = {item.item_id: item for item in payload.items}
+
+    # Process items
+    for vi_item in vi.items:
+        ack_item_payload = payload_items_map.get(vi_item.item_id)
+        received_qty = Decimal(str(ack_item_payload.received_qty)) if ack_item_payload else Decimal("0")
+
+        # Cap received_qty at issued quantity
+        if received_qty > vi_item.qty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Received quantity ({received_qty}) cannot exceed issued quantity ({vi_item.qty}) for item {vi_item.item_id}"
+            )
+
+        # Record acknowledgement item
+        ack_item = MaterialAcknowledgementItem(
+            acknowledgement_id=ack.id,
+            item_id=vi_item.item_id,
+            received_qty=received_qty,
+            remarks=ack_item_payload.remarks if ack_item_payload else None,
+            serial_numbers=ack_item_payload.serial_numbers if ack_item_payload else None,
+            photos=ack_item_payload.photos if ack_item_payload else None,
+        )
+        db.add(ack_item)
+
+        # Deduct quantity from warehouse total_qty and record outflow via vehicle stock ledger
+        if received_qty > 0:
+            vsb = await post_vehicle_stock_ledger(
+                db,
+                item_id=vi_item.item_id,
+                warehouse_id=vi.warehouse_id,
+                vehicle_code=vi.vehicle_code,
+                vehicle_number=vi.vehicle_number,
+                qty=received_qty,
+                rate=vi_item.rate,
+                bin_id=vi_item.bin_id,
+                batch_id=vi_item.batch_id,
+                reference_type="material_acknowledgement",
+                reference_id=ack.id,
+                uom_id=vi_item.uom_id,
+                created_by=current_user.id,
+            )
+
+            # Update serial numbers on VehicleStockBalance
+            existing_serials = vsb.serial_numbers or []
+            new_serials = ack_item.serial_numbers or []
+            vsb.serial_numbers = list(set(existing_serials + new_serials))
+            vsb.last_updated = datetime.now(timezone.utc)
+
+    # Transition vehicle issue status
+    vi.status = "acknowledged"
+
+    # If linked to an indent, update the indent status
+    if vi.indent_id:
+        indent_result = await db.execute(
+            select(Indent).options(selectinload(Indent.items)).where(Indent.id == vi.indent_id)
+        )
+        indent = indent_result.scalar_one_or_none()
+        if indent:
+            # Update IndentItem fulfillment status
+            for vi_item in vi.items:
+                for ind_item in indent.items:
+                    if ind_item.item_id == vi_item.item_id:
+                        # Find total acknowledged for this item
+                        std_acks = await db.execute(
+                            select(func.sum(IndentAcknowledgementItem.received_qty))
+                            .join(IndentAcknowledgement, IndentAcknowledgementItem.acknowledgement_id == IndentAcknowledgement.id)
+                            .where(IndentAcknowledgement.indent_id == vi.indent_id, IndentAcknowledgementItem.item_id == vi_item.item_id)
+                        )
+                        std_qty = std_acks.scalar() or Decimal("0")
+
+                        veh_acks = await db.execute(
+                            select(func.sum(MaterialAcknowledgementItem.received_qty))
+                            .join(MaterialAcknowledgement, MaterialAcknowledgementItem.acknowledgement_id == MaterialAcknowledgement.id)
+                            .join(VehicleIssue, MaterialAcknowledgement.vehicle_issue_id == VehicleIssue.id)
+                            .where(VehicleIssue.indent_id == vi.indent_id, MaterialAcknowledgementItem.item_id == vi_item.item_id)
+                        )
+                        veh_qty = veh_acks.scalar() or Decimal("0")
+
+                        total_ack = std_qty + veh_qty
+                        target = Decimal(str(ind_item.approved_qty or ind_item.requested_qty or 0))
+                        if total_ack >= target:
+                            ind_item.fulfillment_status = "acknowledged"
+
+            # Check if all items in indent are completed
+            all_complete = True
+            any_received = False
+            for ind_item in indent.items:
+                std_acks = await db.execute(
+                    select(func.sum(IndentAcknowledgementItem.received_qty))
+                    .join(IndentAcknowledgement, IndentAcknowledgementItem.acknowledgement_id == IndentAcknowledgement.id)
+                    .where(IndentAcknowledgement.indent_id == vi.indent_id, IndentAcknowledgementItem.item_id == ind_item.item_id)
+                )
+                std_qty = std_acks.scalar() or Decimal("0")
+
+                veh_acks = await db.execute(
+                    select(func.sum(MaterialAcknowledgementItem.received_qty))
+                    .join(MaterialAcknowledgement, MaterialAcknowledgementItem.acknowledgement_id == MaterialAcknowledgement.id)
+                    .join(VehicleIssue, MaterialAcknowledgement.vehicle_issue_id == VehicleIssue.id)
+                    .where(VehicleIssue.indent_id == vi.indent_id, MaterialAcknowledgementItem.item_id == ind_item.item_id)
+                )
+                veh_qty = veh_acks.scalar() or Decimal("0")
+
+                total_ack = std_qty + veh_qty
+                target = Decimal(str(ind_item.approved_qty or ind_item.requested_qty or 0))
+                if total_ack > 0:
+                    any_received = True
+                if total_ack < target:
+                    all_complete = False
+
+            if all_complete and indent.items:
+                indent.status = "fulfilled"
+            elif any_received:
+                indent.status = "partially_fulfilled"
+
+    await db.flush()
+    return {"id": ack.id, "acknowledgement_number": ack_number, "message": "Material acknowledgement recorded successfully"}
+
+
+@ack_router.get("/material-acknowledgements")
+async def list_material_acknowledgements(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    search: str = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List material acknowledgements with pagination and search."""
+    from app.models.issue import VehicleIssue, MaterialAcknowledgement, MaterialAcknowledgementItem
+    offset, limit = paginate_params(page, page_size)
+    query = (
+        select(MaterialAcknowledgement)
+        .options(
+            selectinload(MaterialAcknowledgement.vehicle_issue).selectinload(VehicleIssue.warehouse),
+            selectinload(MaterialAcknowledgement.acknowledger),
+            selectinload(MaterialAcknowledgement.items).selectinload(MaterialAcknowledgementItem.item),
+        )
+    )
+    count_query = select(func.count(MaterialAcknowledgement.id))
+
+    if search:
+        query = query.join(VehicleIssue).where(VehicleIssue.issue_number.ilike(f"%{search}%") | MaterialAcknowledgement.acknowledgement_number.ilike(f"%{search}%"))
+        count_query = count_query.join(VehicleIssue).where(VehicleIssue.issue_number.ilike(f"%{search}%") | MaterialAcknowledgement.acknowledgement_number.ilike(f"%{search}%"))
+
+    total = (await db.execute(count_query)).scalar()
+    result = await db.execute(query.offset(offset).limit(limit).order_by(MaterialAcknowledgement.id.desc()))
+    acks = result.scalars().all()
+
+    response_items = []
+    for ack in acks:
+        data = {
+            "id": ack.id,
+            "acknowledgement_number": ack.acknowledgement_number,
+            "vehicle_issue_id": ack.vehicle_issue_id,
+            "vehicle_issue_number": ack.vehicle_issue.issue_number if ack.vehicle_issue else None,
+            "vehicle_code": ack.vehicle_issue.vehicle_code if ack.vehicle_issue else None,
+            "vehicle_number": ack.vehicle_issue.vehicle_number if ack.vehicle_issue else None,
+            "warehouse_name": ack.vehicle_issue.warehouse.name if ack.vehicle_issue and ack.vehicle_issue.warehouse else None,
+            "acknowledged_by": ack.acknowledged_by,
+            "acknowledged_by_name": f"{ack.acknowledger.first_name} {ack.acknowledger.last_name or ''}".strip() if ack.acknowledger else None,
+            "employee_code": ack.employee_code,
+            "acknowledged_at": ack.acknowledged_at,
+            "remarks": ack.remarks,
+            "status": ack.status,
+            "photos": ack.photos,
+            "items": [
+                {
+                    "id": ai.id,
+                    "item_id": ai.item_id,
+                    "item_code": ai.item.item_code if ai.item else None,
+                    "item_name": ai.item.name if ai.item else None,
+                    "received_qty": float(ai.received_qty),
+                    "remarks": ai.remarks,
+                    "serial_numbers": ai.serial_numbers,
+                    "photos": ai.photos,
+                }
+                for ai in ack.items
+            ]
+        }
+        response_items.append(data)
+
+    return build_paginated_response(response_items, total, page, page_size)
+
+
+@ack_router.get("/material-acknowledgements/{ack_id}")
+async def get_material_acknowledgement(
+    ack_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get material acknowledgement detail."""
+    from app.models.issue import VehicleIssue, MaterialAcknowledgement, MaterialAcknowledgementItem
+    result = await db.execute(
+        select(MaterialAcknowledgement)
+        .options(
+            selectinload(MaterialAcknowledgement.vehicle_issue).selectinload(VehicleIssue.warehouse),
+            selectinload(MaterialAcknowledgement.acknowledger),
+            selectinload(MaterialAcknowledgement.items).selectinload(MaterialAcknowledgementItem.item),
+        )
+        .where(MaterialAcknowledgement.id == ack_id)
+    )
+    ack = result.scalar_one_or_none()
+    if not ack:
+        raise HTTPException(status_code=404, detail="Acknowledgement not found")
+
+    data = {
+        "id": ack.id,
+        "acknowledgement_number": ack.acknowledgement_number,
+        "vehicle_issue_id": ack.vehicle_issue_id,
+        "vehicle_issue_number": ack.vehicle_issue.issue_number if ack.vehicle_issue else None,
+        "vehicle_code": ack.vehicle_issue.vehicle_code if ack.vehicle_issue else None,
+        "vehicle_number": ack.vehicle_issue.vehicle_number if ack.vehicle_issue else None,
+        "warehouse_name": ack.vehicle_issue.warehouse.name if ack.vehicle_issue and ack.vehicle_issue.warehouse else None,
+        "acknowledged_by": ack.acknowledged_by,
+        "acknowledged_by_name": f"{ack.acknowledger.first_name} {ack.acknowledger.last_name or ''}".strip() if ack.acknowledger else None,
+        "employee_code": ack.employee_code,
+        "acknowledged_at": ack.acknowledged_at,
+        "remarks": ack.remarks,
+        "status": ack.status,
+        "photos": ack.photos,
+        "items": [
+            {
+                "id": ai.id,
+                "item_id": ai.item_id,
+                "item_code": ai.item.item_code if ai.item else None,
+                "item_name": ai.item.name if ai.item else None,
+                "received_qty": float(ai.received_qty),
+                "remarks": ai.remarks,
+                "serial_numbers": ai.serial_numbers,
+                "photos": ai.photos,
+            }
+            for ai in ack.items
+        ]
+    }
+    return data
+
+
+@ack_router.post("/upload-photo")
+async def upload_acknowledgement_photo(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+):
+    """Upload a photo for vehicle material acknowledgement."""
+    from app.utils.helpers import save_upload_file
+    import os
+
+    # Check if the file is an image
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".webp", ".gif"):
+        raise HTTPException(status_code=400, detail="Only images are allowed")
+
+    try:
+        file_path = await save_upload_file(file, "vehicle_acknowledgements")
+        filename = os.path.basename(file_path)
+        public_url = f"/uploads/vehicle_acknowledgements/{filename}"
+        return {"url": public_url}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
 

@@ -140,25 +140,37 @@ const AssetCodesTreeModal = ({
     setCurrentPage(1);
   }, [searchQuery, selectedBatchFilter, selectedBinFilter]);
 
-  // Intercept and auto-select multi-line QR scan payloads inside search
-  useEffect(() => {
-    if (searchQuery.includes('\n')) {
-      const query = searchQuery.trim();
-      const lines = query.split('\n');
+  const handleSearchSubmit = (value) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    
+    // Check if it's a multi-line QR scan payload
+    let code = trimmed;
+    if (trimmed.includes('\n')) {
+      const lines = trimmed.split('\n');
       const codeLine = lines.find(l => l.trim().startsWith('Code:'));
-      if (codeLine) {
-        const code = codeLine.replace('Code:', '').trim();
-        const item = allCodesWithMetadata.find(c => c.code.toLowerCase() === code.toLowerCase());
-        if (item) {
-          const isLocked = lockedCodes && !!lockedCodes[item.code];
-          if (!isLocked && !selected.includes(item.code)) {
-            setSelected(prev => [...prev, item.code]);
-          }
-        }
-        setSearchQuery(code);
+      code = codeLine ? codeLine.replace('Code:', '').trim() : lines[0].trim();
+    }
+    
+    const item = allCodesWithMetadata.find(c => c.code.toLowerCase() === code.toLowerCase());
+    if (item) {
+      const isLocked = lockedCodes && !!lockedCodes[item.code];
+      if (!isLocked) {
+        setSelected(prev =>
+          prev.includes(item.code) ? prev : [...prev, item.code]
+        );
       }
     }
-  }, [searchQuery, allCodesWithMetadata, selected, lockedCodes]);
+    setSearchQuery(''); // clear query for next scan
+  };
+
+  const handleSearchChange = (val) => {
+    if (val.includes('\n')) {
+      handleSearchSubmit(val);
+    } else {
+      setSearchQuery(val);
+    }
+  };
 
   const scannedQRPayload = useMemo(() => {
     const trimmed = searchQuery.trim();
@@ -200,46 +212,32 @@ const AssetCodesTreeModal = ({
   useEffect(() => {
     if (open) {
       setSearchQuery('');
-      setSelectedBatchFilter('ALL');
+      setSelectedBatchFilter(batchIds && batchIds.length > 0 ? String(batchIds[0]) : 'ALL');
       setSelectedBinFilter('ALL');
       
       if (selectedCodes.length > 0) {
-        setSelected([...selectedCodes]);
-      } else if (autoSelectOnOpen && targetQty > 0 && allCodesWithMetadata.length > 0) {
-        const availableFiltered = allCodesWithMetadata.filter(c => !lockedCodes || !lockedCodes[c.code]);
-        const autoSelected = availableFiltered.slice(0, Math.min(targetQty, availableFiltered.length)).map(c => c.code);
-        setSelected(autoSelected);
+        // Map short codes (e.g. "1029") to their matching full codes (e.g. "151110-0004-1-1029")
+        const mapped = selectedCodes.map(selCode => {
+          const matched = allCodesWithMetadata.find(c => 
+            c.code === selCode || 
+            c.code.endsWith(`-${selCode}`) ||
+            (itemCode && c.code === `${itemCode}-1-${selCode}`)
+          );
+          return matched ? matched.code : selCode;
+        });
+        setSelected(mapped);
       } else {
         setSelected([]);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, allCodesWithMetadata, selectedCodes, batchIds]);
 
   const toggleCode = (code) => {
     if (lockedCodes && lockedCodes[code]) return;
     setSelected(prev =>
       prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
     );
-  };
-
-  const handleSelectAllFiltered = () => {
-    const newSelects = [...selected];
-    filteredCodes.forEach(c => {
-      if (lockedCodes && lockedCodes[c.code]) return;
-      if (!newSelects.includes(c.code)) {
-        newSelects.push(c.code);
-      }
-    });
-    setSelected(newSelects);
-  };
-
-  const handleAutoFill = () => {
-    if (targetQty > 0) {
-      const availableFiltered = filteredCodes.filter(c => !lockedCodes || !lockedCodes[c.code]);
-      const fillList = availableFiltered.slice(0, Math.min(targetQty, availableFiltered.length)).map(c => c.code);
-      setSelected(fillList);
-    }
   };
 
   const handleClearAll = () => {
@@ -510,9 +508,9 @@ const AssetCodesTreeModal = ({
   };
 
   const getTitle = () => {
-    if (isAsset) return 'Select Asset Codes (Light Mode)';
-    if (isConsumable) return 'Select Consumable Codes (Light Mode)';
-    return 'Select Serial Numbers (Light Mode)';
+    if (isAsset) return 'Select Asset Codes';
+    if (isConsumable) return 'Select Consumable Codes';
+    return 'Select Serial Numbers';
   };
 
   return (
@@ -598,9 +596,10 @@ const AssetCodesTreeModal = ({
             <div style={{ fontWeight: 600, color: '#334155', marginBottom: 6, fontSize: 12 }}>Search Code / Location</div>
             <Input
               prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}
-              placeholder="Search code, location, bin..."
+              placeholder="Search or scan code..."
               value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
+              onChange={e => handleSearchChange(e.target.value)}
+              onPressEnter={e => handleSearchSubmit(e.target.value)}
               style={{ borderRadius: 6 }}
               allowClear
             />
@@ -635,57 +634,7 @@ const AssetCodesTreeModal = ({
           </Col>
         </Row>
 
-        <Divider style={{ margin: '16px 0' }} />
 
-        <Row justify="space-between" align="middle" gutter={[12, 12]}>
-          <Col>
-            <Space size={10}>
-              <Button
-                type="dashed"
-                onClick={handleSelectAllFiltered}
-                disabled={filteredCodes.length === 0}
-                style={{ borderRadius: 6, fontWeight: 600, fontSize: 12 }}
-              >
-                Select All Filtered ({filteredCodes.length})
-              </Button>
-              {targetQty > 0 && (
-                <Button
-                  type="primary"
-                  ghost
-                  icon={<ReloadOutlined />}
-                  onClick={handleAutoFill}
-                  disabled={filteredCodes.length === 0}
-                  style={{ borderRadius: 6, fontWeight: 600, fontSize: 12 }}
-                >
-                  Auto-Select First {targetQty}
-                </Button>
-              )}
-            </Space>
-          </Col>
-
-          {selected.length > 0 && (
-            <Col>
-              <Space>
-                <Button
-                  type="default"
-                  icon={<PrinterOutlined />}
-                  onClick={handlePrintSelectedQRs}
-                  style={{ borderRadius: 6, fontWeight: 600, fontSize: 12, background: '#f0fdf4', color: '#16a34a', borderColor: '#bbf7d0' }}
-                >
-                  Print QR Sheets ({selected.length})
-                </Button>
-                <Button
-                  type="default"
-                  icon={<DownloadOutlined />}
-                  onClick={handleDownloadAllSelectedQRs}
-                  style={{ borderRadius: 6, fontWeight: 600, fontSize: 12 }}
-                >
-                  Download PNGs
-                </Button>
-              </Space>
-            </Col>
-          )}
-        </Row>
       </div>
 
       {scannedQRPayload && (
@@ -807,25 +756,7 @@ const AssetCodesTreeModal = ({
                             );
                           })()}
                         </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
-                          <div style={{ background: '#ffffff', padding: 4, borderRadius: 6, border: '1px solid #e2e8f0', opacity: isLocked ? 0.5 : 1 }}>
-                            <QRCodeSVG value={codePayload} size={50} includeMargin={false} />
-                          </div>
-                          {!isLocked && (
-                            <Tooltip title="Download high-res PNG">
-                              <Button
-                                type="text"
-                                size="small"
-                                icon={<DownloadOutlined style={{ fontSize: 12, color: '#475569' }} />}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDownloadQRCode(item.code, item.rowRef);
-                                }}
-                                style={{ height: 18, width: 18, padding: 0 }}
-                              />
-                            </Tooltip>
-                          )}
-                        </div>
+
                       </div>
                     </Card>
                   </Col>

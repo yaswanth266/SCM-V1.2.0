@@ -320,7 +320,6 @@ class MaterialIssueItemCreate(BaseModel):
         return v
 
 class MaterialIssueCreate(BaseModel):
-    mr_id: Optional[int] = None
     indent_id: Optional[int] = None
     warehouse_id: int
     destination_warehouse_id: Optional[int] = None
@@ -355,7 +354,6 @@ class MaterialIssueCreate(BaseModel):
         return v
 
 class MaterialIssueUpdate(BaseModel):
-    mr_id: Optional[int] = None
     indent_id: Optional[int] = None
     warehouse_id: Optional[int] = None
     destination_warehouse_id: Optional[int] = None
@@ -413,8 +411,8 @@ class MaterialIssueItemResponse(BaseModel):
 class MaterialIssueResponse(BaseModel):
     id: int
     issue_number: str
-    mr_id: Optional[int] = None
     indent_id: Optional[int] = None
+    indent_number: Optional[str] = None
     warehouse_id: int
     warehouse_name: Optional[str] = None
     destination_warehouse_id: Optional[int] = None
@@ -940,4 +938,133 @@ class MaterialInwardResponse(BaseModel):
     items: List[MaterialInwardItemResponse]
 
     model_config = {"from_attributes": True}
+
+
+# ---- Vehicle Issues ----
+class VehicleIssueItemCreate(BaseModel):
+    item_id: int
+    batch_id: Optional[int] = None
+    qty: Decimal
+    uom_id: int
+    bin_id: Optional[int] = None
+    rate: Decimal = Decimal("0")
+    serial_numbers: Optional[List[str]] = None
+    batch_number_text: Optional[str] = None
+    bin_code_text: Optional[str] = None
+
+    @field_validator("qty")
+    @classmethod
+    def val_qty(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("Issue quantity must be greater than zero")
+        return v
+
+    @field_validator("rate")
+    @classmethod
+    def val_rate(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("Rate cannot be negative")
+        return v
+
+
+class VehicleIssueCreate(BaseModel):
+    indent_id: Optional[int] = None
+    warehouse_id: int
+    vehicle_code: str
+    vehicle_number: str
+    issue_date: date
+    department: Optional[str] = None
+    issued_to: Optional[int] = None
+    remarks: Optional[str] = None
+    project_id: Optional[int] = None
+    items: List[VehicleIssueItemCreate]
+
+    @field_validator("items")
+    @classmethod
+    def val_items_not_empty(cls, v):
+        if not v or len(v) == 0:
+            raise ValueError("At least one item is required")
+        return v
+
+    @field_validator("issue_date")
+    @classmethod
+    def val_issue_date(cls, v):
+        from datetime import timedelta
+        if v is not None and v > (date.today() + timedelta(days=1)):
+            raise ValueError("Issue date cannot be more than 1 day in the future")
+        if v is not None and v < (date.today() - timedelta(days=90)):
+            raise ValueError("Issue date cannot be more than 90 days in the past")
+        return v
+
+
+class VehicleIssueUpdate(BaseModel):
+    indent_id: Optional[int] = None
+    warehouse_id: Optional[int] = None
+    vehicle_code: Optional[str] = None
+    vehicle_number: Optional[str] = None
+    issue_date: Optional[date] = None
+    department: Optional[str] = None
+    issued_to: Optional[int] = None
+    remarks: Optional[str] = None
+    project_id: Optional[int] = None
+    items: Optional[List[VehicleIssueItemCreate]] = None
+
+    @field_validator("issue_date")
+    @classmethod
+    def val_issue_date(cls, v):
+        from datetime import timedelta
+        if v is not None and v > (date.today() + timedelta(days=1)):
+            raise ValueError("Issue date cannot be more than 1 day in the future")
+        if v is not None and v < (date.today() - timedelta(days=90)):
+            raise ValueError("Issue date cannot be more than 90 days in the past")
+        return v
+
+
+class VehicleIssueItemResponse(BaseModel):
+    id: int
+    item_id: int
+    item_name: Optional[str] = None
+    item_code: Optional[str] = None
+    uom_name: Optional[str] = None
+    batch_id: Optional[int] = None
+    batch_number: Optional[str] = None
+    expiry_date: Optional[str] = None
+    qty: Decimal
+    uom_id: int
+    bin_id: Optional[int] = None
+    rate: Decimal
+    amount: Decimal
+    serial_numbers: Optional[List[str]] = None
+    has_serial: bool = False
+    has_batch: bool = False
+    item_type: Optional[str] = None
+    batch_number_text: Optional[str] = None
+    bin_code_text: Optional[str] = None
+
+    model_config = {"from_attributes": True}
+
+
+class VehicleIssueResponse(BaseModel):
+    id: int
+    issue_number: str
+    indent_id: Optional[int] = None
+    indent_number: Optional[str] = None
+    warehouse_id: int
+    warehouse_name: Optional[str] = None
+    vehicle_code: str
+    vehicle_number: str
+    issue_date: datetime
+    department: Optional[str] = None
+    issued_to: Optional[int] = None
+    issued_to_name: Optional[str] = None
+    status: str
+    remarks: Optional[str] = None
+    issued_by: Optional[int] = None
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    items: List[VehicleIssueItemResponse] = []
+
+    model_config = {"from_attributes": True}
+
 

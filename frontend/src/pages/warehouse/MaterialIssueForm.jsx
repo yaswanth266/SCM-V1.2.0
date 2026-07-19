@@ -19,7 +19,7 @@ import api from '../../config/api';
 import useAuthStore from '../../store/authStore';
 import {
   formatDate, formatCurrency, formatNumber, getErrorMessage,
-  formatDateForAPI,
+  formatDateForAPI, exportDetailsToExcel, printDetailsToPDF
 } from '../../utils/helpers';
 import { DATE_FORMAT } from '../../utils/constants';
 
@@ -48,7 +48,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
   const [warehouses, setWarehouses] = useState([]);
   const [allWarehouses, setAllWarehouses] = useState([]);
   const [indentOptions, setIndentOptions] = useState([]);
-  const [mrOptions, setMrOptions] = useState([]);
+
   const [uomOptions, setUomOptions] = useState([]);
   const [userOptions, setUserOptions] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -206,23 +206,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
     }
   }, [form]);
 
-  const loadMROptions = useCallback(async (search = '') => {
-    try {
-      const res = await api.get('/procurement/material-requests', {
-        params: { page_size: 50, search },
-      });
-      const data = res.data;
-      const items = data.items || data.data || data || [];
-      setMrOptions(
-        items.map((mr) => ({
-          label: `${mr.mr_number} - ${mr.department || ''}`,
-          value: mr.id,
-        }))
-      );
-    } catch (err) {
-      console.error('Error loading MR options:', err);
-    }
-  }, []);
+
 
   const refreshStockForItems = useCallback(async (warehouseId, itemIds) => {
     if (!warehouseId || !itemIds || itemIds.length === 0) {
@@ -433,30 +417,33 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         service_code: ind.service_code || undefined,
       });
 
-      const lines = (ind.items || []).map((it) => ({
-        key: `${it.id}-${Date.now()}-${Math.random()}`,
-        item_id: it.item_id,
-        item_name: it.item_name || it.name || '',
-        item_code: it.item_code || '',
-        item_type: it.item_type || '',
-        uom_id: it.uom_id || null,
-        qty: Math.max(
-          Number(
-            it.issue_remaining_qty ?? (
-              (Number(it.approved_qty ?? it.requested_qty) || 0)
-              - (Number(it.issued_qty) || 0)
-            ),
-          ) || 0,
-          0,
-        ),
-        batch_id: null,
-        bin_id: null,
-        rate: Number(it.rate) || Number(it.purchase_price) || 0,
-        amount: 0,
-        has_batch: !!it.has_batch,
-        has_serial: !!it.has_serial,
-        serial_numbers: [],
-      }));
+      const lines = (ind.items || [])
+        .map((it) => ({
+          key: `${it.id}-${Date.now()}-${Math.random()}`,
+          item_id: it.item_id,
+          item_name: it.item_name || it.name || '',
+          item_code: it.item_code || '',
+          item_type: it.item_type || '',
+          uom_id: it.uom_id || null,
+          qty: Math.max(
+            Number(
+              it.issue_remaining_qty ?? (
+                (Number(it.approved_qty ?? it.requested_qty) || 0)
+                - (Number(it.issued_qty) || 0)
+              ),
+            ) || 0,
+            0,
+          ),
+          batch_id: null,
+          bin_id: null,
+          rate: Number(it.rate) || Number(it.purchase_price) || 0,
+          amount: 0,
+          has_batch: !!it.has_batch,
+          has_serial: !!it.has_serial,
+          serial_numbers: [],
+        }))
+        // Exclude lines already fully issued — nothing left to issue for them
+        .filter((line) => line.qty > 0);
 
       setIssueItems(lines.length > 0 ? lines : [createEmptyItem()]);
       const itemIds = lines.map((l) => l.item_id).filter(Boolean);
@@ -572,7 +559,6 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         warehouse_id: data.warehouse_id,
         destination_warehouse_id: data.destination_warehouse_id,
         indent_id: data.indent_id,
-        mr_id: data.mr_id,
         department: data.department,
         issued_to: data.issued_to,
         issue_date: data.issue_date ? dayjs(data.issue_date) : null,
@@ -672,7 +658,6 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
   useEffect(() => {
     loadLookups();
     loadIndentOptions();
-    loadMROptions();
     loadVehicleOptions();
     if (!isNew) {
       fetchRecord();
@@ -688,7 +673,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         prefillFromIndent(Number(indentId));
       }
     }
-  }, [id, isNew, fetchRecord, loadLookups, loadIndentOptions, loadMROptions, form, location.search, prefillFromIndent, loadVehicleOptions]);
+  }, [id, isNew, fetchRecord, loadLookups, loadIndentOptions, form, location.search, prefillFromIndent, loadVehicleOptions]);
 
   useEffect(() => {
     if (templateType) {
@@ -1048,6 +1033,16 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
           return matchBatch && matchBin && Number(r.available_qty) > 0;
         });
 
+        // Sort matchingRows by expiry date ascending
+        matchingRows.sort((a, b) => {
+          if (a.expiry_date && b.expiry_date) {
+            return new Date(a.expiry_date) - new Date(b.expiry_date);
+          }
+          if (a.expiry_date) return -1;
+          if (b.expiry_date) return 1;
+          return 0;
+        });
+
         if (matchingRows.length === 0 || (!item.has_batch && selectedBins.length === 0)) {
           payloadItems.push({
             item_id: item.item_id,
@@ -1280,6 +1275,20 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
                 Print QR Labels
               </Button>
             )}
+            <Button
+              type="default"
+              style={{ borderColor: '#52c41a', color: '#52c41a', fontWeight: 600 }}
+              onClick={() => exportDetailsToExcel(recordData, 'material_issue')}
+            >
+              Export Excel
+            </Button>
+            <Button
+              type="primary"
+              style={{ background: '#1890ff', borderColor: '#1890ff', fontWeight: 600 }}
+              onClick={() => printDetailsToPDF(recordData, 'material_issue')}
+            >
+              Print PDF
+            </Button>
             {recordData.status === 'draft' && (
               <>
                 <Button icon={<EditOutlined />} onClick={() => setEditMode(true)} type="primary">
@@ -1313,7 +1322,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
             <Descriptions.Item label="Destination Warehouse">{recordData.destination_warehouse_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="Department">{recordData.department || '-'}</Descriptions.Item>
             <Descriptions.Item label="Issued To">{recordData.issued_to_name || recordData.issued_to || '-'}</Descriptions.Item>
-            <Descriptions.Item label="MR Reference">{recordData.mr_number || recordData.mr_id || '-'}</Descriptions.Item>
+
             <Descriptions.Item label="Indent Reference">{recordData.indent_number || recordData.indent_id || '-'}</Descriptions.Item>
             <Descriptions.Item label="Vehicle Code">{recordData.vehicle_code || '-'}</Descriptions.Item>
             <Descriptions.Item label="Vehicle Number">{recordData.vehicle_number || '-'}</Descriptions.Item>
@@ -1392,11 +1401,9 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
       dataIndex: 'qty',
       width: 120,
       render: (val, record) => {
-        const requiresBatch = record.has_batch;
-        const selectedBatches = record.batch_ids || (record.batch_id ? [record.batch_id] : []);
-        const disabled = requiresBatch && selectedBatches.length === 0;
+        const disabled = !record.item_id;
         return (
-          <Tooltip title={disabled ? 'Select a batch before entering quantity' : ''}>
+          <Tooltip title={disabled ? 'Select an item first' : ''}>
             <InputNumber
               min={0}
               value={val}
@@ -1465,6 +1472,8 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
           );
         }
 
+        const quantityMissing = !record.qty || Number(record.qty) <= 0;
+
         // Non-central warehouse: breakdown returns batch_id=null for all rows.
         // Show an optional text input for source batch traceability (no ledger validation).
         const allBatchIdsNull = details.batches.length > 0 && details.batches.every(b => b.id === null);
@@ -1474,10 +1483,23 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
             <Input
               value={record.batch_number_text || ''}
               onChange={(e) => updateIssueItem(record.key, 'batch_number_text', e.target.value)}
-              placeholder="Source batch # (optional)"
+              placeholder={quantityMissing ? "Enter quantity first" : "Source batch # (optional)"}
+              disabled={quantityMissing}
               size="small"
               style={{ width: '100%' }}
               allowClear
+            />
+          );
+        }
+
+        if (quantityMissing) {
+          return (
+            <Select
+              value={val}
+              disabled
+              placeholder="Enter quantity first"
+              size="small"
+              style={{ width: '100%' }}
             />
           );
         }
@@ -1509,6 +1531,34 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
             />
           );
         }
+        // Sort and filter batches based on requested qty and expiry date
+        let displayedBatches = [...details.batches];
+        displayedBatches.sort((a, b) => {
+          if (a.expiry_date && b.expiry_date) {
+            return new Date(a.expiry_date) - new Date(b.expiry_date);
+          }
+          if (a.expiry_date) return -1;
+          if (b.expiry_date) return 1;
+          return 0;
+        });
+
+        const targetQty = record.qty || 0;
+        const selectedBatchIds = new Set(
+          record.batch_ids || (record.batch_id ? [record.batch_id] : [])
+        );
+
+        if (targetQty > 0) {
+          let accumulatedQty = 0;
+          const filtered = [];
+          for (const b of displayedBatches) {
+            if (accumulatedQty < targetQty || selectedBatchIds.has(b.id)) {
+              filtered.push(b);
+              accumulatedQty += b.qty || 0;
+            }
+          }
+          displayedBatches = filtered;
+        }
+
         return (
           <Select
             mode="multiple"
@@ -1547,7 +1597,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
                 ...rateUpdate
               });
             }}
-            options={details.batches.map((b) => ({
+            options={displayedBatches.map((b) => ({
               label: `${b.batch_number}${b.expiry_date ? ` (Exp: ${b.expiry_date})` : ''}${b.rate > 0 ? ` — ₹${b.rate}` : ''} - Qty: ${formatNumber(b.qty)}`,
               value: b.id,
             }))}
@@ -1676,15 +1726,45 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         const availableSerials = serialsMap[key] || [];
         
         const isAssetOrConsumableOrSerial = record.item_type === 'asset' || record.item_type === 'consumable' || record.has_serial;
+        const selectedCount = val?.length || 0;
+        const isAsset = record.item_type === 'asset';
+        const isConsumable = record.item_type === 'consumable';
+        const shadowColor = isAsset ? 'rgba(6,182,212,0.3)' : isConsumable ? 'rgba(249,115,22,0.3)' : 'rgba(99,102,241,0.3)';
+        const label = isAsset ? 'Codes Selected' : isConsumable ? 'Codes Selected' : 'Serials Selected';
+        const buttonText = isAsset || isConsumable ? 'Select Codes' : 'Select Serials';
+
+        const selectedBatches = record.batch_ids || (record.batch_id ? [record.batch_id] : []);
+        const needsBatch = record.has_batch;
+        const batchMissing = needsBatch && selectedBatches.length === 0;
+
+        if (batchMissing) {
+          if (isAssetOrConsumableOrSerial) {
+            return (
+              <Tooltip title="Select batch first">
+                <Button
+                  size="small"
+                  disabled
+                  icon={<BarcodeOutlined />}
+                  style={{
+                    borderRadius: '20px',
+                    fontSize: '11px',
+                  }}
+                >
+                  {buttonText}
+                </Button>
+              </Tooltip>
+            );
+          }
+          return (
+            <Tooltip title="Select batch first">
+              <span style={{ color: 'rgba(0, 0, 0, 0.25)', cursor: 'not-allowed', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 20, border: '1.5px solid #d9d9d9', background: '#f5f5f5' }}>
+                <BarcodeOutlined /> Select S/N
+              </span>
+            </Tooltip>
+          );
+        }
         
         if (isAssetOrConsumableOrSerial) {
-          const selectedCount = val?.length || 0;
-          const isAsset = record.item_type === 'asset';
-          const isConsumable = record.item_type === 'consumable';
-          const shadowColor = isAsset ? 'rgba(6,182,212,0.3)' : isConsumable ? 'rgba(249,115,22,0.3)' : 'rgba(99,102,241,0.3)';
-          const label = isAsset ? 'Codes Selected' : isConsumable ? 'Codes Selected' : 'Serials Selected';
-          const buttonText = isAsset || isConsumable ? 'Select Codes' : 'Select Serials';
-
           return (
             <Tooltip title="Click to select specific items/serials from tree hierarchy">
               <Button
@@ -1911,18 +1991,6 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
                       onFocus={() => loadIndentOptions()}
                       onSearch={(v) => loadIndentOptions(v)}
                       onChange={(v) => prefillFromIndent(v)}
-                    />
-                  </Form.Item>
-                </Col>
-                <Col span={8}>
-                  <Form.Item name="mr_id" label="Material Request">
-                    <Select
-                      options={mrOptions}
-                      placeholder="Select MR (optional)"
-                      showSearch
-                      optionFilterProp="label"
-                      allowClear
-                      onSearch={(v) => loadMROptions(v)}
                     />
                   </Form.Item>
                 </Col>

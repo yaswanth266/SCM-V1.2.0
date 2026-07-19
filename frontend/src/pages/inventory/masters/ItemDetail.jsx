@@ -283,6 +283,25 @@ const ItemDetail = () => {
     return 'CODE128';
   })();
 
+  const renderDescriptions = (title, rawItems) => {
+    const items = rawItems.filter((it) => {
+      if (it.forceShow) return true;
+      const v = it.value;
+      if (v === undefined || v === null || v === '' || v === '-') return false;
+      return true;
+    });
+    if (items.length === 0) return null;
+    return (
+      <Descriptions title={title} column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered style={{ marginBottom: 24 }}>
+        {items.map((it, idx) => (
+          <Descriptions.Item key={idx} label={it.label}>
+            {it.value}
+          </Descriptions.Item>
+        ))}
+      </Descriptions>
+    );
+  };
+
   return (
     <div>
       <PageHeader title={`${item.readable_code || item.item_code} - ${item.name}`} subtitle={itemTypeName}>
@@ -296,70 +315,70 @@ const ItemDetail = () => {
       <Card style={{ marginBottom: 16 }}>
         <Row gutter={24}>
           <Col xs={24} md={16}>
-            <Descriptions title="Basic" column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered style={{ marginBottom: 24 }}>
-              <Descriptions.Item label="Item Code">{item.item_code}</Descriptions.Item>
-              <Descriptions.Item label="Readable Code">{item.readable_code || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Name">{item.name}</Descriptions.Item>
-              <Descriptions.Item label="Class">{itemTypeName}</Descriptions.Item>
-              <Descriptions.Item label="Sub Class">{item.item_sub_class_name || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Has Components / Kit">{item.is_kit ? 'Yes' : 'No'}</Descriptions.Item>
-              <Descriptions.Item label="Category">{item.category?.name || item.category_name || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Brand">{item.brand || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Manufacturer">{item.manufacturer || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Dosage Form">{item.dosage_form || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Status"><StatusTag status={item.status || (item.is_active === false ? 'inactive' : 'active')} /></Descriptions.Item>
-            </Descriptions>
+            {renderDescriptions("Basic", [
+              { label: "Item Code", value: item.item_code, forceShow: true },
+              { label: "Readable Code", value: item.readable_code },
+              { label: "Name", value: item.name, forceShow: true },
+              { label: "Class", value: itemTypeName, forceShow: true },
+              { label: "Sub Class", value: item.item_sub_class_name },
+              { label: "Has Components / Kit", value: item.is_kit ? "Yes" : "No" },
+              { label: "Category Level 1", value: item.category_l1 },
+              { label: "Category Level 2", value: item.category_l2 },
+              { label: "Category Level 3", value: item.category_l3 },
+              { label: "Brand", value: item.brand },
+              { label: "Dosage Form", value: item.dosage_form },
+              { label: "Status", value: <StatusTag status={item.status || (item.is_active === false ? "inactive" : "active")} />, forceShow: true },
+            ])}
 
-            <Descriptions title="Units & Identification" column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered style={{ marginBottom: 24 }}>
-              <Descriptions.Item label="Primary UOM">{item.primary_uom?.name || item.primary_uom_name || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Conversion Factor">{item.conversion_factor || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Pack Size">{item.pack_size || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Barcode Type">{barcodeTypeName}</Descriptions.Item>
-              <Descriptions.Item label="Barcode Value">{item.barcode_value || '-'}</Descriptions.Item>
-              <Descriptions.Item label="HSN Code">{item.hsn_code || '-'}</Descriptions.Item>
-            </Descriptions>
+            {renderDescriptions("Units & Identification", [
+              { label: "UOM Category", value: item.uom_category_name || item.uom_category?.name },
+              { label: "Primary UOM", value: item.primary_uom?.name || item.primary_uom_name },
+              { label: "Barcode Type", value: barcodeTypeName },
+              { label: "Barcode Value", value: item.barcode_value },
+              { label: "HSN Code", value: item.hsn_code },
+            ])}
 
-            <Descriptions title="Tracking & Stock" column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered style={{ marginBottom: 24 }}>
-              <Descriptions.Item label="Has Batch">{item.has_batch ? 'Yes' : 'No'}</Descriptions.Item>
-              <Descriptions.Item label="Has Serial">{item.has_serial ? 'Yes' : 'No'}</Descriptions.Item>
-              <Descriptions.Item label="Has Expiry">{item.has_expiry ? 'Yes' : 'No'}</Descriptions.Item>
-              <Descriptions.Item label="Shelf Life">{item.shelf_life_days ? `${item.shelf_life_days} days` : '-'}</Descriptions.Item>
-              <Descriptions.Item label="Safety Stock">{item.safety_stock ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label="Reorder Level">{item.reorder_level ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label="Minimum Stock">{item.minimum_stock ?? '-'}</Descriptions.Item>
-              <Descriptions.Item label="Maximum Stock">{item.maximum_stock ?? '-'}</Descriptions.Item>
-            </Descriptions>
+            {renderDescriptions("Tracking & Stock", [
+              { label: "Has Batch", value: item.has_batch ? "Yes" : "No" },
+              { label: "Has Serial", value: item.has_serial ? "Yes" : "No" },
+              { label: "Has Expiry", value: item.has_expiry ? "Yes" : "No" },
+              { label: "Shelf Life", value: item.shelf_life_days ? `${item.shelf_life_days} days` : null },
+              { label: "Safety Stock", value: item.safety_stock != null ? String(item.safety_stock) : null },
+              { label: "Reorder Level", value: item.reorder_level != null ? String(item.reorder_level) : null },
+              { label: "Reorder Qty", value: item.reorder_qty != null ? String(item.reorder_qty) : null },
+              { label: "Lead Time (Days)", value: item.lead_time_days != null ? String(item.lead_time_days) : null },
+              { label: "Min Order Qty", value: item.min_order_qty != null ? String(item.min_order_qty) : null },
+              { label: "Max Order Qty", value: item.max_order_qty != null ? String(item.max_order_qty) : null },
+            ])}
 
-            <Descriptions title="Pricing & Compliance" column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered>
-              <Descriptions.Item label="Purchase Price">{formatCurrency(item.purchase_price)}</Descriptions.Item>
-              <Descriptions.Item label="Selling Price">{formatCurrency(item.selling_price)}</Descriptions.Item>
-              <Descriptions.Item label="MRP">{formatCurrency(item.mrp)}</Descriptions.Item>
-              <Descriptions.Item label="Discount %">{item.discount_percent != null ? `${item.discount_percent}%` : '-'}</Descriptions.Item>
-              <Descriptions.Item label="Valuation Method">{item.valuation_method ? item.valuation_method.toUpperCase() : '-'}</Descriptions.Item>
-              <Descriptions.Item label="GST Rate">{item.gst_rate != null ? `${item.gst_rate}%` : (item.tax_rate != null ? `${item.tax_rate}%` : '-')}</Descriptions.Item>
-              <Descriptions.Item label="Controlled Substance">{item.is_controlled_substance ? 'Yes' : 'No'}</Descriptions.Item>
-              <Descriptions.Item label="Schedule Type">{item.schedule_type || '-'}</Descriptions.Item>
-            </Descriptions>
+            {renderDescriptions("Pricing & Tax", [
+              { label: "Purchase Price", value: item.purchase_price != null ? formatCurrency(item.purchase_price) : null },
+              { label: "Selling Price", value: item.selling_price != null ? formatCurrency(item.selling_price) : null },
+              { label: "MRP", value: item.mrp != null ? formatCurrency(item.mrp) : null },
+              { label: "Tax Rate (%)", value: item.tax_rate != null ? `${item.tax_rate}%` : null },
+              { label: "CGST Rate (%)", value: item.cgst_rate != null ? `${item.cgst_rate}%` : null },
+              { label: "SGST Rate (%)", value: item.sgst_rate != null ? `${item.sgst_rate}%` : null },
+              { label: "IGST Rate (%)", value: item.igst_rate != null ? `${item.igst_rate}%` : null },
+              { label: "Valuation Method", value: item.valuation_method ? item.valuation_method.toUpperCase() : null },
+            ])}
 
-            {item.special_storage_condition && (
-              <Descriptions title="Special Storage Conditions" column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered style={{ marginTop: 24 }}>
-                <Descriptions.Item label="Min Temp">{item.storage_min_temp != null ? `${item.storage_min_temp} °C` : '-'}</Descriptions.Item>
-                <Descriptions.Item label="Max Temp">{item.storage_max_temp != null ? `${item.storage_max_temp} °C` : '-'}</Descriptions.Item>
-                <Descriptions.Item label="Min Moisture">{item.storage_min_moisture != null ? `${item.storage_min_moisture}%` : '-'}</Descriptions.Item>
-                <Descriptions.Item label="Max Moisture">{item.storage_max_moisture != null ? `${item.storage_max_moisture}%` : '-'}</Descriptions.Item>
-                <Descriptions.Item label="Is Breakable">{item.storage_breakable ? <Tag color="red">Breakable / Fragile</Tag> : 'No'}</Descriptions.Item>
-              </Descriptions>
-            )}
+            {Boolean(item.special_storage_condition) && renderDescriptions("Special Storage Conditions", [
+              { label: "Requires Special Storage", value: "Yes", forceShow: true },
+              { label: "Min Temp", value: item.storage_min_temp != null ? `${item.storage_min_temp} °C` : null },
+              { label: "Max Temp", value: item.storage_max_temp != null ? `${item.storage_max_temp} °C` : null },
+              { label: "Min Moisture", value: item.storage_min_moisture != null ? `${item.storage_min_moisture}%` : null },
+              { label: "Max Moisture", value: item.storage_max_moisture != null ? `${item.storage_max_moisture}%` : null },
+              { label: "Is Fragile", value: item.storage_breakable ? <Tag color="red">Breakable / Fragile</Tag> : null },
+            ])}
 
-            {item.special_transport_condition && (
-              <Descriptions title="Special Transport Conditions" column={{ xs: 1, sm: 2, md: 3 }} size="small" bordered style={{ marginTop: 24 }}>
-                <Descriptions.Item label="Min Temp">{item.transport_min_temp != null ? `${item.transport_min_temp} °C` : '-'}</Descriptions.Item>
-                <Descriptions.Item label="Max Temp">{item.transport_max_temp != null ? `${item.transport_max_temp} °C` : '-'}</Descriptions.Item>
-                <Descriptions.Item label="Min Moisture">{item.transport_min_moisture != null ? `${item.transport_min_moisture}%` : '-'}</Descriptions.Item>
-                <Descriptions.Item label="Max Moisture">{item.transport_max_moisture != null ? `${item.transport_max_moisture}%` : '-'}</Descriptions.Item>
-                <Descriptions.Item label="Is Breakable">{item.transport_breakable ? <Tag color="red">Breakable / Fragile</Tag> : 'No'}</Descriptions.Item>
-              </Descriptions>
-            )}
+            {Boolean(item.special_transport_condition) && renderDescriptions("Special Transport Conditions", [
+              { label: "Requires Special Transport", value: "Yes", forceShow: true },
+              { label: "Min Temp", value: item.transport_min_temp != null ? `${item.transport_min_temp} °C` : null },
+              { label: "Max Temp", value: item.transport_max_temp != null ? `${item.transport_max_temp} °C` : null },
+              { label: "Min Moisture", value: item.transport_min_moisture != null ? `${item.transport_min_moisture}%` : null },
+              { label: "Max Moisture", value: item.transport_max_moisture != null ? `${item.transport_max_moisture}%` : null },
+              { label: "Is Fragile", value: item.transport_breakable ? <Tag color="red">Breakable / Fragile</Tag> : null },
+            ])}
 
             {item.description && (
               <div style={{ marginTop: 24 }}>

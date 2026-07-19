@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -21,11 +21,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { router } from 'expo-router';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-
-// Default base URL for backend API:
-// 10.2.1.31 is the host IP in the user's environment.
-const DEFAULT_API_URL = 'http://10.2.1.31:8000';
+import { API_BASE_URL } from '../constants/config';
 
 
 // Custom lightweight icons to eliminate external vector icon library dependency issues
@@ -210,35 +206,6 @@ const Feather = ({ name, size, color }: { name: string; size?: number; color?: s
 
 export default function App() {
   const [screen, setScreen] = useState<'splash' | 'login'>('splash');
-  const [apiUrl, setApiUrl] = useState(DEFAULT_API_URL);
-  const [tempApiUrl, setTempApiUrl] = useState(DEFAULT_API_URL);
-  const [showSettings, setShowSettings] = useState(false);
-
-  const [scanning, setScanning] = useState<boolean>(false);
-  const [permission, requestPermission] = useCameraPermissions();
-
-  const startScanning = async () => {
-    setShowSettings(false);
-    if (!permission || !permission.granted) {
-      const res = await requestPermission();
-      if (!res.granted) {
-        Alert.alert('Permission Required', 'Camera permission is required to scan QR codes.');
-        return;
-      }
-    }
-    setScanning(true);
-  };
-
-  const handleBarCodeScanned = ({ data }: { data: string }) => {
-    setScanning(false);
-    if (data) {
-      const cleanData = data.trim();
-      setTempApiUrl(cleanData);
-      setApiUrl(cleanData);
-      AsyncStorage.setItem('API_URL', cleanData);
-      Alert.alert('Server Configured', `API URL set to: ${cleanData}`);
-    }
-  };
 
 
   // Animated values for draggable bottom sheet
@@ -362,11 +329,8 @@ export default function App() {
   useEffect(() => {
     const bootstrapAsync = async () => {
       try {
-        const savedApiUrl = await AsyncStorage.getItem('API_URL');
-        if (savedApiUrl) {
-          setApiUrl(savedApiUrl);
-          setTempApiUrl(savedApiUrl);
-        }
+        // One-time migration: remove stale manual URL key from older app versions
+        await AsyncStorage.removeItem('API_URL');
 
         const rememberedUser = await AsyncStorage.getItem('remembered_username');
         if (rememberedUser) {
@@ -429,7 +393,7 @@ export default function App() {
 
     setLoading(true);
     try {
-      const response = await axios.post(`${apiUrl}/api/v1/auth/login`, {
+      const response = await axios.post(`${API_BASE_URL}/api/v1/auth/login`, {
         username: username.trim(),
         password: password,
         remember: remember,
@@ -455,28 +419,12 @@ export default function App() {
         const msg = err.response.data?.detail || 'Invalid username or password.';
         setError(msg);
       } else if (err.request) {
-        setError(`Cannot connect to server at ${apiUrl}. Please verify the Host URL in settings.`);
+        setError(`Cannot connect to server. Please check your network connection.`);
       } else {
         setError('An unexpected error occurred. Please try again.');
       }
     } finally {
       setLoading(false);
-    }
-  };
-
-  const saveSettings = async () => {
-    try {
-      let url = tempApiUrl.trim();
-      if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
-        url = 'http://' + url;
-      }
-      setApiUrl(url);
-      setTempApiUrl(url);
-      await AsyncStorage.setItem('API_URL', url);
-      setShowSettings(false);
-      Alert.alert('Settings Saved', `API URL updated to: ${url}`);
-    } catch (e) {
-      Alert.alert('Error', 'Failed to save settings.');
     }
   };
 
@@ -506,32 +454,6 @@ export default function App() {
     );
   }
 
-  if (scanning) {
-    return (
-      <SafeAreaView style={styles.scannerContainer}>
-        <CameraView
-          style={StyleSheet.absoluteFill}
-          barcodeScannerSettings={{
-            barcodeTypes: ["qr"],
-          }}
-          onBarcodeScanned={handleBarCodeScanned}
-        />
-        <View style={styles.scannerOverlay}>
-          <View style={styles.scannerHeader}>
-            <TouchableOpacity style={styles.scannerCloseBtn} onPress={() => setScanning(false)}>
-              <Feather name="x" size={24} color="#FFFFFF" />
-            </TouchableOpacity>
-            <Text style={styles.scannerTitle}>Scan Server Config QR</Text>
-          </View>
-          <View style={styles.scannerTargetContainer}>
-            <View style={styles.scannerTarget} />
-            <Text style={styles.scannerInstruction}>Align connection QR code inside the frame</Text>
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
 
     <LinearGradient
@@ -542,69 +464,11 @@ export default function App() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.keyboardContainer}
       >
-        {/* Settings Modal */}
-        <Modal
-          visible={showSettings}
-          transparent={true}
-          animationType="fade"
-          onRequestClose={() => setShowSettings(false)}
-        >
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Connection Settings</Text>
-              <Text style={styles.modalLabel}>API Base URL:</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={tempApiUrl}
-                onChangeText={setTempApiUrl}
-                placeholder="e.g. http://10.2.1.31:8000"
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <TouchableOpacity 
-                style={styles.modalScanBtn} 
-                onPress={startScanning}
-              >
-                <Feather name="camera" size={14} color="#ffffff" />
-                <Text style={styles.modalScanBtnText}>Scan Server QR Code</Text>
-              </TouchableOpacity>
-              <Text style={styles.modalHint}>
-
-                * Emulators use http://10.0.2.2:8000{'\n'}
-                * Physical devices require host PC local IP address.
-              </Text>
-              <View style={styles.modalButtons}>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.modalCancel]}
-                  onPress={() => {
-                    setTempApiUrl(apiUrl);
-                    setShowSettings(false);
-                  }}
-                >
-                  <Text style={styles.modalCancelText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.modalSave]}
-                  onPress={saveSettings}
-                >
-                  <Text style={styles.modalSaveText}>Save</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-
         {/* Top Stack Container for the dark header space */}
         <View style={styles.topStackContainer}>
           {/* Top Control Bar */}
           <SafeAreaView style={styles.topSafeBar}>
             <View style={styles.topControlBar}>
-              <TouchableOpacity
-                style={styles.settingsBtn}
-                onPress={() => setShowSettings(true)}
-              >
-                <Feather name="settings" size={16} color="rgba(255, 255, 255, 0.45)" />
-              </TouchableOpacity>
               <View style={styles.langBtn}>
                 <Feather name="globe" size={12} color="rgba(255, 255, 255, 0.45)" />
                 <Text style={styles.langText}>EN</Text>

@@ -611,20 +611,36 @@ async def supplier_acknowledge_po(
             po_items = item_res.scalars().all()
             po_items_map = {item.item_id: item for item in po_items}
             
+            # Enforce that for version 1.0 (not amended), supplier cannot change pricing/tax fields
+            if po.parent_po_id is None:
+                for item_input in payload.items:
+                    if item_input.item_id in po_items_map:
+                        item_row = po_items_map[item_input.item_id]
+                        if (
+                            item_input.rate != item_row.rate
+                            or item_input.discount_pct != item_row.discount_pct
+                            or (item_input.cgst_rate is not None and item_input.cgst_rate != item_row.cgst_rate)
+                            or (item_input.sgst_rate is not None and item_input.sgst_rate != item_row.sgst_rate)
+                            or (item_input.igst_rate is not None and item_input.igst_rate != item_row.igst_rate)
+                        ):
+                            raise HTTPException(400, "Editing pricing and tax fields is not allowed for PO version V1.0.")
+            
             for item_input in payload.items:
                 if item_input.item_id in po_items_map:
                     item_row = po_items_map[item_input.item_id]
-                    item_row.rate = item_input.rate
-                    item_row.discount_pct = item_input.discount_pct
-
-                    # BUG-SUPPLIER-RATE fix: apply supplier-provided tax rates
-                    # when they were originally zero (supplier fills pricing).
-                    if item_input.cgst_rate is not None:
-                        item_row.cgst_rate = item_input.cgst_rate
-                    if item_input.sgst_rate is not None:
-                        item_row.sgst_rate = item_input.sgst_rate
-                    if item_input.igst_rate is not None:
-                        item_row.igst_rate = item_input.igst_rate
+                    # Only allow editing rate/discount/tax if PO is amended
+                    if po.parent_po_id is not None:
+                        item_row.rate = item_input.rate
+                        item_row.discount_pct = item_input.discount_pct
+ 
+                        # BUG-SUPPLIER-RATE fix: apply supplier-provided tax rates
+                        # when they were originally zero (supplier fills pricing).
+                        if item_input.cgst_rate is not None:
+                            item_row.cgst_rate = item_input.cgst_rate
+                        if item_input.sgst_rate is not None:
+                            item_row.sgst_rate = item_input.sgst_rate
+                        if item_input.igst_rate is not None:
+                            item_row.igst_rate = item_input.igst_rate
                     
                     # Recalculate line total amount and tax amount
                     base = item_row.qty * item_row.rate

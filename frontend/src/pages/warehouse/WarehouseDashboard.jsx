@@ -11,23 +11,11 @@ import {
   NotificationOutlined,
   FileTextOutlined,
 } from '@ant-design/icons';
-import {
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Tooltip,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Legend,
-} from 'recharts';
+
 import api from '../../config/api';
 import useAuthStore from '../../store/authStore';
 
-const COLORS = ['#F09000', '#52c41a', '#fa8c16', '#fa541c', '#1890ff'];
+
 
 const WarehouseDashboard = () => {
   const navigate = useNavigate();
@@ -73,19 +61,7 @@ const WarehouseDashboard = () => {
     }
   };
 
-  // Curated Storage Space Occupancy
-  const occupancyData = [
-    { zone: 'Zone A (Cold Storage)', value: 82 },
-    { zone: 'Zone B (Bulk Storage)', value: 68 },
-    { zone: 'Zone C (Rack Shelves)', value: 74 },
-    { zone: 'Zone D (Receiving Dock)', value: 45 },
-  ];
 
-  // QA Inspection Ratio Data
-  const qaRatioData = [
-    { name: 'Passed', value: 85 },
-    { name: 'Failed', value: 15 },
-  ];
 
   const getStatusTag = (status) => {
     const map = {
@@ -191,70 +167,7 @@ const WarehouseDashboard = () => {
         </Col>
       </Row>
 
-      {/* Visual Analytics */}
-      <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-        {/* Storage Space Occupancy */}
-        <Col xs={24} lg={16}>
-          <Card 
-            title="Storage Space Occupancy by Warehouse Zone" 
-            style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
-          >
-            <div style={{ height: '300px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={occupancyData} margin={{ top: 20, right: 30, left: 10, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="zone" stroke="#6C757D" tickLine={false} />
-                  <YAxis unit="%" domain={[0, 100]} stroke="#6C757D" tickLine={false} />
-                  <Tooltip formatter={(v) => `${v}%`} />
-                  <Bar dataKey="value" name="Occupancy Rate" fill="#F09000" radius={[4, 4, 0, 0]}>
-                    {occupancyData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-        </Col>
 
-        {/* QA Pass/Fail Ratio */}
-        <Col xs={24} lg={8}>
-          <Card 
-            title="QA Pass/Fail Inspection Ratio" 
-            style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
-          >
-            <div style={{ height: '300px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie
-                    data={qaRatioData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    <Cell fill="#52c41a" />
-                    <Cell fill="#f5222d" />
-                  </Pie>
-                  <Tooltip formatter={(v) => `${v}%`} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div style={{ display: 'flex', gap: '16px', marginTop: '10px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <div style={{ width: '12px', height: '12px', borderRadius: '2px', background: '#52c41a' }} />
-                  <span style={{ fontSize: '13px', color: '#495057' }}>Pass (85%)</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <div style={{ width: '12px', height: '12px', borderRadius: '2px', background: '#f5222d' }} />
-                  <span style={{ fontSize: '13px', color: '#495057' }}>Fail (15%)</span>
-                </div>
-              </div>
-            </div>
-          </Card>
-        </Col>
-      </Row>
 
       {/* Recent Activity / Quick Actions Row */}
       {(() => {

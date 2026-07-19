@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.user import User, Role
-from app.models.stock import StockBalance, StockLedger
+from app.models.stock import StockBalance, StockLedger, VehicleStockBalance
 from app.models.transfer import StockTransfer, StockTransferItem
 from app.models.audit import StockAudit, StockAuditItem, BinReplenishmentRule
 from app.models.master import Item
@@ -19,6 +19,7 @@ from app.schemas.inventory import (
     AuditCreate, AuditResponse,
     ReplenishmentRuleCreate, ReplenishmentRuleResponse,
 )
+from app.schemas.indent import VehicleStockBalanceResponse
 from app.services.number_series import generate_number
 from app.services.stock_service import post_stock_ledger
 from app.services.approval_service import submit_for_approval
@@ -144,8 +145,18 @@ async def get_stock_balances(
         query = query.where(StockBalance.item_id.in_(search_subq))
         count_query = count_query.where(StockBalance.item_id.in_(search_subq))
 
-    # BUG-INV-135: filter by quantity unless show_zero_stock is set.
-    if not show_zero_stock:
+    if show_zero_stock:
+        query = query.where(
+            StockBalance.available_qty == 0,
+            StockBalance.reserved_qty == 0,
+            StockBalance.transit_qty == 0
+        )
+        count_query = count_query.where(
+            StockBalance.available_qty == 0,
+            StockBalance.reserved_qty == 0,
+            StockBalance.transit_qty == 0
+        )
+    else:
         from sqlalchemy import or_
         query = query.where(
             or_(
@@ -525,6 +536,221 @@ async def get_stock_balances(
     return build_paginated_response(paginated_items, total, page, page_size)
 
 
+@router.get("/vehicle-stock-balance")
+async def get_vehicle_stock_balance(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    search: str = Query(None),
+    vehicle_code: str = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List vehicle stock levels with search and pagination."""
+    from app.models.stock import VehicleStockBalance
+    from app.models.inventory_master import Item
+    from app.models.warehouse import Batch
+    offset, limit = paginate_params(page, page_size)
+    query = select(VehicleStockBalance).options(
+        selectinload(VehicleStockBalance.item).selectinload(Item.primary_uom),
+        selectinload(VehicleStockBalance.batch),
+    )
+    count_query = select(func.count(VehicleStockBalance.id))
+
+    if vehicle_code:
+        query = query.where(VehicleStockBalance.vehicle_code == vehicle_code)
+        count_query = count_query.where(VehicleStockBalance.vehicle_code == vehicle_code)
+
+    if search:
+        query = query.join(Item).where(
+            VehicleStockBalance.vehicle_code.ilike(f"%{search}%")
+            | VehicleStockBalance.vehicle_number.ilike(f"%{search}%")
+            | Item.name.ilike(f"%{search}%")
+            | Item.item_code.ilike(f"%{search}%")
+        )
+        count_query = count_query.join(Item).where(
+            VehicleStockBalance.vehicle_code.ilike(f"%{search}%")
+            | VehicleStockBalance.vehicle_number.ilike(f"%{search}%")
+            | Item.name.ilike(f"%{search}%")
+            | Item.item_code.ilike(f"%{search}%")
+        )
+
+    total = (await db.execute(count_query)).scalar()
+    result = await db.execute(query.offset(offset).limit(limit).order_by(VehicleStockBalance.id.desc()))
+    records = result.scalars().all()
+
+    data = []
+    for r in records:
+        data.append({
+            "id": r.id,
+            "vehicle_code": r.vehicle_code,
+            "vehicle_number": r.vehicle_number,
+            "item_id": r.item_id,
+            "item_code": r.item.item_code if r.item else None,
+            "item_name": r.item.name if r.item else None,
+            "uom_name": r.item.primary_uom.name if r.item and r.item.primary_uom else None,
+            "batch_id": r.batch_id,
+            "batch_number": r.batch.batch_number if r.batch else None,
+            "qty": float(r.qty),
+            "serial_numbers": r.serial_numbers,
+            "last_updated": r.last_updated.isoformat() if r.last_updated else None,
+        })
+    return build_paginated_response(data, total, page, page_size)
+
+
+@router.get("/vehicle-stock-ledger")
+async def get_vehicle_stock_ledger(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=10000),
+    vehicle_code: str = Query(None),
+    item_id: int = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    search: str = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve vehicle stock ledger entries with filters, search and pagination."""
+    from app.models.stock import VehicleStockLedger
+    from app.models.master import Item
+    from app.models.warehouse import Warehouse
+    from app.models.user import User as DBUser
+    from app.models.issue import VehicleIssue, MaterialAcknowledgement
+    from sqlalchemy import or_, cast, String as SqlString, select, func
+    from sqlalchemy.orm import selectinload
+
+    offset, limit = paginate_params(page, page_size)
+
+    query = (
+        select(VehicleStockLedger)
+        .options(
+            selectinload(VehicleStockLedger.item),
+            selectinload(VehicleStockLedger.warehouse),
+            selectinload(VehicleStockLedger.batch),
+        )
+        .order_by(
+            VehicleStockLedger.posting_date.desc(),
+            VehicleStockLedger.id.desc()
+        )
+    )
+    count_query = select(func.count(VehicleStockLedger.id))
+
+    if vehicle_code:
+        query = query.where(VehicleStockLedger.vehicle_code == vehicle_code)
+        count_query = count_query.where(VehicleStockLedger.vehicle_code == vehicle_code)
+
+    if item_id:
+        query = query.where(VehicleStockLedger.item_id == item_id)
+        count_query = count_query.where(VehicleStockLedger.item_id == item_id)
+
+    if date_from:
+        try:
+            from datetime import date as _d
+            _ = _d.fromisoformat(date_from[:10])
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Invalid date_from: {date_from}")
+        query = query.where(VehicleStockLedger.posting_date >= date_from)
+        count_query = count_query.where(VehicleStockLedger.posting_date >= date_from)
+
+    if date_to:
+        try:
+            from datetime import date as _d, timedelta as _td
+            d = _d.fromisoformat(date_to[:10])
+            next_day = d + _td(days=1)
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Invalid date_to: {date_to}")
+        query = query.where(VehicleStockLedger.posting_date < next_day.isoformat())
+        count_query = count_query.where(VehicleStockLedger.posting_date < next_day.isoformat())
+
+    if search:
+        search_term = f"%{search.strip()}%"
+        query = query.join(VehicleStockLedger.item).outerjoin(VehicleStockLedger.warehouse).where(
+            or_(
+                Item.item_code.ilike(search_term),
+                Item.name.ilike(search_term),
+                Warehouse.name.ilike(search_term),
+                VehicleStockLedger.vehicle_code.ilike(search_term),
+                VehicleStockLedger.transaction_type.ilike(search_term),
+                cast(VehicleStockLedger.reference_id, SqlString).ilike(search_term)
+            )
+        )
+        count_query = count_query.join(VehicleStockLedger.item).outerjoin(VehicleStockLedger.warehouse).where(
+            or_(
+                Item.item_code.ilike(search_term),
+                Item.name.ilike(search_term),
+                Warehouse.name.ilike(search_term),
+                VehicleStockLedger.vehicle_code.ilike(search_term),
+                VehicleStockLedger.transaction_type.ilike(search_term),
+                cast(VehicleStockLedger.reference_id, SqlString).ilike(search_term)
+            )
+        )
+
+    total = (await db.execute(count_query)).scalar()
+    result = await db.execute(query.offset(offset).limit(limit))
+    entries = result.scalars().all()
+
+    # Collect reference info
+    vi_ids = {e.reference_id for e in entries if e.reference_type == "vehicle_issue" and e.reference_id}
+    ack_ids = {e.reference_id for e in entries if e.reference_type == "material_acknowledgement" and e.reference_id}
+    user_ids = {e.created_by for e in entries if e.created_by}
+
+    vi_map = {}
+    if vi_ids:
+        vi_rows = await db.execute(select(VehicleIssue.id, VehicleIssue.issue_number).where(VehicleIssue.id.in_(list(vi_ids))))
+        for r in vi_rows.mappings().all():
+            vi_map[r["id"]] = r["issue_number"]
+
+    ack_map = {}
+    if ack_ids:
+        ack_rows = await db.execute(select(MaterialAcknowledgement.id, MaterialAcknowledgement.acknowledgement_number).where(MaterialAcknowledgement.id.in_(list(ack_ids))))
+        for r in ack_rows.mappings().all():
+            ack_map[r["id"]] = r["acknowledgement_number"]
+
+    users_map = {}
+    if user_ids:
+        u_rows = await db.execute(select(DBUser).where(DBUser.id.in_(list(user_ids))))
+        for u in u_rows.scalars().all():
+            users_map[u.id] = f"{u.first_name} {u.last_name or ''}".strip() or u.username
+
+    response_items = []
+    for e in entries:
+        ref_num = None
+        if e.reference_type == "vehicle_issue":
+            ref_num = vi_map.get(e.reference_id)
+        elif e.reference_type == "material_acknowledgement":
+            ref_num = ack_map.get(e.reference_id)
+        
+        response_items.append({
+            "id": e.id,
+            "vehicle_code": e.vehicle_code,
+            "vehicle_number": e.vehicle_number,
+            "warehouse_id": e.warehouse_id,
+            "warehouse_name": e.warehouse.name if e.warehouse else None,
+            "item_id": e.item_id,
+            "item_code": e.item.item_code if e.item else None,
+            "item_name": e.item.name if e.item else None,
+            "batch_id": e.batch_id,
+            "batch_number": e.batch.batch_number if e.batch else None,
+            "transaction_type": e.transaction_type,
+            "reference_type": e.reference_type,
+            "reference_id": e.reference_id,
+            "reference": ref_num or (str(e.reference_id) if e.reference_id else None),
+            "qty_in": float(e.qty_in) if e.qty_in is not None else 0.0,
+            "qty_out": float(e.qty_out) if e.qty_out is not None else 0.0,
+            "balance_qty": float(e.balance_qty) if e.balance_qty is not None else 0.0,
+            "rate": float(e.rate) if e.rate is not None else 0.0,
+            "value_in": float(e.value_in) if e.value_in is not None else 0.0,
+            "value_out": float(e.value_out) if e.value_out is not None else 0.0,
+            "balance_value": float(e.balance_value) if e.balance_value is not None else 0.0,
+            "posting_date": e.posting_date.isoformat() if e.posting_date else None,
+            "posting_time": e.posting_time.isoformat() if e.posting_time else None,
+            "created_by": e.created_by,
+            "created_by_name": users_map.get(e.created_by),
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        })
+
+    return build_paginated_response(response_items, total, page, page_size)
+
+
 # ==================== STOCK LEDGER ====================
 
 @router.get("/ledger")
@@ -564,13 +790,21 @@ async def get_stock_ledger(
     # could shift when posting_date jumps across page boundaries on a
     # back-dated insert. Always order by posting_date first, then id as the
     # tiebreaker so paging is reproducible.
+    from sqlalchemy import case
     query = (
         select(StockLedger)
         .options(
             selectinload(StockLedger.item),
             selectinload(StockLedger.warehouse),
         )
-        .order_by(StockLedger.posting_date.desc(), StockLedger.id.desc())
+        .order_by(
+            StockLedger.posting_date.desc(),
+            case(
+                (StockLedger.qty_out > 0, 1),
+                else_=2
+            ).asc(),
+            StockLedger.id.desc()
+        )
     )
     count_query = select(func.count(StockLedger.id))
 
@@ -3214,6 +3448,7 @@ async def list_items(
         query.options(
             selectinload(Item.primary_uom),
             selectinload(Item.category),
+            selectinload(Item.uom_category),
             selectinload(Item.feature),
             selectinload(Item.sub_class),
             selectinload(Item.kit_components).selectinload(MasterItemKitComponent.uom),
@@ -3224,6 +3459,31 @@ async def list_items(
     item_ids = [int(i.id) for i in items]
     fallback_feature_ids = [int(i.feature_id) for i in items if i.feature_id]
     item_feature_map, feature_map = await _load_feature_maps_for_items(db, item_ids, fallback_feature_ids)
+
+    # In-memory category hierarchy lookup helper to avoid N+1 queries
+    from app.models.inventory_master import ItemCategory
+    cat_rows = (await db.execute(select(ItemCategory))).scalars().all()
+    cat_map = {c.id: c for c in cat_rows}
+
+    def get_cat_hierarchy(category_id: int | None) -> dict:
+        hierarchy = {"level1": None, "level2": None, "level3": None}
+        if not category_id:
+            return hierarchy
+        current_id = category_id
+        for _ in range(3):
+            if not current_id:
+                break
+            cat = cat_map.get(current_id)
+            if not cat:
+                break
+            if cat.level == 1:
+                hierarchy["level1"] = cat.name
+            elif cat.level == 2:
+                hierarchy["level2"] = cat.name
+            elif cat.level == 3:
+                hierarchy["level3"] = cat.name
+            current_id = cat.parent_id
+        return hierarchy
 
     # Enrich response with UOM and category names for frontend
     response_items = []
@@ -3236,6 +3496,14 @@ async def list_items(
         data["primary_uom"] = {"id": i.primary_uom.id, "name": i.primary_uom.name, "abbreviation": i.primary_uom.abbreviation, "category_id": i.primary_uom.category_id} if i.primary_uom else None
         data["category_name"] = i.category.name if i.category else None
         data["category"] = {"id": i.category.id, "name": i.category.name, "code": i.category.code} if i.category else None
+        data["uom_category_name"] = i.uom_category.name if i.uom_category else None
+        
+        # Category hierarchy path
+        hierarchy = get_cat_hierarchy(i.category_id)
+        data["category_l1"] = hierarchy["level1"]
+        data["category_l2"] = hierarchy["level2"]
+        data["category_l3"] = hierarchy["level3"]
+
         data["feature_id"] = feature_ids[0] if feature_ids else None
         data["feature_ids"] = feature_ids
         data["feature_names"] = feature_names
@@ -3248,6 +3516,28 @@ async def list_items(
         response_items.append(data)
 
     return build_paginated_response(response_items, total, page, page_size)
+
+
+async def _resolve_category_hierarchy(db: AsyncSession, category_id: int | None) -> dict:
+    hierarchy = {"level1": None, "level2": None, "level3": None}
+    if not category_id:
+        return hierarchy
+    from app.models.inventory_master import ItemCategory
+    current_id = category_id
+    for _ in range(3):
+        if not current_id:
+            break
+        row = (await db.execute(select(ItemCategory).where(ItemCategory.id == current_id))).scalar_one_or_none()
+        if not row:
+            break
+        if row.level == 1:
+            hierarchy["level1"] = row.name
+        elif row.level == 2:
+            hierarchy["level2"] = row.name
+        elif row.level == 3:
+            hierarchy["level3"] = row.name
+        current_id = row.parent_id
+    return hierarchy
 
 
 @router.get("/items/{item_id}", response_model=ItemResponse)
@@ -3265,6 +3555,8 @@ async def get_item(
         select(Item)
         .options(
             selectinload(Item.primary_uom),
+            selectinload(Item.category),
+            selectinload(Item.uom_category),
             selectinload(Item.sub_class),
             selectinload(Item.kit_components).selectinload(MasterItemKitComponent.uom),
         )
@@ -3284,6 +3576,19 @@ async def get_item(
     if item.primary_uom:
         data["primary_uom_name"] = item.primary_uom.name
         data["primary_uom"] = {"id": item.primary_uom.id, "name": item.primary_uom.name, "abbreviation": item.primary_uom.abbreviation, "category_id": item.primary_uom.category_id}
+    if item.category:
+        data["category_name"] = item.category.name
+        data["category"] = {"id": item.category.id, "name": item.category.name, "code": item.category.code}
+    if item.uom_category:
+        data["uom_category_name"] = item.uom_category.name
+        data["uom_category"] = {"id": item.uom_category.id, "name": item.uom_category.name}
+    
+    # Resolve category hierarchy levels L1, L2, L3
+    hierarchy = await _resolve_category_hierarchy(db, item.category_id)
+    data["category_l1"] = hierarchy["level1"]
+    data["category_l2"] = hierarchy["level2"]
+    data["category_l3"] = hierarchy["level3"]
+
     data["feature_id"] = feature_ids[0] if feature_ids else None
     data["feature_ids"] = feature_ids
     data["feature_names"] = feature_names

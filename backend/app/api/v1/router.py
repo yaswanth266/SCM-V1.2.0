@@ -12,7 +12,7 @@ from app.api.v1 import (
     cycle_count, sidebar, packaging, inward, dispatch, api_keys, external,
     logistics, carrier_auth, carrier_portal,
     vendor_auth, vendor_portal,
-    consignment, bulk_upload, vehicles, project_templates, hrms_webhook,
+    consignment, bulk_upload, vehicles, project_templates, hrms_webhook, vehicle_issues,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -28,6 +28,7 @@ api_router.include_router(external.router, prefix="/external", tags=["External D
 api_router.include_router(procurement.router, prefix="/procurement", tags=["Procurement"])
 api_router.include_router(procurement_demand_pool.router, prefix="/procurement", tags=["Demand Pool"])
 api_router.include_router(warehouse.router, prefix="/warehouse", tags=["Warehouse / GRN / QI / Putaway"])
+api_router.include_router(vehicle_issues.router, prefix="/warehouse/vehicle-issues", tags=["Vehicle Issues"])
 api_router.include_router(inward.router, prefix="/warehouse/inwards", tags=["Warehouse / Material Inward"])
 api_router.include_router(dispatch.router, prefix="/warehouse/dispatch", tags=["Warehouse / Dispatch"])
 api_router.include_router(inventory.router, prefix="/inventory", tags=["Inventory"])
@@ -369,7 +370,13 @@ async def stock_balance_summary_alias(
         if warehouse_id is not None:
             stmt = stmt.where(StockBalance.warehouse_id == warehouse_id)
             
-        if not show_zero_stock:
+        if show_zero_stock:
+            stmt = stmt.where(
+                StockBalance.available_qty == 0,
+                StockBalance.reserved_qty == 0,
+                StockBalance.transit_qty == 0
+            )
+        else:
             stmt = stmt.where(
                 or_(
                     StockBalance.available_qty > 0,

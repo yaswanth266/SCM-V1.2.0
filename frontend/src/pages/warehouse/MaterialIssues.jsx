@@ -12,7 +12,7 @@ import DataTable from '../../components/DataTable';
 import StatusTag from '../../components/StatusTag';
 import api from '../../config/api';
 import {
-  formatDate, getErrorMessage
+  formatDate, getErrorMessage, exportGlobalToExcel, printGlobalToPDF
 } from '../../utils/helpers';
 
 const MI_STATUSES = [
@@ -241,6 +241,8 @@ const MaterialIssues = () => {
         exportFileName="material_issues_list"
         toolbar={toolbar}
         scroll={{ x: 1200 }}
+        onExport={(data) => exportGlobalToExcel(data, 'material_issue')}
+        onPrint={(data) => printGlobalToPDF(data, 'material_issue')}
       />
     </div>
   );

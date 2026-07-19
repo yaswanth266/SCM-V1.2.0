@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -16,6 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { router, useFocusEffect } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
+import { API_BASE_URL, WEB_BASE_URL } from '../constants/config';
 
 // ─── Lightweight Icon Renderer ───────────────────────────────────────────────
 const Icon = ({ name, size = 18, color = '#7A6D66' }: { name: string; size?: number; color?: string }) => {
@@ -167,7 +168,6 @@ const Feather = ({ name, size, color }: { name: string; size?: number; color?: s
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const [token, setToken] = useState<string>('');
-  const [apiUrl, setApiUrl] = useState<string>('');
   const [user, setUser] = useState<any>(null);
   const [allowedKeys, setAllowedKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -181,7 +181,6 @@ export default function Dashboard() {
         try {
           const savedToken = await AsyncStorage.getItem('user_token');
           const savedUserStr = await AsyncStorage.getItem('user_profile');
-          const savedApiUrl = await AsyncStorage.getItem('API_URL');
 
           if (!savedToken || !savedUserStr) {
             if (isMounted) router.replace('/');
@@ -189,12 +188,11 @@ export default function Dashboard() {
           }
 
           const parsedUser = JSON.parse(savedUserStr);
-          const activeApiUrl = savedApiUrl || 'http://10.2.1.31:8000';
+          const activeApiUrl = API_BASE_URL;
 
           if (isMounted) {
             setToken(savedToken);
             setUser(parsedUser);
-            setApiUrl(activeApiUrl);
           }
 
           // Fetch sidebar permissions and unread notifications directly using the fresh token/url
@@ -235,22 +233,9 @@ export default function Dashboard() {
     }, [])
   );
 
-  const getWebUrl = (apiUri: string) => {
-    try {
-      const url = new URL(apiUri);
-      if (url.port === '8000') {
-        url.port = '3000';
-      }
-      return url.origin;
-    } catch (e) {
-      return apiUri.replace(':8000', ':3000');
-    }
-  };
-
   const openWebPage = async (path: string) => {
     try {
-      const webBase = getWebUrl(apiUrl);
-      const url = `${webBase}${path}?token=${encodeURIComponent(token)}`;
+      const url = `${WEB_BASE_URL}${path}?token=${encodeURIComponent(token)}`;
       await WebBrowser.openBrowserAsync(url, {
         presentationStyle: WebBrowser.WebBrowserPresentationStyle.AUTOMATIC,
       });

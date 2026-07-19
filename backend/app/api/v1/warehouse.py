@@ -3199,7 +3199,6 @@ async def list_material_issues(
         mi_dict = {
             "id": mi.id,
             "issue_number": mi.issue_number,
-            "mr_id": mi.mr_id,
             "indent_id": mi.indent_id,
             "indent_number": indent.indent_number if indent else None,
             "warehouse_id": mi.warehouse_id,
@@ -3674,28 +3673,7 @@ async def create_material_issue(
         except Exception:
             pass
 
-    # BUG-ISS-004 — block cross-org / cross-warehouse MR linkage.
-    if payload.mr_id:
-        try:
-            from app.models.procurement import MaterialRequest as _MR
-            mrr = await db.execute(select(_MR).where(_MR.id == payload.mr_id))
-            mr = mrr.scalar_one_or_none()
-            if not mr:
-                raise HTTPException(status_code=404, detail="Linked material request not found")
-            mr_org = getattr(mr, "organization_id", None)
-            if mr_org and mr_org != current_user.organization_id:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Material request belongs to a different organization",
-                )
-            mr_wh = getattr(mr, "warehouse_id", None)
-            if mr_wh and mr_wh != payload.warehouse_id:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Material request warehouse does not match this issue",
-                )
-        except ImportError:
-            pass
+    # mr_id reference removed — material request feature decoupled from material issue
 
     # D-006 — H1/narcotic/Rx prescriber gate at CREATE time
     from app.services.compliance_service import assert_prescriber_present_on_lines
@@ -3726,7 +3704,6 @@ async def create_material_issue(
 
             mi = MaterialIssue(
                 issue_number=issue_number,
-                mr_id=payload.mr_id,
                 indent_id=payload.indent_id,
                 warehouse_id=payload.warehouse_id,
                 destination_warehouse_id=payload.destination_warehouse_id,
@@ -4044,28 +4021,7 @@ async def bulk_create_material_issues(
             except Exception:
                 pass
 
-        # Link validation for MRs
-        if payload.mr_id:
-            try:
-                from app.models.procurement import MaterialRequest as _MR
-                mrr = await db.execute(select(_MR).where(_MR.id == payload.mr_id))
-                mr = mrr.scalar_one_or_none()
-                if not mr:
-                    raise HTTPException(status_code=404, detail="Linked material request not found")
-                mr_org = getattr(mr, "organization_id", None)
-                if mr_org and mr_org != current_user.organization_id:
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Material request belongs to a different organization",
-                    )
-                mr_wh = getattr(mr, "warehouse_id", None)
-                if mr_wh and mr_wh != payload.warehouse_id:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="Material request warehouse does not match this issue",
-                    )
-            except ImportError:
-                pass
+        # mr_id reference removed — material request feature decoupled from material issue
 
         # Prescriber check
         from app.services.compliance_service import assert_prescriber_present_on_lines
@@ -4092,7 +4048,6 @@ async def bulk_create_material_issues(
 
                 mi = MaterialIssue(
                     issue_number=issue_number,
-                    mr_id=payload.mr_id,
                     indent_id=payload.indent_id,
                     warehouse_id=payload.warehouse_id,
                     destination_warehouse_id=payload.destination_warehouse_id,
@@ -4350,8 +4305,6 @@ async def update_material_issue(
         raise HTTPException(status_code=400, detail="Only draft material issues can be updated")
 
     # Update scalar fields
-    if payload.mr_id is not None:
-        mi.mr_id = payload.mr_id
     if payload.indent_id is not None:
         mi.indent_id = payload.indent_id
     if payload.warehouse_id is not None:

@@ -66,8 +66,8 @@ class UserCreate(BaseModel):
         if len(v) > 100:
             raise ValueError("Username must be at most 100 characters")
         import re as _re
-        if not _re.match(r"^[a-zA-Z0-9_]+$", v):
-            raise ValueError("Username can only contain letters, numbers, and underscores")
+        if not _re.match(r"^[a-zA-Z0-9_-]+$", v):
+            raise ValueError("Username can only contain letters, numbers, underscores, and hyphens")
         return v
 
     @field_validator("first_name")
@@ -129,8 +129,8 @@ class UserUpdate(BaseModel):
         if len(v) > 100:
             raise ValueError("Username must be at most 100 characters")
         import re as _re
-        if not _re.match(r"^[a-zA-Z0-9_]+$", v):
-            raise ValueError("Username can only contain letters, numbers, and underscores")
+        if not _re.match(r"^[a-zA-Z0-9_-]+$", v):
+            raise ValueError("Username can only contain letters, numbers, underscores, and hyphens")
         return v
 
     @field_validator("password")

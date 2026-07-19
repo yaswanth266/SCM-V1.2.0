@@ -10,23 +10,10 @@ import {
   ArrowRightOutlined,
   NotificationOutlined,
 } from '@ant-design/icons';
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-  PieChart,
-  Pie,
-  Cell,
-} from 'recharts';
 import api from '../../config/api';
 import useAuthStore from '../../store/authStore';
 import { formatNumber } from '../../utils/helpers';
 
-const COLORS = ['#481890', '#fa8c16', '#52c41a', '#f5222d', '#1890ff'];
 
 const IndentDashboard = () => {
   const navigate = useNavigate();
@@ -59,22 +46,7 @@ const IndentDashboard = () => {
     }
   };
 
-  // Turnaround Time (TAT) visual trend data (mock/calculated averages based on standard SLA targets)
-  const tatData = [
-    { name: 'Draft -> Raised', average: 0.5, target: 1.0 },
-    { name: 'Raised -> Approved', average: 1.2, target: 2.0 },
-    { name: 'Approved -> Issued', average: 2.4, target: 3.0 },
-    { name: 'Issued -> Acknowledged', average: 1.5, target: 2.0 },
-  ];
 
-  // Types distribution
-  const routineCount = recentIndents.filter(i => i.indent_type === 'routine').length;
-  const emergencyCount = recentIndents.filter(i => i.indent_type === 'emergency').length;
-  const hasTypeData = routineCount > 0 || emergencyCount > 0;
-  const typeData = [
-    { name: 'Routine', value: routineCount },
-    { name: 'Emergency', value: emergencyCount },
-  ];
 
   const getStatusTag = (status) => {
     const map = {
@@ -181,72 +153,7 @@ const IndentDashboard = () => {
         </Col>
       </Row>
 
-      {/* Visual Analytics */}
-      <Row gutter={[16, 16]} style={{ marginBottom: '24px' }}>
-        {/* TAT Timeline Chart */}
-        <Col xs={24} lg={16}>
-          <Card 
-            title="Turnaround Time (TAT) Latency per Stage" 
-            style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
-          >
-            <div style={{ height: '300px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={tatData} margin={{ top: 20, right: 30, left: 0, bottom: 0 }}>
-                  <XAxis dataKey="name" stroke="#6C757D" fontSize={12} tickLine={false} />
-                  <YAxis label={{ value: 'Days', angle: -90, position: 'insideLeft' }} stroke="#6C757D" tickLine={false} />
-                  <Tooltip cursor={{ fill: 'rgba(72, 24, 144, 0.05)' }} />
-                  <Legend />
-                  <Bar dataKey="average" name="Average Speed (Days)" fill="#481890" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="target" name="SLA Target (Days)" fill="#fa8c16" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-        </Col>
 
-        {/* Indent Type Pie Chart */}
-        <Col xs={24} lg={8}>
-          <Card 
-            title="Indent Requisition Type" 
-            style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
-          >
-            <div style={{ height: '300px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
-              {hasTypeData ? (
-                <>
-                  <ResponsiveContainer width="100%" height={220}>
-                    <PieChart>
-                      <Pie
-                        data={typeData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={80}
-                        paddingAngle={5}
-                        dataKey="value"
-                      >
-                        {typeData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                    </PieChart>
-                  </ResponsiveContainer>
-                  <div style={{ display: 'flex', gap: '16px', marginTop: '10px' }}>
-                    {typeData.map((t, idx) => (
-                      <div key={t.name} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <div style={{ width: '12px', height: '12px', borderRadius: '2px', background: COLORS[idx % COLORS.length] }} />
-                        <span style={{ fontSize: '13px', color: '#495057' }}>{t.name} ({t.value})</span>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <Empty description="No indent type data available" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              )}
-            </div>
-          </Card>
-        </Col>
-      </Row>
 
       {/* Recent Activity / Quick Actions Row */}
       <Row gutter={[16, 16]}>
