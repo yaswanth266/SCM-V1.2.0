@@ -5,11 +5,10 @@ from sqlalchemy import text
 async def main():
     async with AsyncSessionLocal() as session:
         # Check current column details
-        res = await session.execute(text("DESCRIBE logistics_main_dispatch_orders;"))
-        columns = res.all()
-        for col in columns:
-            if col[0] == 'status':
-                print(f"Col status details: Field={col[0]}, Type={col[1]}, Null={col[2]}, Key={col[3]}, Default={col[4]}, Extra={col[5]}")
+        res = await session.execute(text("SHOW TRIGGERS;"))
+        triggers = res.all()
+        for trig in triggers:
+            print(f"Trigger: {trig[0]} on Table: {trig[1]}, Event: {trig[2]}, Timing: {trig[3]}")
 
 if __name__ == "__main__":
     asyncio.run(main())

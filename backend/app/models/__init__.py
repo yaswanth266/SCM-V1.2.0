@@ -1,7 +1,7 @@
 from app.models.user import Organization, Project, Role, Permission, RolePermission, User, UserRole, UserProject, UserWarehouse, TokenBlocklist, PasswordHistory
 from app.models.master import UOMCategory, UOM, UOMConversion, ItemCategory, Item, PriceList, PriceListItem, Vendor, VendorCategory, VendorItem, VendorContract, VendorRating, Customer, Brand, ItemAttribute, ItemAttributeValue, SpecCategory, Spec, ItemSpec, ItemSpecValue, UserGroup, UserGroupMember, UserGroupPermission, BOM, BOMComponent
 from app.models.warehouse import Warehouse, WarehouseLocation, WarehouseLine, WarehouseRack, WarehouseBin, Batch, SerialNumber, MaterialInward, MaterialInwardItem, WarehouseConfig
-from app.models.stock import StockLedger, StockBalance
+from app.models.stock import StockLedger, StockBalance, VehicleStockBalance, VehicleStockLedger
 from app.models.barcode import BarcodeRegistry, ScanLog
 from app.models.procurement import MaterialRequest, MaterialRequestItem, MrIndentLink, Quotation, QuotationItem, PurchaseOrder, PurchaseOrderItem
 from app.models.grn import GoodsReceiptNote, GRNItem, GRNItemSerial, QualityInspection, QualityInspectionItem, PutawayOrder, PutawayItem
@@ -10,7 +10,7 @@ from app.models.outbound import SalesOrder, SalesOrderItem, DeliveryOrder, WaveP
 from app.models.dispatch import DispatchOrder, GatePass, DispatchOrderItem, DispatchDeliveryAcknowledgement, DispatchAcknowledgementItem, DispatchAcknowledgementDocument
 from app.models.transfer import StockTransfer, StockTransferItem
 from app.models.indent import Indent, IndentItem, IndentAcknowledgement
-from app.models.issue import MaterialIssue, MaterialIssueItem, IssueReturn, IssueReturnItem
+from app.models.issue import MaterialIssue, MaterialIssueItem, IssueReturn, IssueReturnItem, VehicleIssue, VehicleIssueItem, MaterialAcknowledgement, MaterialAcknowledgementItem
 from app.models.audit import StockAudit, StockAuditItem, BinReplenishmentRule
 from app.models.approval import ApprovalWorkflow, ApprovalLevel, ApprovalRequest, ApprovalHistory, ApprovalDelegation
 from app.models.rules import BusinessRule, BusinessRuleExecution

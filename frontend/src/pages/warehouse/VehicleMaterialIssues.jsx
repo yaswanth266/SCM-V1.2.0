@@ -15,16 +15,14 @@ import {
   formatDate, getErrorMessage, exportGlobalToExcel, printGlobalToPDF
 } from '../../utils/helpers';
 
-const MI_STATUSES = [
+const VI_STATUSES = [
   { label: 'Draft', value: 'draft' },
   { label: 'Issued', value: 'issued' },
-  { label: 'Dispatched', value: 'dispatched' },
   { label: 'Acknowledged', value: 'acknowledged' },
-  { label: 'Completed', value: 'completed' },
   { label: 'Cancelled', value: 'cancelled' },
 ];
 
-const MaterialIssues = () => {
+const VehicleMaterialIssues = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [refreshKey, setRefreshKey] = useState(0);
@@ -52,14 +50,6 @@ const MaterialIssues = () => {
     }
   }, []);
 
-  // Handle redirect if deep-linked from Indents page with indent_id
-  useEffect(() => {
-    const indentId = searchParams.get('indent_id');
-    if (indentId) {
-      navigate(`/warehouse/material-issues/new?indent_id=${indentId}`, { replace: true });
-    }
-  }, [searchParams, navigate]);
-
   useEffect(() => {
     loadLookups();
   }, [loadLookups]);
@@ -71,7 +61,7 @@ const MaterialIssues = () => {
       if (filterStatus) qp.status = filterStatus;
       if (filterWarehouse) qp.warehouse_id = filterWarehouse;
       if (filterDepartment) qp.department = filterDepartment;
-      return await api.get('/warehouse/material-issues', { params: qp });
+      return await api.get('/warehouse/vehicle-issues', { params: qp });
     },
     [filterStatus, filterWarehouse, filterDepartment]
   );
@@ -79,8 +69,8 @@ const MaterialIssues = () => {
   // --- Actions ---
   const handleIssue = async (id) => {
     try {
-      await api.post(`/warehouse/material-issues/${id}/issue`);
-      message.success('Material issued successfully, stock reserved');
+      await api.post(`/warehouse/vehicle-issues/${id}/issue`);
+      message.success('Vehicle issue confirmed successfully, stock reserved');
       setRefreshKey((k) => k + 1);
     } catch (err) {
       message.error(getErrorMessage(err));
@@ -89,8 +79,8 @@ const MaterialIssues = () => {
 
   const handleDelete = async (id) => {
     try {
-      await api.delete(`/warehouse/material-issues/${id}`);
-      message.success('Material Issue deleted');
+      await api.delete(`/warehouse/vehicle-issues/${id}`);
+      message.success('Vehicle issue deleted');
       setRefreshKey((k) => k + 1);
     } catch (err) {
       message.error(getErrorMessage(err));
@@ -107,7 +97,7 @@ const MaterialIssues = () => {
       sorter: true,
       fixed: 'left',
       render: (text, record) => (
-        <a onClick={() => navigate(`/warehouse/material-issues/${record.id}`)}>{text}</a>
+        <a onClick={() => navigate(`/warehouse/vehicle-material-issues/${record.id}`)}>{text}</a>
       ),
     },
     {
@@ -119,11 +109,17 @@ const MaterialIssues = () => {
       render: (v) => v || '-',
     },
     {
-      title: 'Destination Warehouse',
-      dataIndex: 'destination_warehouse_name',
-      key: 'destination_warehouse',
-      width: 160,
-      ellipsis: true,
+      title: 'Vehicle Code',
+      dataIndex: 'vehicle_code',
+      key: 'vehicle_code',
+      width: 140,
+      render: (v) => v || '-',
+    },
+    {
+      title: 'Vehicle Number',
+      dataIndex: 'vehicle_number',
+      key: 'vehicle_number',
+      width: 140,
       render: (v) => v || '-',
     },
     {
@@ -164,22 +160,22 @@ const MaterialIssues = () => {
       render: (_, record) => (
         <Space size="small">
           <Tooltip title="View Detail">
-            <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/warehouse/material-issues/${record.id}`)} />
+            <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/warehouse/vehicle-material-issues/${record.id}`)} />
           </Tooltip>
           {record.status === 'draft' && (
             <>
               <Tooltip title="Edit">
-                <Button type="link" size="small" icon={<EditOutlined />} onClick={() => navigate(`/warehouse/material-issues/${record.id}?edit=true`)} />
+                <Button type="link" size="small" icon={<EditOutlined />} onClick={() => navigate(`/warehouse/vehicle-material-issues/${record.id}?edit=true`)} />
               </Tooltip>
               <Tooltip title="Issue Material (Reserve)">
                 <Popconfirm
-                  title="Issue this material? Stock will be reserved."
+                  title="Issue this material? Stock will be reserved in source warehouse."
                   onConfirm={() => handleIssue(record.id)}
                 >
                   <Button type="link" size="small" icon={<SendOutlined />} style={{ color: '#eb2f96' }} />
                 </Popconfirm>
               </Tooltip>
-              <Popconfirm title="Delete this Material Issue?" onConfirm={() => handleDelete(record.id)} okButtonProps={{ danger: true }}>
+              <Popconfirm title="Delete this Vehicle Issue?" onConfirm={() => handleDelete(record.id)} okButtonProps={{ danger: true }}>
                 <Button type="link" size="small" danger icon={<DeleteOutlined />} />
               </Popconfirm>
             </>
@@ -198,7 +194,7 @@ const MaterialIssues = () => {
         style={{ width: 150 }}
         value={filterStatus}
         onChange={(v) => { setFilterStatus(v); setRefreshKey((k) => k + 1); }}
-        options={MI_STATUSES}
+        options={VI_STATUSES}
       />
       <Select
         placeholder="Warehouse"
@@ -224,10 +220,10 @@ const MaterialIssues = () => {
 
   return (
     <div>
-      <PageHeader title="Material Issues" subtitle="Manage material issues from warehouse">
+      <PageHeader title="Vehicle Material Issues" subtitle="Manage material issues to vehicles">
         <Space>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/warehouse/material-issues/new')}>
-            Create Issue
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/warehouse/vehicle-material-issues/new')}>
+            Create Vehicle Issue
           </Button>
         </Space>
       </PageHeader>
@@ -237,15 +233,15 @@ const MaterialIssues = () => {
         columns={columns}
         fetchFunction={fetchRecords}
         rowKey="id"
-        searchPlaceholder="Search by issue number, department..."
-        exportFileName="material_issues_list"
+        searchPlaceholder="Search by issue number, vehicle code, number..."
+        exportFileName="vehicle_material_issues_list"
         toolbar={toolbar}
         scroll={{ x: 1200 }}
-        onExport={(data) => exportGlobalToExcel(data, 'material_issue')}
-        onPrint={(data) => printGlobalToPDF(data, 'material_issue')}
+        onExport={(data) => exportGlobalToExcel(data, 'vehicle_issue')}
+        onPrint={(data) => printGlobalToPDF(data, 'vehicle_issue')}
       />
     </div>
   );
 };
 
-export default MaterialIssues;
+export default VehicleMaterialIssues;

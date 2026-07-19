@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.user import User, Role
-from app.models.stock import StockBalance, StockLedger
+from app.models.stock import StockBalance, StockLedger, VehicleStockBalance
 from app.models.transfer import StockTransfer, StockTransferItem
 from app.models.audit import StockAudit, StockAuditItem, BinReplenishmentRule
 from app.models.master import Item
@@ -19,6 +19,7 @@ from app.schemas.inventory import (
     AuditCreate, AuditResponse,
     ReplenishmentRuleCreate, ReplenishmentRuleResponse,
 )
+from app.schemas.indent import VehicleStockBalanceResponse
 from app.services.number_series import generate_number
 from app.services.stock_service import post_stock_ledger
 from app.services.approval_service import submit_for_approval
@@ -533,6 +534,221 @@ async def get_stock_balances(
     total = len(grouped_items)
     paginated_items = grouped_items[offset:offset + page_size]
     return build_paginated_response(paginated_items, total, page, page_size)
+
+
+@router.get("/vehicle-stock-balance")
+async def get_vehicle_stock_balance(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=100),
+    search: str = Query(None),
+    vehicle_code: str = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List vehicle stock levels with search and pagination."""
+    from app.models.stock import VehicleStockBalance
+    from app.models.inventory_master import Item
+    from app.models.warehouse import Batch
+    offset, limit = paginate_params(page, page_size)
+    query = select(VehicleStockBalance).options(
+        selectinload(VehicleStockBalance.item).selectinload(Item.primary_uom),
+        selectinload(VehicleStockBalance.batch),
+    )
+    count_query = select(func.count(VehicleStockBalance.id))
+
+    if vehicle_code:
+        query = query.where(VehicleStockBalance.vehicle_code == vehicle_code)
+        count_query = count_query.where(VehicleStockBalance.vehicle_code == vehicle_code)
+
+    if search:
+        query = query.join(Item).where(
+            VehicleStockBalance.vehicle_code.ilike(f"%{search}%")
+            | VehicleStockBalance.vehicle_number.ilike(f"%{search}%")
+            | Item.name.ilike(f"%{search}%")
+            | Item.item_code.ilike(f"%{search}%")
+        )
+        count_query = count_query.join(Item).where(
+            VehicleStockBalance.vehicle_code.ilike(f"%{search}%")
+            | VehicleStockBalance.vehicle_number.ilike(f"%{search}%")
+            | Item.name.ilike(f"%{search}%")
+            | Item.item_code.ilike(f"%{search}%")
+        )
+
+    total = (await db.execute(count_query)).scalar()
+    result = await db.execute(query.offset(offset).limit(limit).order_by(VehicleStockBalance.id.desc()))
+    records = result.scalars().all()
+
+    data = []
+    for r in records:
+        data.append({
+            "id": r.id,
+            "vehicle_code": r.vehicle_code,
+            "vehicle_number": r.vehicle_number,
+            "item_id": r.item_id,
+            "item_code": r.item.item_code if r.item else None,
+            "item_name": r.item.name if r.item else None,
+            "uom_name": r.item.primary_uom.name if r.item and r.item.primary_uom else None,
+            "batch_id": r.batch_id,
+            "batch_number": r.batch.batch_number if r.batch else None,
+            "qty": float(r.qty),
+            "serial_numbers": r.serial_numbers,
+            "last_updated": r.last_updated.isoformat() if r.last_updated else None,
+        })
+    return build_paginated_response(data, total, page, page_size)
+
+
+@router.get("/vehicle-stock-ledger")
+async def get_vehicle_stock_ledger(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=10000),
+    vehicle_code: str = Query(None),
+    item_id: int = Query(None),
+    date_from: str = Query(None),
+    date_to: str = Query(None),
+    search: str = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve vehicle stock ledger entries with filters, search and pagination."""
+    from app.models.stock import VehicleStockLedger
+    from app.models.master import Item
+    from app.models.warehouse import Warehouse
+    from app.models.user import User as DBUser
+    from app.models.issue import VehicleIssue, MaterialAcknowledgement
+    from sqlalchemy import or_, cast, String as SqlString, select, func
+    from sqlalchemy.orm import selectinload
+
+    offset, limit = paginate_params(page, page_size)
+
+    query = (
+        select(VehicleStockLedger)
+        .options(
+            selectinload(VehicleStockLedger.item),
+            selectinload(VehicleStockLedger.warehouse),
+            selectinload(VehicleStockLedger.batch),
+        )
+        .order_by(
+            VehicleStockLedger.posting_date.desc(),
+            VehicleStockLedger.id.desc()
+        )
+    )
+    count_query = select(func.count(VehicleStockLedger.id))
+
+    if vehicle_code:
+        query = query.where(VehicleStockLedger.vehicle_code == vehicle_code)
+        count_query = count_query.where(VehicleStockLedger.vehicle_code == vehicle_code)
+
+    if item_id:
+        query = query.where(VehicleStockLedger.item_id == item_id)
+        count_query = count_query.where(VehicleStockLedger.item_id == item_id)
+
+    if date_from:
+        try:
+            from datetime import date as _d
+            _ = _d.fromisoformat(date_from[:10])
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Invalid date_from: {date_from}")
+        query = query.where(VehicleStockLedger.posting_date >= date_from)
+        count_query = count_query.where(VehicleStockLedger.posting_date >= date_from)
+
+    if date_to:
+        try:
+            from datetime import date as _d, timedelta as _td
+            d = _d.fromisoformat(date_to[:10])
+            next_day = d + _td(days=1)
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Invalid date_to: {date_to}")
+        query = query.where(VehicleStockLedger.posting_date < next_day.isoformat())
+        count_query = count_query.where(VehicleStockLedger.posting_date < next_day.isoformat())
+
+    if search:
+        search_term = f"%{search.strip()}%"
+        query = query.join(VehicleStockLedger.item).outerjoin(VehicleStockLedger.warehouse).where(
+            or_(
+                Item.item_code.ilike(search_term),
+                Item.name.ilike(search_term),
+                Warehouse.name.ilike(search_term),
+                VehicleStockLedger.vehicle_code.ilike(search_term),
+                VehicleStockLedger.transaction_type.ilike(search_term),
+                cast(VehicleStockLedger.reference_id, SqlString).ilike(search_term)
+            )
+        )
+        count_query = count_query.join(VehicleStockLedger.item).outerjoin(VehicleStockLedger.warehouse).where(
+            or_(
+                Item.item_code.ilike(search_term),
+                Item.name.ilike(search_term),
+                Warehouse.name.ilike(search_term),
+                VehicleStockLedger.vehicle_code.ilike(search_term),
+                VehicleStockLedger.transaction_type.ilike(search_term),
+                cast(VehicleStockLedger.reference_id, SqlString).ilike(search_term)
+            )
+        )
+
+    total = (await db.execute(count_query)).scalar()
+    result = await db.execute(query.offset(offset).limit(limit))
+    entries = result.scalars().all()
+
+    # Collect reference info
+    vi_ids = {e.reference_id for e in entries if e.reference_type == "vehicle_issue" and e.reference_id}
+    ack_ids = {e.reference_id for e in entries if e.reference_type == "material_acknowledgement" and e.reference_id}
+    user_ids = {e.created_by for e in entries if e.created_by}
+
+    vi_map = {}
+    if vi_ids:
+        vi_rows = await db.execute(select(VehicleIssue.id, VehicleIssue.issue_number).where(VehicleIssue.id.in_(list(vi_ids))))
+        for r in vi_rows.mappings().all():
+            vi_map[r["id"]] = r["issue_number"]
+
+    ack_map = {}
+    if ack_ids:
+        ack_rows = await db.execute(select(MaterialAcknowledgement.id, MaterialAcknowledgement.acknowledgement_number).where(MaterialAcknowledgement.id.in_(list(ack_ids))))
+        for r in ack_rows.mappings().all():
+            ack_map[r["id"]] = r["acknowledgement_number"]
+
+    users_map = {}
+    if user_ids:
+        u_rows = await db.execute(select(DBUser).where(DBUser.id.in_(list(user_ids))))
+        for u in u_rows.scalars().all():
+            users_map[u.id] = f"{u.first_name} {u.last_name or ''}".strip() or u.username
+
+    response_items = []
+    for e in entries:
+        ref_num = None
+        if e.reference_type == "vehicle_issue":
+            ref_num = vi_map.get(e.reference_id)
+        elif e.reference_type == "material_acknowledgement":
+            ref_num = ack_map.get(e.reference_id)
+        
+        response_items.append({
+            "id": e.id,
+            "vehicle_code": e.vehicle_code,
+            "vehicle_number": e.vehicle_number,
+            "warehouse_id": e.warehouse_id,
+            "warehouse_name": e.warehouse.name if e.warehouse else None,
+            "item_id": e.item_id,
+            "item_code": e.item.item_code if e.item else None,
+            "item_name": e.item.name if e.item else None,
+            "batch_id": e.batch_id,
+            "batch_number": e.batch.batch_number if e.batch else None,
+            "transaction_type": e.transaction_type,
+            "reference_type": e.reference_type,
+            "reference_id": e.reference_id,
+            "reference": ref_num or (str(e.reference_id) if e.reference_id else None),
+            "qty_in": float(e.qty_in) if e.qty_in is not None else 0.0,
+            "qty_out": float(e.qty_out) if e.qty_out is not None else 0.0,
+            "balance_qty": float(e.balance_qty) if e.balance_qty is not None else 0.0,
+            "rate": float(e.rate) if e.rate is not None else 0.0,
+            "value_in": float(e.value_in) if e.value_in is not None else 0.0,
+            "value_out": float(e.value_out) if e.value_out is not None else 0.0,
+            "balance_value": float(e.balance_value) if e.balance_value is not None else 0.0,
+            "posting_date": e.posting_date.isoformat() if e.posting_date else None,
+            "posting_time": e.posting_time.isoformat() if e.posting_time else None,
+            "created_by": e.created_by,
+            "created_by_name": users_map.get(e.created_by),
+            "created_at": e.created_at.isoformat() if e.created_at else None,
+        })
+
+    return build_paginated_response(response_items, total, page, page_size)
 
 
 # ==================== STOCK LEDGER ====================

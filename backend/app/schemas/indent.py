@@ -228,3 +228,82 @@ class IndentAcknowledgementResponse(BaseModel):
     scanned_barcodes: Optional[list] = None
     items: List[AckItemResponse] = []
     model_config = {"from_attributes": True}
+
+
+# --- Material Acknowledgement (Vehicle) Schemas ---
+
+class MaterialAcknowledgementItemCreate(BaseModel):
+    item_id: int
+    received_qty: Decimal
+    remarks: Optional[str] = None
+    serial_numbers: Optional[List[str]] = None
+    photos: Optional[List[str]] = None
+
+    @field_validator("received_qty")
+    @classmethod
+    def val_qty(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("Received quantity cannot be negative")
+        return v
+
+
+class MaterialAcknowledgementCreate(BaseModel):
+    vehicle_issue_id: int
+    employee_code: Optional[str] = None
+    remarks: Optional[str] = None
+    photos: Optional[List[str]] = None
+    items: List[MaterialAcknowledgementItemCreate]
+
+
+class MaterialAcknowledgementItemResponse(BaseModel):
+    id: int
+    item_id: int
+    item_code: Optional[str] = None
+    item_name: Optional[str] = None
+    uom: Optional[str] = None
+    received_qty: Decimal
+    remarks: Optional[str] = None
+    serial_numbers: Optional[List[str]] = None
+    photos: Optional[List[str]] = None
+
+    model_config = {"from_attributes": True}
+
+
+class MaterialAcknowledgementResponse(BaseModel):
+    id: int
+    acknowledgement_number: str
+    vehicle_issue_id: int
+    vehicle_issue_number: Optional[str] = None
+    vehicle_code: Optional[str] = None
+    vehicle_number: Optional[str] = None
+    warehouse_name: Optional[str] = None
+    acknowledged_by: int
+    acknowledged_by_name: Optional[str] = None
+    employee_code: Optional[str] = None
+    acknowledged_at: datetime
+    remarks: Optional[str] = None
+    status: str
+    photos: Optional[List[str]] = None
+    items: List[MaterialAcknowledgementItemResponse] = []
+
+    model_config = {"from_attributes": True}
+
+
+# --- Vehicle Stock Balance Schemas ---
+
+class VehicleStockBalanceResponse(BaseModel):
+    id: int
+    vehicle_code: str
+    vehicle_number: str
+    item_id: int
+    item_code: Optional[str] = None
+    item_name: Optional[str] = None
+    uom_name: Optional[str] = None
+    batch_id: Optional[int] = None
+    batch_number: Optional[str] = None
+    qty: Decimal
+    serial_numbers: Optional[List[str]] = None
+    last_updated: datetime
+
+    model_config = {"from_attributes": True}
+

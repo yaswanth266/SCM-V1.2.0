@@ -40,6 +40,8 @@ DOC_TOKEN_MAP = {
     "bom": "BOM",
     "gate_pass_inward": "GP-IN",
     "gate_pass_outward": "GP-OUT",
+    "vehicle_issue": "VI",
+    "material_acknowledgement": "MACK",
 }
 
 DEFAULT_ORG_PREFIX = "BHSPL"

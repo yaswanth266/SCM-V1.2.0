@@ -24,6 +24,7 @@ export const MODULE_NAVS = {
           { label: 'Quality Inspection', path: '/warehouse/quality-inspection' },
           { label: 'Putaway', path: '/warehouse/putaway' },
           { label: 'Material Issues', path: '/warehouse/material-issues' },
+          { label: 'Vehicle Material Issues', path: '/warehouse/vehicle-material-issues' },
           { label: 'AP 104 DP / Consumables', path: '/warehouse/material-issues/ap104-consumables' },
           { label: 'AP 104 DP Install', path: '/warehouse/material-issues/ap104-install' },
           { label: 'Purchase Returns', path: '/warehouse/purchase-returns' }
@@ -69,6 +70,8 @@ export const MODULE_NAVS = {
           { label: 'Stock Ledger', path: '/inventory/stock-ledger' },
           { label: 'Stock Transfer', path: '/inventory/stock-transfer' },
           { label: 'Stock Audit', path: '/inventory/stock-audit' },
+          { label: 'Vehicle Stock Balance', path: '/inventory/vehicle-stock-balance' },
+          { label: 'Vehicle Stock Ledger', path: '/inventory/vehicle-stock-ledger' },
           { label: 'Replenishment', path: '/inventory/replenishment' }
         ]
       },
@@ -117,7 +120,8 @@ export const MODULE_NAVS = {
           { label: 'Board', path: '/indent/indents/kanban', hideForRoles: ['field_staff', 'field_supervisor'] },
           { label: 'AP 104 DP / Consumables', path: '/indent/ap104-consumables' },
           { label: 'AP 104 DP Install', path: '/indent/ap104-install' },
-          { label: 'Acknowledgement', path: '/indent/acknowledgement' }
+          { label: 'Acknowledgement', path: '/indent/acknowledgement' },
+          { label: 'Material Acknowledgement', path: '/indent/material-acknowledgement' }
         ]
 
       },

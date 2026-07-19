@@ -231,6 +231,7 @@ export const MENU_CONFIG = [
       { key: 'warehouse-putaway', label: 'Putaway', path: '/warehouse/putaway' },
       { key: 'warehouse-purchase-returns', label: 'Purchase Returns', path: '/warehouse/purchase-returns' },
       { key: 'warehouse-material-issues', label: 'Material Issues', path: '/warehouse/material-issues' },
+      { key: 'warehouse-vehicle-material-issues', label: 'Vehicle Material Issues', path: '/warehouse/vehicle-material-issues' },
       { key: 'warehouse-material-issues-ap104-consumables', label: 'AP 104 DP / Consumables', path: '/warehouse/material-issues/ap104-consumables' },
       { key: 'warehouse-material-issues-ap104-install', label: 'AP 104 DP Install', path: '/warehouse/material-issues/ap104-install' },
     ],
@@ -254,7 +255,9 @@ export const MENU_CONFIG = [
     icon: 'AppstoreOutlined',
     children: [
       { key: 'inventory-stock-balance', label: 'Stock Balance', path: '/inventory/stock-balance' },
+      { key: 'inventory-vehicle-stock-balance', label: 'Vehicle Stock Balance', path: '/inventory/vehicle-stock-balance' },
       { key: 'inventory-stock-ledger', label: 'Stock Ledger', path: '/inventory/stock-ledger' },
+      { key: 'inventory-vehicle-stock-ledger', label: 'Vehicle Stock Ledger', path: '/inventory/vehicle-stock-ledger' },
       { key: 'inventory-stock-transfer', label: 'Stock Transfer', path: '/inventory/stock-transfer' },
       { key: 'inventory-stock-audit', label: 'Stock Audit', path: '/inventory/stock-audit' },
       { key: 'inventory-replenishment', label: 'Replenishment', path: '/inventory/replenishment' },
@@ -271,6 +274,7 @@ export const MENU_CONFIG = [
       { key: 'indent-ap104-consumables', label: 'AP 104 DP / Consumables', path: '/indent/ap104-consumables' },
       { key: 'indent-ap104-install', label: 'AP 104 DP Install', path: '/indent/ap104-install' },
       { key: 'indent-acknowledgement', label: 'Acknowledgement', path: '/indent/acknowledgement' },
+      { key: 'indent-material-acknowledgement', label: 'Material Acknowledgement', path: '/indent/material-acknowledgement' },
     ],
   },
 
