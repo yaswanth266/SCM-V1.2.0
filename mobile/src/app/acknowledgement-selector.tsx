@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -112,6 +112,21 @@ export default function AcknowledgementSelectorScreen() {
           <View style={styles.textContainer}>
             <Text style={styles.cardTitle}>Logistics Delivery</Text>
             <Text style={styles.cardDesc}>Acknowledge package dispatches, verify seals, and record consignment receipt.</Text>
+          </View>
+          <Feather name="chevron-right" size={18} color="#94A3B8" />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.selectorCard}
+          activeOpacity={0.7}
+          onPress={() => router.push('/material-acknowledgement')}
+        >
+          <View style={[styles.iconContainer, { backgroundColor: '#FEF3C7' }]}>
+            <Feather name="truck" size={22} color="#D97706" />
+          </View>
+          <View style={styles.textContainer}>
+            <Text style={styles.cardTitle}>Vehicle Issues</Text>
+            <Text style={styles.cardDesc}>Acknowledge received materials and update vehicle stock balances.</Text>
           </View>
           <Feather name="chevron-right" size={18} color="#94A3B8" />
         </TouchableOpacity>

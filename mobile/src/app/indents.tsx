@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -44,7 +44,7 @@ const Icon = ({ name, size = 18, color = '#7A6D66' }: { name: string; size?: num
   if (name === 'search') {
     return (
       <View style={{ width: s, height: s, alignItems: 'center', justifyContent: 'center' }}>
-        <View style={{ width: s * 0.45, height: s * 0.45, borderRadius: (s * 0.45)/2, borderWidth: 2, borderColor: color, transform: [{ translateX: -s * 0.08 }, { translateY: -s * 0.08 }] }} />
+        <View style={{ width: s * 0.45, height: s * 0.45, borderRadius: (s * 0.45) / 2, borderWidth: 2, borderColor: color, transform: [{ translateX: -s * 0.08 }, { translateY: -s * 0.08 }] }} />
         <View style={{ position: 'absolute', width: s * 0.35, height: 2, backgroundColor: color, bottom: s * 0.15, right: s * 0.15, transform: [{ rotate: '45deg' }] }} />
       </View>
     );
@@ -81,16 +81,16 @@ const Icon = ({ name, size = 18, color = '#7A6D66' }: { name: string; size?: num
   }
   if (name === 'clock') {
     return (
-      <View style={{ width: s, height: s, borderRadius: s/2, borderWidth: 1.8, borderColor: color, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width: s, height: s, borderRadius: s / 2, borderWidth: 1.8, borderColor: color, alignItems: 'center', justifyContent: 'center' }}>
         <View style={{ width: 1.8, height: s * 0.35, backgroundColor: color }} />
-        <View style={{ position: 'absolute', width: s * 0.25, height: 1.8, backgroundColor: color, top: s/2, left: s/2 }} />
+        <View style={{ position: 'absolute', width: s * 0.25, height: 1.8, backgroundColor: color, top: s / 2, left: s / 2 }} />
       </View>
     );
   }
   if (name === 'user') {
     return (
       <View style={{ width: s, height: s, alignItems: 'center', justifyContent: 'center' }}>
-        <View style={{ width: s * 0.4, height: s * 0.4, borderRadius: (s * 0.4)/2, borderWidth: 1.8, borderColor: color }} />
+        <View style={{ width: s * 0.4, height: s * 0.4, borderRadius: (s * 0.4) / 2, borderWidth: 1.8, borderColor: color }} />
         <View style={{ width: s * 0.75, height: s * 0.25, borderTopLeftRadius: 5, borderTopRightRadius: 5, borderWidth: 1.8, borderColor: color, borderBottomWidth: 0, marginTop: 1 }} />
       </View>
     );
@@ -137,22 +137,36 @@ const DropdownSelect = ({
   onValueChange,
   items,
   placeholder = 'Select an option',
+  searchable = false,
 }: {
   label: string;
   value: string;
   onValueChange: (val: string) => void;
   items: { label: string; value: string }[];
   placeholder?: string;
+  searchable?: boolean;
 }) => {
   const [modalVisible, setModalVisible] = useState(false);
+  const [searchText, setSearchText] = useState('');
   const selectedItem = items.find((item) => item.value === value);
+
+  const filteredItems = searchable && searchText
+    ? items.filter((item) =>
+        item.label.toLowerCase().includes(searchText.toLowerCase())
+      )
+    : items;
+
+  const openModal = () => {
+    setSearchText('');
+    setModalVisible(true);
+  };
 
   return (
     <View style={{ marginBottom: 16 }}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TouchableOpacity
         style={styles.dropdownTrigger}
-        onPress={() => setModalVisible(true)}
+        onPress={openModal}
       >
         <Text style={[styles.dropdownTriggerText, !selectedItem && { color: '#94A3B8' }]}>
           {selectedItem ? selectedItem.label : placeholder}
@@ -181,9 +195,31 @@ const DropdownSelect = ({
                 <Text style={styles.dropdownCloseBtnText}>Close</Text>
               </TouchableOpacity>
             </View>
+
+            {/* Search bar — only shown when searchable=true */}
+            {searchable && (
+              <View style={{ paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 }}>
+                <TextInput
+                  style={styles.dropdownSearchInput}
+                  placeholder={`Search ${label.replace(' *', '').toLowerCase()}...`}
+                  placeholderTextColor="#94A3B8"
+                  value={searchText}
+                  onChangeText={setSearchText}
+                  autoCapitalize="none"
+                  autoFocus={false}
+                />
+              </View>
+            )}
+
             <FlatList
-              data={items}
+              data={filteredItems}
               keyExtractor={(item) => item.value}
+              style={{ maxHeight: 320 }}
+              ListEmptyComponent={
+                <View style={{ padding: 20, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 13, color: '#94A3B8' }}>No matches found</Text>
+                </View>
+              }
               renderItem={({ item }) => (
                 <TouchableOpacity
                   style={[
@@ -240,9 +276,12 @@ export default function IndentsScreen() {
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [uoms, setUoms] = useState<any[]>([]);
+  const [vehicles, setVehicles] = useState<any[]>([]);
 
   const [selectedWarehouse, setSelectedWarehouse] = useState<string>('');
   const [selectedProject, setSelectedProject] = useState<string>('');
+  const [selectedVehicleCode, setSelectedVehicleCode] = useState<string>('');
+  const [vehicleNumber, setVehicleNumber] = useState<string>('');
   const [requiredDate, setRequiredDate] = useState<string>('');
   const [isUrgent, setIsUrgent] = useState<boolean>(false);
   const [remarks, setRemarks] = useState<string>('');
@@ -346,7 +385,7 @@ export default function IndentsScreen() {
 
   const fetchLookups = async (apiBase: string, authToken: string) => {
     try {
-      const [whRes, projRes, uomRes] = await Promise.all([
+      const [whRes, projRes, uomRes, vehRes] = await Promise.all([
         axios.get(`${apiBase}/api/v1/masters/warehouses`, {
           headers: { Authorization: `Bearer ${authToken}` },
           params: { page_size: 200, is_active: true },
@@ -359,11 +398,16 @@ export default function IndentsScreen() {
           headers: { Authorization: `Bearer ${authToken}` },
           params: { page_size: 200 },
         }),
+        axios.get(`${apiBase}/api/v1/masters/vehicles`, {
+          headers: { Authorization: `Bearer ${authToken}` },
+          params: { page_size: 200, is_active: true },
+        }),
       ]);
 
       setWarehouses(whRes.data.items || whRes.data.data || whRes.data || []);
       setProjects(projRes.data.items || projRes.data.data || projRes.data || []);
       setUoms(uomRes.data.items || uomRes.data.data || uomRes.data || []);
+      setVehicles(vehRes.data.items || vehRes.data.data || vehRes.data || []);
     } catch (e) {
       console.error('Lookup load error:', e);
     }
@@ -489,12 +533,22 @@ export default function IndentsScreen() {
   };
 
   // ─── Create/Edit Form Logic ─────────────────────────────────────────────────
+  const handleVehicleCodeChange = (val: string) => {
+    setSelectedVehicleCode(val);
+    const matched = vehicles.find((v) => v.vehicle_code === val);
+    if (matched && matched.vehicle_number) {
+      setVehicleNumber(matched.vehicle_number);
+    }
+  };
+
   const openNewForm = () => {
     setFormIsNew(true);
     setFormIndentId(null);
     setSelectedWarehouse(warehouses.length === 1 ? warehouses[0].id.toString() : '');
     setSelectedProject(projects.length === 1 ? projects[0].id.toString() : '');
-    
+    setSelectedVehicleCode('');
+    setVehicleNumber('');
+
     // Default required date is 7 days from now (YYYY-MM-DD)
     const sevenDaysLater = new Date();
     sevenDaysLater.setDate(sevenDaysLater.getDate() + 7);
@@ -512,6 +566,8 @@ export default function IndentsScreen() {
     setFormIndentId(indent.id);
     setSelectedWarehouse(indent.warehouse_id?.toString() || '');
     setSelectedProject(indent.project_id?.toString() || '');
+    setSelectedVehicleCode(indent.vehicle_code || '');
+    setVehicleNumber(indent.vehicle_number || '');
     setRequiredDate(indent.required_date ? indent.required_date.split('T')[0] : '');
     setIsUrgent(indent.indent_type === 'urgent');
     setRemarks(indent.remarks || '');
@@ -592,10 +648,6 @@ export default function IndentsScreen() {
 
   // Save / Submit Indent
   const handleSaveForm = async (submitForApproval: boolean) => {
-    if (!selectedWarehouse) {
-      Alert.alert('Validation Error', 'Please select a destination warehouse.');
-      return;
-    }
     const validItems = formItems.filter((i) => i.item_id);
     if (validItems.length === 0) {
       Alert.alert('Validation Error', 'Please add at least one valid item.');
@@ -611,18 +663,19 @@ export default function IndentsScreen() {
       }
     }
 
-    // Validate required date format
-    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
-    if (!requiredDate || !dateRegex.test(requiredDate)) {
-      Alert.alert('Validation Error', 'Please enter a valid required date (YYYY-MM-DD).');
+    // Validate mandatory vehicle code
+    if (!selectedVehicleCode || !selectedVehicleCode.trim()) {
+      Alert.alert('Validation Error', 'Vehicle code is required.');
       return;
     }
 
     setFormLoading(true);
     try {
       const payload = {
-        warehouse_id: parseInt(selectedWarehouse),
+        warehouse_id: selectedWarehouse ? parseInt(selectedWarehouse) : null,
         project_id: selectedProject ? parseInt(selectedProject) : null,
+        vehicle_code: selectedVehicleCode,
+        vehicle_number: vehicleNumber || null,
         indent_type: isUrgent ? 'urgent' : 'regular',
         required_date: requiredDate,
         remarks: remarks || '',
@@ -768,6 +821,11 @@ export default function IndentsScreen() {
     value: uom.id.toString(),
   }));
 
+  const vehicleItems = vehicles.map((v: any) => ({
+    label: v.vehicle_number ? `${v.vehicle_code} (${v.vehicle_number})` : v.vehicle_code,
+    value: v.vehicle_code,
+  }));
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -901,6 +959,14 @@ export default function IndentsScreen() {
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Project</Text>
                   <Text style={styles.infoValue}>{selectedIndent.project_name || '-'}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Vehicle Code</Text>
+                  <Text style={styles.infoValue}>{selectedIndent.vehicle_code || '-'}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Vehicle Number</Text>
+                  <Text style={styles.infoValue}>{selectedIndent.vehicle_number || '-'}</Text>
                 </View>
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Required Date</Text>
@@ -1041,7 +1107,7 @@ export default function IndentsScreen() {
               <ScrollView contentContainerStyle={styles.modalScroll}>
                 {/* Warehouse Dropdown */}
                 <DropdownSelect
-                  label="Warehouse *"
+                  label="Warehouse"
                   value={selectedWarehouse}
                   onValueChange={setSelectedWarehouse}
                   items={warehouseItems}
@@ -1055,6 +1121,25 @@ export default function IndentsScreen() {
                   onValueChange={setSelectedProject}
                   items={projectItems}
                   placeholder="Select Associated Project"
+                />
+
+                {/* Vehicle Code Dropdown */}
+                <DropdownSelect
+                  label="Vehicle Code *"
+                  value={selectedVehicleCode}
+                  onValueChange={handleVehicleCodeChange}
+                  items={vehicleItems}
+                  placeholder="Search & Select Vehicle Code"
+                  searchable
+                />
+
+                {/* Vehicle Number Input */}
+                <Text style={styles.fieldLabel}>Vehicle Number</Text>
+                <TextInput
+                  style={styles.formInput}
+                  placeholder="Vehicle Registration Number"
+                  value={vehicleNumber}
+                  onChangeText={setVehicleNumber}
                 />
 
                 {/* Required Date */}
@@ -1705,6 +1790,16 @@ const styles = StyleSheet.create({
     color: '#7C3AED',
     fontWeight: 'bold',
     fontSize: 14,
+  },
+  dropdownSearchInput: {
+    height: 40,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 12,
+    fontSize: 13,
+    color: '#0F172A',
   },
   dropdownItemRow: {
     paddingVertical: 12,

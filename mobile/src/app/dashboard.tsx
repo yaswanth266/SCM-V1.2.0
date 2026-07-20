@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -278,6 +278,10 @@ export default function Dashboard() {
     ? (allowedKeys.includes('logistics') || allowedKeys.includes('logistics-dashboard'))
     : isSuperAdminOrAdmin;
 
+  const showMaterialIssues = allowedKeys.length > 0
+    ? (allowedKeys.includes('warehouse-material-issues') || allowedKeys.includes('warehouse'))
+    : (isSuperAdminOrAdmin || activeRole === 'store_keeper' || activeRole === 'storekeeper' || activeRole === 'warehouse_manager' || activeRole === 'field_staff');
+
   return (
     <View style={styles.homeContainer}>
       {/* ── App Bar ── */}
@@ -373,6 +377,75 @@ export default function Dashboard() {
                 </View>
                 <Feather name="chevron-right" size={18} color="#94A3B8" />
               </TouchableOpacity>
+            )}
+
+            {/* AP 104 Template Indents */}
+            {showIndents && (
+              <>
+                <TouchableOpacity
+                  style={styles.moduleCard}
+                  activeOpacity={0.7}
+                  onPress={() => router.push('/template-indents?type=consumables')}
+                >
+                  <View style={[styles.moduleIconContainer, { backgroundColor: '#EDE9FE' }]}>
+                    <Feather name="archive" size={20} color="#7C3AED" />
+                  </View>
+                  <View style={styles.moduleTextContainer}>
+                    <Text style={styles.moduleTitle}>AP 104 DP / Consumables</Text>
+                    <Text style={styles.moduleDesc}>Fixed template indents for consumables &amp; DP items.</Text>
+                  </View>
+                  <Feather name="chevron-right" size={18} color="#94A3B8" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.moduleCard}
+                  activeOpacity={0.7}
+                  onPress={() => router.push('/template-indents?type=install')}
+                >
+                  <View style={[styles.moduleIconContainer, { backgroundColor: '#CCFBF1' }]}>
+                    <Feather name="tool" size={20} color="#0F766E" />
+                  </View>
+                  <View style={styles.moduleTextContainer}>
+                    <Text style={styles.moduleTitle}>AP 104 DP Install</Text>
+                    <Text style={styles.moduleDesc}>Fixed template indents for installation materials.</Text>
+                  </View>
+                  <Feather name="chevron-right" size={18} color="#94A3B8" />
+                </TouchableOpacity>
+              </>
+            )}
+
+            {showMaterialIssues && (
+              <>
+                <TouchableOpacity
+                  style={styles.moduleCard}
+                  activeOpacity={0.7}
+                  onPress={() => router.push('/material-issues')}
+                >
+                  <View style={[styles.moduleIconContainer, { backgroundColor: '#FEE2E2' }]}>
+                    <Feather name="package" size={20} color="#DC2626" />
+                  </View>
+                  <View style={styles.moduleTextContainer}>
+                    <Text style={styles.moduleTitle}>Material Issues</Text>
+                    <Text style={styles.moduleDesc}>Raise and issue standard inventory materials.</Text>
+                  </View>
+                  <Feather name="chevron-right" size={18} color="#94A3B8" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.moduleCard}
+                  activeOpacity={0.7}
+                  onPress={() => router.push('/vehicle-issues')}
+                >
+                  <View style={[styles.moduleIconContainer, { backgroundColor: '#FEF3C7' }]}>
+                    <Feather name="truck" size={20} color="#D97706" />
+                  </View>
+                  <View style={styles.moduleTextContainer}>
+                    <Text style={styles.moduleTitle}>Vehicle Issues</Text>
+                    <Text style={styles.moduleDesc}>Dispatch materials assigned to vehicle inventory.</Text>
+                  </View>
+                  <Feather name="chevron-right" size={18} color="#94A3B8" />
+                </TouchableOpacity>
+              </>
             )}
 
              {showAcknowledgment && (
