@@ -1,10 +1,10 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Button, Card, Row, Col, Select, Input, Table, Tag, Typography, Space, message, Tooltip } from 'antd';
-import { SearchOutlined, DownloadOutlined } from '@ant-design/icons';
+import { SearchOutlined, DownloadOutlined, FilePdfOutlined } from '@ant-design/icons';
 import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
 import api from '../../config/api';
-import { formatCurrency, formatNumber, getErrorMessage, downloadExcel, formatDateTime } from '../../utils/helpers';
+import { formatCurrency, formatNumber, getErrorMessage, formatDateTime, exportVehicleStockToExcel, printVehicleStockToPDF } from '../../utils/helpers';
 
 const { Text } = Typography;
 
@@ -40,7 +40,7 @@ const VehicleStockBalance = () => {
     [filterVehicle, filterItem]
   );
 
-  const handleExport = async () => {
+  const handleExportExcel = async () => {
     try {
       const res = await api.get('/inventory/vehicle-stock-balance', {
         params: {
@@ -50,20 +50,25 @@ const VehicleStockBalance = () => {
         },
       });
       const data = res.data?.items || res.data || [];
-      const exportData = data.map((r) => ({
-        'Vehicle Code': r.vehicle_code,
-        'Vehicle Number': r.vehicle_number,
-        'Item Code': r.item_code,
-        'Item Name': r.item_name,
-        'Quantity': r.qty || 0,
-        'UOM': r.uom_name || '',
-        'Valuation Rate': r.valuation_rate || 0,
-        'Stock Value': (r.qty || 0) * (r.valuation_rate || 0),
-        'Serial / Asset Codes': r.serial_numbers ? r.serial_numbers.join(', ') : '',
-        'Last Updated At': formatDateTime(r.last_updated),
-      }));
-      downloadExcel(exportData, 'Vehicle_Stock_Balance');
-      message.success('Vehicle Stock Balance exported successfully');
+      exportVehicleStockToExcel(data);
+      message.success('Vehicle Stock Balance exported to Excel successfully');
+    } catch (err) {
+      message.error(getErrorMessage(err));
+    }
+  };
+
+  const handleExportPDF = async () => {
+    try {
+      const res = await api.get('/inventory/vehicle-stock-balance', {
+        params: {
+          page_size: 10000,
+          vehicle_code: filterVehicle || undefined,
+          search: filterItem || undefined,
+        },
+      });
+      const data = res.data?.items || res.data || [];
+      printVehicleStockToPDF(data);
+      message.success('Vehicle Stock Balance PDF report opened successfully');
     } catch (err) {
       message.error(getErrorMessage(err));
     }
@@ -184,16 +189,21 @@ const VehicleStockBalance = () => {
   return (
     <div style={{ padding: '24px' }}>
       <PageHeader title="Vehicle Stock Balance" subtitle="View and track materials currently stored in vehicles">
-        <Button type="primary" icon={<DownloadOutlined />} onClick={handleExport}>
-          Export to Excel
-        </Button>
+        <Space>
+          <Button type="primary" icon={<DownloadOutlined />} onClick={handleExportExcel}>
+            Export to Excel
+          </Button>
+          <Button type="primary" style={{ backgroundColor: '#0d9488', borderColor: '#0d9488' }} icon={<FilePdfOutlined />} onClick={handleExportPDF}>
+            Print / Export PDF
+          </Button>
+        </Space>
       </PageHeader>
 
       <DataTable
         key={refreshKey}
         columns={columns}
         fetchFunction={fetchRecords}
-        rowKey={(r) => `${r.vehicle_code}-${r.item_id || r.item_code}`}
+        rowKey={(r) => r.id}
         searchPlaceholder="Filter items..."
         exportFileName="vehicle_stock_balance"
         toolbar={toolbar}

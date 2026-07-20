@@ -539,7 +539,7 @@ async def get_stock_balances(
 @router.get("/vehicle-stock-balance")
 async def get_vehicle_stock_balance(
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=100),
+    page_size: int = Query(50, ge=1, le=10000),
     search: str = Query(None),
     vehicle_code: str = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -578,8 +578,25 @@ async def get_vehicle_stock_balance(
     result = await db.execute(query.offset(offset).limit(limit).order_by(VehicleStockBalance.id.desc()))
     records = result.scalars().all()
 
+    item_ids = [r.item_id for r in records if r.item_id]
+    valuation_rates_map = {}
+    if item_ids:
+        from app.models.stock import StockBalance
+        # Get the max valuation_rate for each item_id from StockBalance
+        val_res = await db.execute(
+            select(StockBalance.item_id, func.max(StockBalance.valuation_rate))
+            .where(StockBalance.item_id.in_(item_ids))
+            .group_by(StockBalance.item_id)
+        )
+        for row in val_res.all():
+            valuation_rates_map[row[0]] = float(row[1] or 0.0)
+
     data = []
     for r in records:
+        val_rate = valuation_rates_map.get(r.item_id)
+        if val_rate is None or val_rate == 0.0:
+            val_rate = float(r.item.purchase_price or 0.0) if r.item else 0.0
+
         data.append({
             "id": r.id,
             "vehicle_code": r.vehicle_code,
@@ -591,6 +608,7 @@ async def get_vehicle_stock_balance(
             "batch_id": r.batch_id,
             "batch_number": r.batch.batch_number if r.batch else None,
             "qty": float(r.qty),
+            "valuation_rate": val_rate,
             "serial_numbers": r.serial_numbers,
             "last_updated": r.last_updated.isoformat() if r.last_updated else None,
         })

@@ -985,3 +985,215 @@ export const printGlobalToPDF = (records, type) => {
   }, 300);
 };
 
+export const exportVehicleStockToExcel = (data) => {
+  if (!data || data.length === 0) return;
+
+  // Group data by vehicle
+  const grouped = {};
+  data.forEach((r) => {
+    const key = `${r.vehicle_code} (${r.vehicle_number || '-'})`;
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    grouped[key].push(r);
+  });
+
+  let html = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+      <meta charset="utf-8">
+      <style>
+        .title { background-color: #1e3a8a; color: #ffffff; font-weight: bold; font-size: 16px; text-align: center; height: 40px; border: 1px solid #cbd5e1; }
+        .vehicle-header { background-color: #2563eb; color: #ffffff; font-weight: bold; font-size: 13px; border: 1px solid #cbd5e1; height: 32px; }
+        .item-th { background-color: #0d9488; color: #ffffff; font-weight: bold; border: 1px solid #cbd5e1; }
+        .item-row { background-color: #f0fdfa; color: #0f766e; border: 1px solid #cbd5e1; font-weight: bold; }
+        .serial-row { background-color: #fef9c3; color: #b45309; font-family: monospace; border: 1px solid #cbd5e1; }
+        .section-divider { background-color: #ffffff; height: 15px; }
+        td, th { padding: 8px; text-align: left; vertical-align: middle; }
+        .text-right { text-align: right; }
+      </style>
+    </head>
+    <body>
+      <table>
+        <tr>
+          <th colspan="8" class="title">VEHICLE STOCK BALANCE EXPORT</th>
+        </tr>
+  `;
+
+  Object.entries(grouped).forEach(([vehicleInfo, items], vIdx) => {
+    html += `
+      <tr class="section-divider"><td colspan="8"></td></tr>
+      <tr>
+        <th colspan="8" class="vehicle-header">VEHICLE: ${vehicleInfo}</th>
+      </tr>
+      <tr>
+        <th class="item-th" style="width: 5%;">#</th>
+        <th class="item-th" style="width: 15%;">Item Code</th>
+        <th class="item-th" style="width: 25%;">Item Name</th>
+        <th class="item-th" style="width: 10%;">UOM</th>
+        <th class="item-th" style="width: 10%; text-align: right;">Quantity</th>
+        <th class="item-th" style="width: 12%; text-align: right;">Valuation Rate</th>
+        <th class="item-th" style="width: 13%; text-align: right;">Stock Value</th>
+        <th class="item-th" style="width: 10%;">Last Updated</th>
+      </tr>
+    `;
+
+    items.forEach((item, idx) => {
+      const qty = Number(item.qty || 0);
+      const rate = Number(item.valuation_rate || 0);
+      const value = qty * rate;
+      const lastUpdatedStr = formatDateTime(item.last_updated);
+
+      html += `
+        <tr class="item-row">
+          <td>${idx + 1}</td>
+          <td>${item.item_code || '-'}</td>
+          <td>${item.item_name || '-'}</td>
+          <td>${item.uom_name || '-'}</td>
+          <td class="text-right">${formatNumber(qty)}</td>
+          <td class="text-right">${formatCurrency(rate)}</td>
+          <td class="text-right">${formatCurrency(value)}</td>
+          <td>${lastUpdatedStr}</td>
+        </tr>
+      `;
+
+      const serials = item.serial_numbers || [];
+      if (serials.length > 0) {
+        html += `
+          <tr class="serial-row">
+            <td></td>
+            <td style="color: #b45309; font-weight: bold;">[Asset/Consumable Codes]</td>
+            <td colspan="6" style="font-family: monospace;">${serials.join(', ')}</td>
+          </tr>
+        `;
+      }
+    });
+  });
+
+  html += `
+      </table>
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `Vehicle_Stock_Balance_${dayjs().format('YYYYMMDD_HHmmss')}.xls`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+export const printVehicleStockToPDF = (data) => {
+  if (!data || data.length === 0) return;
+
+  // Group data by vehicle
+  const grouped = {};
+  data.forEach((r) => {
+    const key = `${r.vehicle_code} (${r.vehicle_number || '-'})`;
+    if (!grouped[key]) {
+      grouped[key] = [];
+    }
+    grouped[key].push(r);
+  });
+
+  let title = 'Vehicle Stock Balance Report';
+  let bodyHTML = '';
+
+  Object.entries(grouped).forEach(([vehicleInfo, items], recIdx) => {
+    let itemsHTML = '';
+    items.forEach((item, idx) => {
+      const qty = Number(item.qty || 0);
+      const rate = Number(item.valuation_rate || 0);
+      const value = qty * rate;
+      const lastUpdatedStr = formatDateTime(item.last_updated);
+
+      itemsHTML += `
+        <tr class="item-row">
+          <td>${idx + 1}</td>
+          <td>${item.item_code || '-'}</td>
+          <td>${item.item_name || '-'}</td>
+          <td>${item.uom_name || '-'}</td>
+          <td class="text-right">${formatNumber(qty)}</td>
+          <td class="text-right">${formatCurrency(rate)}</td>
+          <td class="text-right">${formatCurrency(value)}</td>
+          <td>${lastUpdatedStr}</td>
+        </tr>
+      `;
+
+      const serials = item.serial_numbers || [];
+      if (serials.length > 0) {
+        itemsHTML += `
+          <tr class="serial-row">
+            <td></td>
+            <td class="serial-label">[Asset/Consumable Codes]</td>
+            <td colspan="6" style="font-family: monospace;">${serials.join(', ')}</td>
+          </tr>
+        `;
+      }
+    });
+
+    bodyHTML += `
+      <div class="record-section" style="${recIdx > 0 ? 'page-break-before: always;' : ''}">
+        <div class="vehicle-header-title">VEHICLE: ${vehicleInfo}</div>
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th style="width: 5%">#</th>
+              <th style="width: 15%">Item Code</th>
+              <th style="width: 25%">Item Name</th>
+              <th style="width: 10%">UOM</th>
+              <th style="width: 10%" class="text-right">Quantity</th>
+              <th style="width: 12%" class="text-right">Valuation Rate</th>
+              <th style="width: 13%" class="text-right">Stock Value</th>
+              <th style="width: 10%">Last Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHTML}
+          </tbody>
+        </table>
+      </div>
+    `;
+  });
+
+  const printWindow = window.open('', '_blank');
+  printWindow.document.write(`
+    <html>
+      <head>
+        <title>${title}</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; padding: 25px; color: #1e293b; }
+          .page-title { text-align: center; color: #1e3a8a; font-size: 20px; font-weight: bold; margin-bottom: 25px; text-transform: uppercase; border-bottom: 3px solid #1e3a8a; padding-bottom: 12px; }
+          .vehicle-header-title { font-size: 14px; font-weight: bold; color: #ffffff; background-color: #2563eb; padding: 8px 12px; margin-top: 20px; margin-bottom: 10px; border-radius: 4px; }
+          .items-table { width: 100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 30px; }
+          .items-table th { background-color: #0d9488; color: white; padding: 8px 10px; border: 1px solid #cbd5e1; text-align: left; font-weight: bold; font-size: 12px; }
+          .items-table td { padding: 7px 10px; border: 1px solid #cbd5e1; font-size: 12px; }
+          .item-row { background-color: #f0fdfa; color: #0f766e; font-weight: bold; }
+          .serial-row { background-color: #fef9c3; color: #854d0e; font-size: 11px; }
+          .serial-label { color: #b45309; font-weight: bold; }
+          .text-right { text-align: right; }
+          .no-print-btn { background-color: #1e3a8a; color: white; padding: 10px 20px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-bottom: 25px; font-size: 13px; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+          .no-print-btn:hover { background-color: #1d4ed8; }
+          @media print {
+            .no-print-btn { display: none; }
+            body { padding: 10px; }
+          }
+        </style>
+      </head>
+      <body>
+        <button class="no-print-btn" onclick="window.print()">Print / Save as PDF</button>
+        <div class="page-title">${title}</div>
+        ${bodyHTML}
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  setTimeout(() => {
+    printWindow.focus();
+  }, 300);
+};
+
+
