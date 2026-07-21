@@ -331,6 +331,8 @@ class MaterialIssueCreate(BaseModel):
     vehicle_number: Optional[str] = None
     service_code: Optional[str] = None
     template_type: Optional[str] = None
+    template_id: Optional[int] = None
+    template_name: Optional[str] = None
     project_id: Optional[int] = None
     items: List[MaterialIssueItemCreate]
 
@@ -365,6 +367,8 @@ class MaterialIssueUpdate(BaseModel):
     vehicle_number: Optional[str] = None
     service_code: Optional[str] = None
     template_type: Optional[str] = None
+    template_id: Optional[int] = None
+    template_name: Optional[str] = None
     project_id: Optional[int] = None
     items: Optional[List[MaterialIssueItemCreate]] = None
 
@@ -977,6 +981,9 @@ class VehicleIssueCreate(BaseModel):
     issued_to: Optional[int] = None
     remarks: Optional[str] = None
     project_id: Optional[int] = None
+    template_type: Optional[str] = None
+    template_id: Optional[int] = None
+    template_name: Optional[str] = None
     items: List[VehicleIssueItemCreate]
 
     @field_validator("items")
@@ -1007,6 +1014,9 @@ class VehicleIssueUpdate(BaseModel):
     issued_to: Optional[int] = None
     remarks: Optional[str] = None
     project_id: Optional[int] = None
+    template_type: Optional[str] = None
+    template_id: Optional[int] = None
+    template_name: Optional[str] = None
     items: Optional[List[VehicleIssueItemCreate]] = None
 
     @field_validator("issue_date")

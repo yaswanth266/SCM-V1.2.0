@@ -23,6 +23,8 @@ class MaterialIssue(Base):
     vehicle_number = Column(String(50), nullable=True)
     service_code = Column(String(50), nullable=True)
     template_type = Column(String(50), nullable=True)
+    template_id = Column(BigInteger, ForeignKey("project_indent_templates.id"), nullable=True)
+    template_name = Column(String(100), nullable=True)
     project_id = Column(BigInteger, ForeignKey("projects.id"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     # Wave 5 — needed for ordering / "last edited" UX (BUG-ISS-014).
@@ -124,6 +126,9 @@ class VehicleIssue(Base):
     remarks = Column(Text)
     issued_by = Column(BigInteger, ForeignKey("users.id"))
     project_id = Column(BigInteger, ForeignKey("projects.id"), nullable=True)
+    template_type = Column(String(50), nullable=True)
+    template_id = Column(BigInteger, ForeignKey("project_indent_templates.id"), nullable=True)
+    template_name = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

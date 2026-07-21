@@ -1851,15 +1851,18 @@ class ProjectIndentTemplateItemResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 class ProjectIndentTemplateCreate(BaseModel):
+    id: Optional[int] = None
     project_id: int
-    template_type: str  # consumables, install
+    template_name: str
+    template_type: Optional[str] = "dp_project"
     items: List[ProjectIndentTemplateItemCreate]
 
 class ProjectIndentTemplateResponse(BaseModel):
     id: int
     project_id: int
     project_name: Optional[str] = None
-    template_type: str
+    template_name: Optional[str] = None
+    template_type: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     items: List[ProjectIndentTemplateItemResponse] = []

@@ -372,46 +372,29 @@ export default function Dashboard() {
                   <Feather name="file-text" size={20} color="#481890" />
                 </View>
                 <View style={styles.moduleTextContainer}>
-                  <Text style={styles.moduleTitle}>Field Indents</Text>
+                  <Text style={styles.moduleTitle}>Indents</Text>
                   <Text style={styles.moduleDesc}>Create and track material indents for your location.</Text>
                 </View>
                 <Feather name="chevron-right" size={18} color="#94A3B8" />
               </TouchableOpacity>
             )}
 
-            {/* AP 104 Template Indents */}
+            {/* Template Indents */}
             {showIndents && (
-              <>
-                <TouchableOpacity
-                  style={styles.moduleCard}
-                  activeOpacity={0.7}
-                  onPress={() => router.push('/template-indents?type=consumables')}
-                >
-                  <View style={[styles.moduleIconContainer, { backgroundColor: '#EDE9FE' }]}>
-                    <Feather name="archive" size={20} color="#7C3AED" />
-                  </View>
-                  <View style={styles.moduleTextContainer}>
-                    <Text style={styles.moduleTitle}>AP 104 DP / Consumables</Text>
-                    <Text style={styles.moduleDesc}>Fixed template indents for consumables &amp; DP items.</Text>
-                  </View>
-                  <Feather name="chevron-right" size={18} color="#94A3B8" />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.moduleCard}
-                  activeOpacity={0.7}
-                  onPress={() => router.push('/template-indents?type=install')}
-                >
-                  <View style={[styles.moduleIconContainer, { backgroundColor: '#CCFBF1' }]}>
-                    <Feather name="tool" size={20} color="#0F766E" />
-                  </View>
-                  <View style={styles.moduleTextContainer}>
-                    <Text style={styles.moduleTitle}>AP 104 DP Install</Text>
-                    <Text style={styles.moduleDesc}>Fixed template indents for installation materials.</Text>
-                  </View>
-                  <Feather name="chevron-right" size={18} color="#94A3B8" />
-                </TouchableOpacity>
-              </>
+              <TouchableOpacity
+                style={styles.moduleCard}
+                activeOpacity={0.7}
+                onPress={() => router.push('/template-indents')}
+              >
+                <View style={[styles.moduleIconContainer, { backgroundColor: '#EDE9FE' }]}>
+                  <Feather name="archive" size={20} color="#7C3AED" />
+                </View>
+                <View style={styles.moduleTextContainer}>
+                  <Text style={styles.moduleTitle}>Template Indents</Text>
+                  <Text style={styles.moduleDesc}>Master template-based fixed indents for DP projects.</Text>
+                </View>
+                <Feather name="chevron-right" size={18} color="#94A3B8" />
+              </TouchableOpacity>
             )}
 
             {showMaterialIssues && (

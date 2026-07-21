@@ -82,6 +82,39 @@ async def create_vehicle_issue(
                     detail=f"Batch {b.batch_number} belongs to warehouse {b.warehouse_id}, not {payload.warehouse_id}"
                 )
 
+    # Determine template_id / template_name
+    tmpl_id = getattr(payload, "template_id", None)
+    tmpl_name = getattr(payload, "template_name", None)
+    tmpl_type = getattr(payload, "template_type", None)
+
+    if not tmpl_id and payload.indent_id:
+        ind_r = await db.execute(select(Indent).where(Indent.id == payload.indent_id))
+        ind_obj = ind_r.scalar_one_or_none()
+        if ind_obj:
+            tmpl_id = getattr(ind_obj, "template_id", None)
+            tmpl_name = getattr(ind_obj, "template_name", None) or getattr(ind_obj, "template_type", None)
+            tmpl_type = getattr(ind_obj, "template_type", None)
+
+    # ─── STRICT DUPLICATE TEMPLATE ISSUE VALIDATION FOR VEHICLE ──────────────
+    if tmpl_id or tmpl_name:
+        dup_q = select(VehicleIssue).where(
+            VehicleIssue.vehicle_code == payload.vehicle_code,
+            VehicleIssue.vehicle_number == payload.vehicle_number,
+            VehicleIssue.status != "cancelled",
+        )
+        if tmpl_id:
+            dup_q = dup_q.where(VehicleIssue.template_id == tmpl_id)
+        elif tmpl_name:
+            dup_q = dup_q.where(VehicleIssue.template_name == tmpl_name)
+
+        dup_res = await db.execute(dup_q)
+        if dup_res.scalar_one_or_none():
+            display_name = tmpl_name or f"Template #{tmpl_id}"
+            raise HTTPException(
+                status_code=400,
+                detail=f"Template '{display_name}' has already been issued to vehicle '{payload.vehicle_code} ({payload.vehicle_number})'! Duplicate template issues to the same vehicle are strictly prohibited."
+            )
+
     # Generate issue number
     issue_number = await generate_number(db, "warehouse", "vehicle_issue")
 
@@ -98,6 +131,9 @@ async def create_vehicle_issue(
         remarks=payload.remarks,
         issued_by=current_user.id,
         project_id=payload.project_id,
+        template_id=tmpl_id,
+        template_name=tmpl_name,
+        template_type=tmpl_type or "dp_project",
     )
     db.add(vi)
     await db.flush()

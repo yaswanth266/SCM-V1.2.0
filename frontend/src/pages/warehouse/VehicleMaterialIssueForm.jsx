@@ -56,6 +56,7 @@ const VehicleMaterialIssueForm = () => {
   const [itemStockDetails, setItemStockDetails] = useState({});
   const [isCentralWarehouse, setIsCentralWarehouse] = useState(true);
   const [associatedAck, setAssociatedAck] = useState(null);
+  const [isTemplateIndent, setIsTemplateIndent] = useState(false);
 
   // Modals state
   const [activeRowKey, setActiveRowKey] = useState(null);
@@ -359,11 +360,17 @@ const VehicleMaterialIssueForm = () => {
   }, []);
 
   const prefillFromIndent = useCallback(async (indentId) => {
-    if (!indentId) return;
+    if (!indentId) {
+      setIsTemplateIndent(false);
+      return;
+    }
     try {
       const res = await api.get(`/indent/indents/${indentId}`);
       const ind = res.data;
       if (!ind) return;
+
+      const isTempl = Boolean(ind.template_id || ind.template_name || ind.template_type || location.pathname.includes('/template'));
+      setIsTemplateIndent(isTempl);
 
       let sourceWarehouseId = user?.warehouse_id ? Number(user.warehouse_id) : ind.warehouse_id;
 
@@ -416,6 +423,8 @@ const VehicleMaterialIssueForm = () => {
       const res = await api.get(`/warehouse/vehicle-issues/${id}`);
       const data = res.data;
       setRecordData(data);
+      const isTempl = Boolean(data.template_id || data.template_name || data.template_type || location.pathname.includes('/template'));
+      setIsTemplateIndent(isTempl);
       form.setFieldsValue({
         warehouse_id: data.warehouse_id,
         indent_id: data.indent_id,
@@ -1128,9 +1137,9 @@ const VehicleMaterialIssueForm = () => {
       dataIndex: 'qty',
       width: 120,
       render: (val, record) => {
-        const disabled = !record.item_id;
+        const disabled = !record.item_id || isTemplateIndent;
         return (
-          <Tooltip title={disabled ? 'Select an item first' : ''}>
+          <Tooltip title={disabled ? (isTemplateIndent ? 'Quantity is fixed for template indents' : 'Select an item first') : ''}>
             <InputNumber
               min={0}
               value={val}
@@ -1541,7 +1550,7 @@ const VehicleMaterialIssueForm = () => {
       title: '',
       width: 35,
       render: (_, record) =>
-        issueItems.length > 1 ? (
+        issueItems.length > 1 && !isTemplateIndent ? (
           <MinusCircleOutlined
             style={{ color: '#ff4d4f', cursor: 'pointer' }}
             onClick={() => removeItemRow(record.key)}
@@ -1775,7 +1784,7 @@ const VehicleMaterialIssueForm = () => {
           <Card
             title="Items Grid"
             extra={
-              editMode && (
+              editMode && !isTemplateIndent && (
                 <ItemSelector
                   onSelect={handleItemSelect}
                   triggerButton={

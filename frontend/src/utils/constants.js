@@ -232,8 +232,7 @@ export const MENU_CONFIG = [
       { key: 'warehouse-purchase-returns', label: 'Purchase Returns', path: '/warehouse/purchase-returns' },
       { key: 'warehouse-material-issues', label: 'Material Issues', path: '/warehouse/material-issues' },
       { key: 'warehouse-vehicle-material-issues', label: 'Vehicle Material Issues', path: '/warehouse/vehicle-material-issues' },
-      { key: 'warehouse-material-issues-ap104-consumables', label: 'AP 104 DP / Consumables', path: '/warehouse/material-issues/ap104-consumables' },
-      { key: 'warehouse-material-issues-ap104-install', label: 'AP 104 DP Install', path: '/warehouse/material-issues/ap104-install' },
+      { key: 'warehouse-material-issues-template', label: 'Template Material Issues', path: '/warehouse/material-issues/template' },
     ],
   },
   {
@@ -261,8 +260,7 @@ export const MENU_CONFIG = [
       { key: 'inventory-stock-transfer', label: 'Stock Transfer', path: '/inventory/stock-transfer' },
       { key: 'inventory-stock-audit', label: 'Stock Audit', path: '/inventory/stock-audit' },
       { key: 'inventory-replenishment', label: 'Replenishment', path: '/inventory/replenishment' },
-      { key: 'inventory-masters-ap104-consumables', label: 'AP 104 DP / Consumables Master', path: '/inventory/masters/ap104-consumables' },
-      { key: 'inventory-masters-ap104-install', label: 'AP 104 DP Install Master', path: '/inventory/masters/ap104-install' },
+      { key: 'inventory-masters-project-templates', label: 'Template Master for DP Project', path: '/inventory/masters/project-templates' },
     ],
   },
   {
@@ -271,8 +269,7 @@ export const MENU_CONFIG = [
     icon: 'FileTextOutlined',
     children: [
       { key: 'indent-indents', label: 'Indents', path: '/indent/indents' },
-      { key: 'indent-ap104-consumables', label: 'AP 104 DP / Consumables', path: '/indent/ap104-consumables' },
-      { key: 'indent-ap104-install', label: 'AP 104 DP Install', path: '/indent/ap104-install' },
+      { key: 'indent-template-indents', label: 'Template Indents', path: '/indent/template-indents' },
       { key: 'indent-acknowledgement', label: 'Acknowledgement', path: '/indent/acknowledgement' },
       { key: 'indent-material-acknowledgement', label: 'Material Acknowledgement', path: '/indent/material-acknowledgement' },
     ],

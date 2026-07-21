@@ -26,6 +26,8 @@ class Indent(Base):
     vehicle_number = Column(String(50), nullable=True)
     service_code = Column(String(50), nullable=True)
     template_type = Column(String(50), nullable=True)
+    template_id = Column(BigInteger, ForeignKey("project_indent_templates.id"), nullable=True)
+    template_name = Column(String(100), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

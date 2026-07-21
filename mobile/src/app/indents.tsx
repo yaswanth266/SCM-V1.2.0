@@ -292,6 +292,7 @@ export default function IndentsScreen() {
   const [itemSearchResults, setItemSearchResults] = useState<any[]>([]);
   const [itemSearchLoading, setItemSearchLoading] = useState<boolean>(false);
   const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null);
+  const [itemPickerVisible, setItemPickerVisible] = useState<boolean>(false);
 
   // App Approvals Overrides
   const [approveOverrides, setApproveOverrides] = useState<any>({});
@@ -608,19 +609,15 @@ export default function IndentsScreen() {
   };
 
   // Item Search Fetch
-  const handleItemSearch = async (text: string, index: number) => {
+  const handleItemSearch = async (text: string, index?: number) => {
     setItemSearchText(text);
-    setActiveItemIndex(index);
-    if (!text || text.length < 2) {
-      setItemSearchResults([]);
-      return;
-    }
+    if (index !== undefined) setActiveItemIndex(index);
 
     setItemSearchLoading(true);
     try {
       const response = await axios.get(`${API_BASE_URL}/api/v1/masters/items`, {
         headers: { Authorization: `Bearer ${token}` },
-        params: { search: text, page_size: 20, is_active: true, transactable: true },
+        params: { search: text || undefined, page_size: 30, is_active: true, transactable: true },
       });
       const data = response.data.items || response.data.data || response.data || [];
       setItemSearchResults(data);
@@ -631,19 +628,30 @@ export default function IndentsScreen() {
     }
   };
 
+  const openItemPickerModal = (index: number) => {
+    setActiveItemIndex(index);
+    setItemSearchText('');
+    setItemSearchResults([]);
+    setItemPickerVisible(true);
+    handleItemSearch('', index);
+  };
+
   const handleSelectItem = (item: any, index: number) => {
     const updated = [...formItems];
+    const uomId = item.primary_uom_id?.toString() || item.uom_id?.toString() || '';
+    const uomObj = uoms.find((u: any) => u.id.toString() === uomId);
     updated[index] = {
       ...updated[index],
       item_id: item.id.toString(),
       item_name: `[${item.item_code || item.code}] ${item.name || item.item_name}`,
-      uom_id: item.primary_uom_id?.toString() || '',
-      uom_name: item.primary_uom?.name || item.primary_uom_name || '',
+      uom_id: uomId,
+      uom_name: uomObj?.name || item.primary_uom?.name || item.primary_uom_name || '',
     };
     setFormItems(updated);
     setItemSearchResults([]);
     setActiveItemIndex(null);
     setItemSearchText('');
+    setItemPickerVisible(false);
   };
 
   // Save / Submit Indent
@@ -842,7 +850,7 @@ export default function IndentsScreen() {
           >
             <Icon name="arrow-left" size={20} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Field Indents</Text>
+          <Text style={styles.headerTitle}>Indents</Text>
           <TouchableOpacity style={styles.headerButton} onPress={openNewForm}>
             <Icon name="plus" size={20} color="#FFFFFF" />
           </TouchableOpacity>
@@ -864,14 +872,23 @@ export default function IndentsScreen() {
       {/* Tabs */}
       <View style={styles.tabContainer}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabScroll}>
-          {['all', 'draft', 'pending_approval', 'approved', 'rejected'].map((tab) => (
+          {[
+            { key: 'all', label: 'ALL' },
+            { key: 'draft', label: 'DRAFT' },
+            { key: 'pending_approval', label: 'PENDING' },
+            { key: 'approved', label: 'APPROVED' },
+            { key: 'partially_fulfilled', label: 'PARTIAL' },
+            { key: 'fulfilled', label: 'FULFILLED' },
+            { key: 'rejected', label: 'REJECTED' },
+            { key: 'cancelled', label: 'CANCELLED' },
+          ].map((t) => (
             <TouchableOpacity
-              key={tab}
-              style={[styles.tab, activeTab === tab && styles.tabActive]}
-              onPress={() => handleTabChange(tab)}
+              key={t.key}
+              style={[styles.tab, activeTab === t.key && styles.tabActive]}
+              onPress={() => handleTabChange(t.key)}
             >
-              <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
-                {tab.replace(/_/g, ' ').toUpperCase()}
+              <Text style={[styles.tabText, activeTab === t.key && styles.tabTextActive]}>
+                {t.label}
               </Text>
             </TouchableOpacity>
           ))}
@@ -890,7 +907,7 @@ export default function IndentsScreen() {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         >
           <Icon name="package" size={48} color="#CBD5E1" />
-          <Text style={styles.emptyText}>No field indents found</Text>
+          <Text style={styles.emptyText}>No indents found</Text>
           <TouchableOpacity style={styles.emptyButton} onPress={openNewForm}>
             <Text style={styles.emptyButtonText}>Raise First Indent</Text>
           </TouchableOpacity>
@@ -1181,43 +1198,15 @@ export default function IndentsScreen() {
                     <View style={styles.formItemRow}>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.fieldLabel}>Item Search *</Text>
-                        <View style={{ position: 'relative', zIndex: 999 }}>
-                          <TextInput
-                            style={styles.formInput}
-                            placeholder="Type item name..."
-                            value={item.item_id ? item.item_name : itemSearchText && activeItemIndex === index ? itemSearchText : ''}
-                            onChangeText={(text) => {
-                              if (item.item_id) {
-                                // Reset item if editing text
-                                const updated = [...formItems];
-                                updated[index] = { ...updated[index], item_id: '', item_name: '' };
-                                setFormItems(updated);
-                              }
-                              handleItemSearch(text, index);
-                            }}
-                          />
-
-                          {/* Search results dropdown overlay */}
-                          {activeItemIndex === index && itemSearchResults.length > 0 && (
-                            <View style={styles.searchResultsDropdown}>
-                              {itemSearchLoading ? (
-                                <ActivityIndicator style={{ padding: 8 }} />
-                              ) : (
-                                itemSearchResults.map((res) => (
-                                  <TouchableOpacity
-                                    key={res.id}
-                                    style={styles.searchResultRow}
-                                    onPress={() => handleSelectItem(res, index)}
-                                  >
-                                    <Text style={styles.searchResultText}>
-                                      [{res.item_code || res.code}] {res.name || res.item_name}
-                                    </Text>
-                                  </TouchableOpacity>
-                                ))
-                              )}
-                            </View>
-                          )}
-                        </View>
+                        <TouchableOpacity
+                          style={styles.dropdownTrigger}
+                          onPress={() => openItemPickerModal(index)}
+                        >
+                          <Text style={[styles.dropdownTriggerText, !item.item_id && { color: '#94A3B8' }]} numberOfLines={1}>
+                            {item.item_name || 'Tap to search & select item...'}
+                          </Text>
+                          <Icon name="chevron-right" size={16} color="#94A3B8" />
+                        </TouchableOpacity>
                       </View>
                     </View>
 
@@ -1275,6 +1264,81 @@ export default function IndentsScreen() {
             )}
           </KeyboardAvoidingView>
         </SafeAreaView>
+      </Modal>
+
+      {/* ─── Item Search Picker Modal ─── */}
+      <Modal
+        visible={itemPickerVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setItemPickerVisible(false)}
+      >
+        <TouchableOpacity
+          style={styles.dropdownModalBg}
+          activeOpacity={1}
+          onPress={() => setItemPickerVisible(false)}
+        >
+          <TouchableOpacity
+            style={[styles.dropdownModalContent, { maxHeight: '80%' }]}
+            activeOpacity={1}
+          >
+            <View style={styles.dropdownModalHeader}>
+              <Text style={styles.dropdownModalTitle}>Select Master Item</Text>
+              <TouchableOpacity onPress={() => setItemPickerVisible(false)} style={styles.dropdownCloseBtn}>
+                <Text style={styles.dropdownCloseBtnText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ paddingHorizontal: 12, paddingTop: 10, paddingBottom: 6 }}>
+              <TextInput
+                style={styles.dropdownSearchInput}
+                placeholder="Search by item code or name..."
+                placeholderTextColor="#94A3B8"
+                value={itemSearchText}
+                onChangeText={(text) => handleItemSearch(text)}
+                autoCapitalize="none"
+                autoFocus
+              />
+            </View>
+
+            {itemSearchLoading ? (
+              <View style={{ padding: 24, alignItems: 'center' }}>
+                <ActivityIndicator color="#4A1060" />
+                <Text style={{ fontSize: 12, color: '#64748B', marginTop: 6 }}>Searching items...</Text>
+              </View>
+            ) : (
+              <FlatList
+                data={itemSearchResults}
+                keyExtractor={(item) => item.id.toString()}
+                style={{ maxHeight: 340 }}
+                ListEmptyComponent={
+                  <View style={{ padding: 24, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 13, color: '#94A3B8' }}>No items found</Text>
+                  </View>
+                }
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.dropdownItemRow}
+                    onPress={() => {
+                      if (activeItemIndex !== null) {
+                        handleSelectItem(item, activeItemIndex);
+                      }
+                    }}
+                  >
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.dropdownItemText}>
+                        [{item.item_code || item.code}] {item.name || item.item_name}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#64748B', marginTop: 2 }}>
+                        UOM: {item.primary_uom?.name || item.primary_uom_name || '-'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
       </Modal>
     </SafeAreaView>
   );

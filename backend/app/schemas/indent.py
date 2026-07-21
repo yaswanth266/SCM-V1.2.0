@@ -32,6 +32,8 @@ class IndentCreate(BaseModel):
     vehicle_number: Optional[str] = None
     service_code: Optional[str] = None
     template_type: Optional[str] = None
+    template_id: Optional[int] = None
+    template_name: Optional[str] = None
 
     @field_validator("vehicle_code")
     @classmethod
@@ -107,6 +109,8 @@ class IndentUpdate(BaseModel):
     vehicle_number: Optional[str] = None
     service_code: Optional[str] = None
     template_type: Optional[str] = None
+    template_id: Optional[int] = None
+    template_name: Optional[str] = None
     # When provided, replaces all existing items on the indent. Only allowed
 
     # while the indent is still in draft status (handler enforces).
@@ -161,6 +165,8 @@ class IndentResponse(BaseModel):
     vehicle_number: Optional[str] = None
     service_code: Optional[str] = None
     template_type: Optional[str] = None
+    template_id: Optional[int] = None
+    template_name: Optional[str] = None
     position_id: Optional[int] = None
 
     position_name: Optional[str] = None

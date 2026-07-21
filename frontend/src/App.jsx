@@ -508,12 +508,9 @@ const App = () => {
             <Route path="/warehouse/vehicle-material-issues" element={<KeyRoute requiredKey="warehouse-material-issues"><VehicleMaterialIssues /></KeyRoute>} />
             <Route path="/warehouse/vehicle-material-issues/new" element={<KeyRoute requiredKey="warehouse-material-issues"><VehicleMaterialIssueForm /></KeyRoute>} />
             <Route path="/warehouse/vehicle-material-issues/:id" element={<KeyRoute requiredKey="warehouse-material-issues"><VehicleMaterialIssueForm /></KeyRoute>} />
-            <Route path="/warehouse/material-issues/ap104-consumables" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-consumables"><TemplateMaterialIssueList templateType="consumables" title="AP 104 DP / Consumables Issues" /></KeyRoute>} />
-            <Route path="/warehouse/material-issues/ap104-consumables/new" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-consumables"><MaterialIssueForm templateType="consumables" title="Create AP 104 DP / Consumables Material Issue" /></KeyRoute>} />
-            <Route path="/warehouse/material-issues/ap104-consumables/:id" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-consumables"><MaterialIssueForm templateType="consumables" title="AP 104 DP / Consumables Material Issue" /></KeyRoute>} />
-            <Route path="/warehouse/material-issues/ap104-install" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-install"><TemplateMaterialIssueList templateType="install" title="AP 104 DP Install Issues" /></KeyRoute>} />
-            <Route path="/warehouse/material-issues/ap104-install/new" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-install"><MaterialIssueForm templateType="install" title="Create AP 104 DP Install Material Issue" /></KeyRoute>} />
-            <Route path="/warehouse/material-issues/ap104-install/:id" element={<KeyRoute requiredKey="warehouse-material-issues-ap104-install"><MaterialIssueForm templateType="install" title="AP 104 DP Install Material Issue" /></KeyRoute>} />
+            <Route path="/warehouse/material-issues/template" element={<KeyRoute requiredKey="warehouse-material-issues"><TemplateMaterialIssueList title="Template Material Issues" /></KeyRoute>} />
+            <Route path="/warehouse/material-issues/template/new" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssueForm title="Create Template Material Issue" /></KeyRoute>} />
+            <Route path="/warehouse/material-issues/template/:id" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssueForm title="Template Material Issue" /></KeyRoute>} />
             <Route path="/warehouse/picklist" element={<KeyRoute requiredKey="warehouse-picklist"><Picklist /></KeyRoute>} />
             <Route path="/warehouse/picklist/new" element={<KeyRoute requiredKey="warehouse-picklist"><PicklistForm /></KeyRoute>} />
             <Route path="/warehouse/qc-outward" element={<KeyRoute requiredKey="warehouse-qc-outward"><QCOutward /></KeyRoute>} />
@@ -589,12 +586,9 @@ const App = () => {
             <Route path="/inventory/masters/boms" element={<KeyRoute requiredKey="inventory-masters-boms"><BOMs /></KeyRoute>} />
             <Route path="/inventory/masters/boms/new" element={<KeyRoute requiredKey="inventory-masters-boms"><BOMForm /></KeyRoute>} />
             <Route path="/inventory/masters/boms/:id/edit" element={<KeyRoute requiredKey="inventory-masters-boms"><BOMForm /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-consumables" element={<KeyRoute requiredKey="inventory-masters-ap104-consumables"><ProjectIndentTemplateList templateType="consumables" title="AP 104 DP / Consumables Master" /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-consumables/new" element={<KeyRoute requiredKey="inventory-masters-ap104-consumables"><ProjectIndentTemplateForm templateType="consumables" title="AP 104 DP / Consumables Master" /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-consumables/edit/:projectId" element={<KeyRoute requiredKey="inventory-masters-ap104-consumables"><ProjectIndentTemplateForm templateType="consumables" title="AP 104 DP / Consumables Master" /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-install" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateList templateType="install" title="AP 104 DP Install Master" /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-install/new" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateForm templateType="install" title="AP 104 DP Install Master" /></KeyRoute>} />
-            <Route path="/inventory/masters/ap104-install/edit/:projectId" element={<KeyRoute requiredKey="inventory-masters-ap104-install"><ProjectIndentTemplateForm templateType="install" title="AP 104 DP Install Master" /></KeyRoute>} />
+            <Route path="/inventory/masters/project-templates" element={<KeyRoute requiredKey="inventory-masters-project-templates"><ProjectIndentTemplateList title="Template Master for DP Project" /></KeyRoute>} />
+            <Route path="/inventory/masters/project-templates/new" element={<KeyRoute requiredKey="inventory-masters-project-templates"><ProjectIndentTemplateForm title="Template Master for DP Project" /></KeyRoute>} />
+            <Route path="/inventory/masters/project-templates/edit/:id" element={<KeyRoute requiredKey="inventory-masters-project-templates"><ProjectIndentTemplateForm title="Template Master for DP Project" /></KeyRoute>} />
             <Route path="/inventory/masters/vehicles" element={<KeyRoute requiredKey="inventory-masters-vehicles"><Vehicles /></KeyRoute>} />
             <Route path="/inventory/masters/price-lists" element={<KeyRoute requiredKey="inventory-masters-price-lists"><PriceLists /></KeyRoute>} />
 
@@ -623,12 +617,9 @@ const App = () => {
             <Route path="/indent/indents/new" element={<KeyRoute requiredKey="indent-indents"><IndentForm /></KeyRoute>} />
             <Route path="/indent/indents/create" element={<Navigate to="/indent/indents/new" replace />} />
             <Route path="/indent/indents/:id" element={<KeyRoute requiredKey="indent-indents"><IndentForm /></KeyRoute>} />
-            <Route path="/indent/ap104-consumables" element={<KeyRoute requiredKey="indent-ap104-consumables"><TemplateIndentList templateType="consumables" title="AP 104 DP / Consumables Indents" /></KeyRoute>} />
-            <Route path="/indent/ap104-consumables/new" element={<KeyRoute requiredKey="indent-ap104-consumables"><TemplateIndentForm templateType="consumables" title="Create AP 104 DP / Consumables Indent" /></KeyRoute>} />
-            <Route path="/indent/ap104-consumables/:id" element={<KeyRoute requiredKey="indent-ap104-consumables"><TemplateIndentForm templateType="consumables" title="AP 104 DP / Consumables Indent" /></KeyRoute>} />
-            <Route path="/indent/ap104-install" element={<KeyRoute requiredKey="indent-ap104-install"><TemplateIndentList templateType="install" title="AP 104 DP Install Indents" /></KeyRoute>} />
-            <Route path="/indent/ap104-install/new" element={<KeyRoute requiredKey="indent-ap104-install"><TemplateIndentForm templateType="install" title="Create AP 104 DP Install Indent" /></KeyRoute>} />
-            <Route path="/indent/ap104-install/:id" element={<KeyRoute requiredKey="indent-ap104-install"><TemplateIndentForm templateType="install" title="AP 104 DP Install Indent" /></KeyRoute>} />
+            <Route path="/indent/template-indents" element={<KeyRoute requiredKey="indent-template-indents"><TemplateIndentList title="Template Indents" /></KeyRoute>} />
+            <Route path="/indent/template-indents/new" element={<KeyRoute requiredKey="indent-template-indents"><TemplateIndentForm title="Create Template Indent" /></KeyRoute>} />
+            <Route path="/indent/template-indents/:id" element={<KeyRoute requiredKey="indent-template-indents"><TemplateIndentForm title="Template Indent" /></KeyRoute>} />
 
             <Route path="/indent/acknowledgement" element={<KeyRoute requiredKey="indent-acknowledgement"><IndentAcknowledgement /></KeyRoute>} />
             <Route path="/indent/acknowledgement/new" element={<KeyRoute requiredKey="indent-acknowledgement"><AcknowledgementForm /></KeyRoute>} />

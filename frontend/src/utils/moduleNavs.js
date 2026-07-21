@@ -25,8 +25,7 @@ export const MODULE_NAVS = {
           { label: 'Putaway', path: '/warehouse/putaway' },
           { label: 'Material Issues', path: '/warehouse/material-issues' },
           { label: 'Vehicle Material Issues', path: '/warehouse/vehicle-material-issues' },
-          { label: 'AP 104 DP / Consumables', path: '/warehouse/material-issues/ap104-consumables' },
-          { label: 'AP 104 DP Install', path: '/warehouse/material-issues/ap104-install' },
+          { label: 'Template Material Issues', path: '/warehouse/material-issues/template' },
           { label: 'Purchase Returns', path: '/warehouse/purchase-returns' }
         ]
       },
@@ -57,8 +56,7 @@ export const MODULE_NAVS = {
           { label: 'Specs', path: '/inventory/masters/specs' },
           { label: 'BOM', path: '/inventory/masters/boms' },
           { label: 'Price Lists', path: '/inventory/masters/price-lists' },
-          { label: 'AP 104 DP / Consumables', path: '/inventory/masters/ap104-consumables' },
-          { label: 'AP 104 DP Install', path: '/inventory/masters/ap104-install' },
+          { label: 'Template Master for DP Project', path: '/inventory/masters/project-templates' },
           { label: 'Vehicles', path: '/inventory/masters/vehicles' }
         ]
 
@@ -118,8 +116,7 @@ export const MODULE_NAVS = {
         children: [
           { label: 'List', path: '/indent/indents' },
           { label: 'Board', path: '/indent/indents/kanban', hideForRoles: ['field_staff', 'field_supervisor'] },
-          { label: 'AP 104 DP / Consumables', path: '/indent/ap104-consumables' },
-          { label: 'AP 104 DP Install', path: '/indent/ap104-install' },
+          { label: 'Template Indents', path: '/indent/template-indents' },
           { label: 'Acknowledgement', path: '/indent/acknowledgement' },
           { label: 'Material Acknowledgement', path: '/indent/material-acknowledgement' }
         ]

@@ -417,9 +417,21 @@ async def list_indents(
             full = f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username
             user_map[u.id] = full
 
+    # Bulk resolve template_name for indents with template_id but missing template_name
+    tmpl_ids_missing = [ind.template_id for ind in indents if ind.template_id and not ind.template_name]
+    tmpl_name_map = {}
+    if tmpl_ids_missing:
+        from app.models.project_templates import ProjectIndentTemplate
+        t_res = await db.execute(
+            select(ProjectIndentTemplate.id, ProjectIndentTemplate.template_name)
+            .where(ProjectIndentTemplate.id.in_(tmpl_ids_missing))
+        )
+        tmpl_name_map = {r[0]: r[1] for r in t_res.all()}
+
     response_items = []
     for ind in indents:
         data = IndentResponse.model_validate(ind).model_dump()
+        data["template_name"] = ind.template_name or tmpl_name_map.get(ind.template_id)
         data["warehouse_name"] = ind.warehouse.name if ind.warehouse else None
         # Bug fix BUG_0042: surface project name for the list view column
         data["project_name"] = ind.project.name if ind.project else None
@@ -587,6 +599,14 @@ async def get_indent(
                 raise HTTPException(status_code=403, detail="Not authorized to view this indent")
 
     data = IndentResponse.model_validate(indent).model_dump()
+    if indent.template_id and not indent.template_name:
+        from app.models.project_templates import ProjectIndentTemplate
+        t_res = await db.execute(
+            select(ProjectIndentTemplate.template_name).where(ProjectIndentTemplate.id == indent.template_id)
+        )
+        data["template_name"] = t_res.scalar_one_or_none()
+    else:
+        data["template_name"] = indent.template_name
     data["warehouse_name"] = indent.warehouse.name if indent.warehouse else None
     data["project_name"] = indent.project.name if indent.project else None
     data["source_bom_code"] = indent.source_bom.bom_code if indent.source_bom else None
@@ -891,6 +911,14 @@ async def create_indent(
             )
             user_position_id = pos_q.scalars().first()
 
+    template_name = payload.template_name
+    if payload.template_id and not template_name:
+        from app.models.project_templates import ProjectIndentTemplate
+        tmpl_res = await db.execute(
+            select(ProjectIndentTemplate.template_name).where(ProjectIndentTemplate.id == payload.template_id)
+        )
+        template_name = tmpl_res.scalar_one_or_none()
+
     indent = Indent(
         indent_number=indent_number,
         project_id=project_id,
@@ -907,6 +935,8 @@ async def create_indent(
         vehicle_number=payload.vehicle_number,
         service_code=payload.service_code,
         template_type=payload.template_type,
+        template_id=payload.template_id,
+        template_name=template_name,
     )
 
     db.add(indent)
@@ -1016,6 +1046,13 @@ async def update_indent(
     # Defensive: even though IndentUpdate.status is no longer exposed
     # (BUG-IND-010), strip any sneaky pass-through.
     payload_data.pop("status", None)
+
+    if payload_data.get("template_id") and not payload_data.get("template_name"):
+        from app.models.project_templates import ProjectIndentTemplate
+        tmpl_res = await db.execute(
+            select(ProjectIndentTemplate.template_name).where(ProjectIndentTemplate.id == payload_data["template_id"])
+        )
+        payload_data["template_name"] = tmpl_res.scalar_one_or_none()
 
     # BUG-IND-020 — refuse a wipe-via-empty-list. Updating with items=[]
     # would previously delete every line and leave a zero-item indent

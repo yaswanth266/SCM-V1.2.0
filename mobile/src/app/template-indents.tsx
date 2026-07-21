@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -44,13 +44,6 @@ const Icon = ({ name, size = 18, color = '#7A6D66' }: { name: string; size?: num
     <View style={{ width: s, height: s, alignItems: 'center', justifyContent: 'center' }}>
       <View style={{ position: 'absolute', width: s * 0.7, height: 2, backgroundColor: color, transform: [{ rotate: '45deg' }] }} />
       <View style={{ position: 'absolute', width: s * 0.7, height: 2, backgroundColor: color, transform: [{ rotate: '-45deg' }] }} />
-    </View>
-  );
-  if (name === 'calendar') return (
-    <View style={{ width: s, height: s, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={{ width: s * 0.75, height: s * 0.75, borderRadius: 2, borderWidth: 1.8, borderColor: color, paddingTop: 4 }}>
-        <View style={{ width: '100%', height: 1.5, backgroundColor: color, marginBottom: 3 }} />
-      </View>
     </View>
   );
   if (name === 'file-text') return (
@@ -213,13 +206,9 @@ const StatusFlow = ({ currentStatus }: { currentStatus: string }) => {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function TemplateIndentsScreen() {
-  const params = useLocalSearchParams<{ type?: string }>();
-  const templateType = (params.type === 'install' ? 'install' : 'consumables');
-  const typeTitle = templateType === 'install' ? 'AP 104 DP Install' : 'AP 104 DP / Consumables';
-  const themeColor = templateType === 'install' ? '#0F766E' : '#7C3AED';
-  const themeBg: [string, string] = templateType === 'install'
-    ? ['#0F766E', '#065F46']
-    : ['#481238', '#3A0F40'];
+  const typeTitle = 'Template Indent';
+  const themeColor = '#7C3AED';
+  const themeBg: [string, string] = ['#481238', '#3A0F40'];
 
   const [token, setToken] = useState('');
   const [user, setUser] = useState<any>(null);
@@ -242,13 +231,16 @@ export default function TemplateIndentsScreen() {
   const [formVisible, setFormVisible] = useState(false);
   const [formMode, setFormMode] = useState<'new' | 'edit'>('new');
   const [formIndentId, setFormIndentId] = useState<number | null>(null);
-  const [formLoading, setFormLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Lookup data
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [projects, setProjects] = useState<any[]>([]);
   const [vehicles, setVehicles] = useState<any[]>([]);
+  
+  // Available templates for selected project
+  const [availableTemplates, setAvailableTemplates] = useState<any[]>([]);
+  const [selTemplateId, setSelTemplateId] = useState('');
   const [templateItems, setTemplateItems] = useState<any[]>([]);
   const [loadingTemplate, setLoadingTemplate] = useState(false);
 
@@ -275,12 +267,12 @@ export default function TemplateIndentsScreen() {
       } catch { router.replace('/'); }
     };
     init();
-  }, [templateType]);
+  }, []);
 
   const fetchList = async (tok: string, pageNum: number, searchQ: string, statusQ: string) => {
     try {
       if (pageNum === 1) setLoading(true);
-      const params: any = { page: pageNum, page_size: 20, template_type: templateType };
+      const params: any = { page: pageNum, page_size: 20, template_type: 'dp_project' };
       if (searchQ) params.search = searchQ;
       if (statusQ) params.status = statusQ;
       const res = await axios.get(`${API_BASE_URL}/api/v1/indent/indents`, {
@@ -310,7 +302,6 @@ export default function TemplateIndentsScreen() {
         const d = whRes.value.data;
         const list = (d.items || d.data || d || []);
         setWarehouses(list);
-        // Auto-select warehouse if user has one
         if (parsedUser?.warehouse_id) setSelWarehouseId(String(parsedUser.warehouse_id));
         else if (list.length === 1) setSelWarehouseId(String(list[0].id));
       }
@@ -325,36 +316,53 @@ export default function TemplateIndentsScreen() {
     } catch { /* silent */ }
   };
 
-  const fetchTemplate = async (projectId: string) => {
-    if (!projectId) { setTemplateItems([]); return; }
+  const fetchTemplatesForProject = async (projectId: string) => {
+    if (!projectId) {
+      setAvailableTemplates([]);
+      setSelTemplateId('');
+      setTemplateItems([]);
+      return;
+    }
     setLoadingTemplate(true);
     try {
-      const res = await axios.get(`${API_BASE_URL}/api/v1/masters/project-indent-templates`, {
+      const res = await axios.get(`${API_BASE_URL}/api/v1/masters/project-indent-templates/by-project/${projectId}`, {
         headers: { Authorization: `Bearer ${token}` },
-        params: { project_id: projectId, template_type: templateType },
       });
-      const data = res.data;
-      if (data?.items?.length > 0) {
-        setTemplateItems(data.items.map((item: any, idx: number) => ({
-          key: item.id || idx,
-          item_id: item.item_id,
-          item_code: item.item_code || '',
-          item_name: item.item_name || '',
-          requested_qty: Number(item.quantity || 0),
-          uom: item.uom_name || '',
-          uom_id: item.uom_id,
-          remarks: 'Fixed template item',
-        })));
-        Alert.alert('✅ Template Loaded', `Loaded ${data.items.length} fixed items from the project template.`);
-      } else {
+      const data = res.data || [];
+      setAvailableTemplates(data);
+      if (data.length === 0) {
+        setSelTemplateId('');
         setTemplateItems([]);
-        Alert.alert('⚠️ No Template', `No indent template configured for this project under type '${templateType}'.`);
+        Alert.alert('⚠️ No Templates', 'No indent templates configured for this project.');
+      } else if (data.length === 1) {
+        setSelTemplateId(String(data[0].id));
+        handleTemplateSelect(String(data[0].id), data);
       }
     } catch (e: any) {
+      setAvailableTemplates([]);
       setTemplateItems([]);
-      Alert.alert('Error', e?.response?.data?.detail || 'Failed to load template items.');
+      Alert.alert('Error', e?.response?.data?.detail || 'Failed to load templates for project.');
     } finally {
       setLoadingTemplate(false);
+    }
+  };
+
+  const handleTemplateSelect = (templateIdStr: string, list = availableTemplates) => {
+    setSelTemplateId(templateIdStr);
+    const matched = list.find((t: any) => String(t.id) === templateIdStr);
+    if (matched && matched.items) {
+      setTemplateItems(matched.items.map((item: any, idx: number) => ({
+        key: item.id || idx,
+        item_id: item.item_id,
+        item_code: item.item_code || '',
+        item_name: item.item_name || '',
+        requested_qty: Number(item.quantity || 0),
+        uom: item.uom_name || '',
+        uom_id: item.uom_id,
+        remarks: 'Fixed template item',
+      })));
+    } else {
+      setTemplateItems([]);
     }
   };
 
@@ -362,11 +370,12 @@ export default function TemplateIndentsScreen() {
     setFormMode('new');
     setFormIndentId(null);
     setSelProjectId('');
+    setAvailableTemplates([]);
+    setSelTemplateId('');
     setSelVehicleCode('');
     setVehicleNumber('');
     setRemarks('');
     setTemplateItems([]);
-    // Set default required date = 7 days from now
     const d = new Date(); d.setDate(d.getDate() + 7);
     setRequiredDate(d.toISOString().split('T')[0]);
     setFormVisible(true);
@@ -376,12 +385,13 @@ export default function TemplateIndentsScreen() {
     setFormMode('edit');
     setFormIndentId(indent.id);
     setSelProjectId(String(indent.project_id || ''));
+    if (indent.project_id) fetchTemplatesForProject(String(indent.project_id));
+    setSelTemplateId(String(indent.template_id || ''));
     setSelWarehouseId(String(indent.warehouse_id || ''));
     setSelVehicleCode(indent.vehicle_code || '');
     setVehicleNumber(indent.vehicle_number || '');
     setRemarks(indent.remarks || '');
     setRequiredDate(indent.required_date ? indent.required_date.split('T')[0] : '');
-    // Load items from indent
     const items = (indent.items || []).map((it: any, idx: number) => ({
       key: it.id || idx,
       item_id: it.item_id,
@@ -406,7 +416,6 @@ export default function TemplateIndentsScreen() {
         headers: { Authorization: `Bearer ${token}` },
       });
       setSelectedIndent(res.data);
-      // Also populate form items in case user wants to edit
       const items = (res.data.items || []).map((it: any, idx: number) => ({
         key: it.id || idx, item_id: it.item_id, item_code: it.item_code || '',
         item_name: it.item_name || '', requested_qty: Number(it.requested_qty || it.qty || 0),
@@ -433,18 +442,23 @@ export default function TemplateIndentsScreen() {
 
   const handleSubmitForm = async (submitForApproval = false) => {
     if (!selProjectId) { Alert.alert('Validation', 'Please select a project.'); return; }
+    if (!selTemplateId) { Alert.alert('Validation', 'Please select a template name.'); return; }
     if (!selWarehouseId) { Alert.alert('Validation', 'Please select a warehouse.'); return; }
     if (!requiredDate || !/^\d{4}-\d{2}-\d{2}$/.test(requiredDate)) {
       Alert.alert('Validation', 'Please enter Required Date in YYYY-MM-DD format.'); return;
     }
-    if (templateItems.length === 0) { Alert.alert('Validation', 'No template items found. Please select a project with a configured template.'); return; }
+    if (templateItems.length === 0) { Alert.alert('Validation', 'No template items found for selected template.'); return; }
+
+    const matchedTmpl = availableTemplates.find((t: any) => String(t.id) === selTemplateId);
 
     setSubmitting(true);
     try {
       const payload = {
         warehouse_id: parseInt(selWarehouseId),
         indent_type: 'regular',
-        template_type: templateType,
+        template_type: 'dp_project',
+        template_id: parseInt(selTemplateId),
+        template_name: matchedTmpl ? matchedTmpl.template_name : undefined,
         required_date: requiredDate,
         project_id: parseInt(selProjectId),
         vehicle_code: selVehicleCode || null,
@@ -559,7 +573,7 @@ export default function TemplateIndentsScreen() {
       {loading && page === 1 ? (
         <View style={styles.centeredBox}>
           <ActivityIndicator size="large" color={themeColor} />
-          <Text style={styles.loadingText}>Loading {typeTitle} indents...</Text>
+          <Text style={styles.loadingText}>Loading template indents...</Text>
         </View>
       ) : indents.length === 0 ? (
         <ScrollView contentContainerStyle={styles.centeredBox} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}>
@@ -580,7 +594,7 @@ export default function TemplateIndentsScreen() {
           renderItem={({ item }) => (
             <TouchableOpacity style={styles.card} activeOpacity={0.7} onPress={() => openDetail(item.id)}>
               <View style={styles.cardHeader}>
-                <View style={[styles.cardIconBox, { backgroundColor: templateType === 'install' ? '#CCFBF1' : '#F0E8F8' }]}>
+                <View style={[styles.cardIconBox, { backgroundColor: '#F0E8F8' }]}>
                   <Icon name="file-text" size={16} color={themeColor} />
                 </View>
                 <View style={{ flex: 1 }}>
@@ -590,6 +604,10 @@ export default function TemplateIndentsScreen() {
                 <StatusBadge status={item.status} />
               </View>
               <View style={styles.cardBody}>
+                <View style={styles.cardRow}>
+                  <Text style={styles.cardLabel}>Template Name</Text>
+                  <Text style={[styles.cardValue, { color: '#7C3AED', fontWeight: '800' }]}>{item.template_name || '-'}</Text>
+                </View>
                 <View style={styles.cardRow}>
                   <Text style={styles.cardLabel}>Warehouse</Text>
                   <Text style={styles.cardValue}>{item.warehouse_name || '-'}</Text>
@@ -633,16 +651,14 @@ export default function TemplateIndentsScreen() {
             <View style={styles.centeredBox}><ActivityIndicator size="large" color={themeColor} /></View>
           ) : (
             <ScrollView contentContainerStyle={styles.modalScroll}>
-              {/* Status Flow */}
               <View style={styles.section}>
                 <StatusFlow currentStatus={selectedIndent.status} />
               </View>
 
-              {/* Info Card */}
               <View style={styles.infoCard}>
                 <InfoRow label="Indent #" value={selectedIndent.indent_number || '-'} />
-                <InfoRow label="Template Type" value={typeTitle} />
                 <InfoRow label="Project" value={selectedIndent.project_name || '-'} />
+                <InfoRow label="Template Name" value={selectedIndent.template_name || '-'} />
                 <InfoRow label="Warehouse" value={selectedIndent.warehouse_name || '-'} />
                 <InfoRow label="Vehicle" value={selectedIndent.vehicle_code ? `${selectedIndent.vehicle_code} (${selectedIndent.vehicle_number || '-'})` : '-'} />
                 <InfoRow label="Indent Date" value={formatDate(selectedIndent.indent_date)} />
@@ -651,7 +667,6 @@ export default function TemplateIndentsScreen() {
                 {selectedIndent.remarks ? <InfoRow label="Remarks" value={selectedIndent.remarks} /> : null}
               </View>
 
-              {/* Fixed Items */}
               <View style={[styles.section, { marginTop: 4 }]}>
                 <Text style={styles.sectionTitle}>📦 Fixed Items List</Text>
                 {(selectedIndent.items || []).length === 0 ? (
@@ -673,7 +688,6 @@ export default function TemplateIndentsScreen() {
                 )}
               </View>
 
-              {/* Action Buttons */}
               <View style={styles.actionBar}>
                 {selectedIndent.status === 'draft' && (
                   <>
@@ -734,7 +748,7 @@ export default function TemplateIndentsScreen() {
               <Icon name="x" size={20} color="#334155" />
             </TouchableOpacity>
             <Text style={styles.modalTitle} numberOfLines={1}>
-              {formMode === 'new' ? `New ${typeTitle} Indent` : 'Edit Indent'}
+              {formMode === 'new' ? 'New Template Indent' : 'Edit Indent'}
             </Text>
             <View style={{ width: 24 }} />
           </View>
@@ -750,10 +764,20 @@ export default function TemplateIndentsScreen() {
               <SearchableDropdown
                 label="Project *"
                 value={selProjectId}
-                onValueChange={(v) => { setSelProjectId(v); fetchTemplate(v); }}
+                onValueChange={(v) => { setSelProjectId(v); fetchTemplatesForProject(v); }}
                 items={projects.map(p => ({ label: p.name || p.project_name || `#${p.id}`, value: String(p.id) }))}
                 placeholder="Select project..."
                 disabled={formMode === 'edit'}
+              />
+
+              {/* Template Name */}
+              <SearchableDropdown
+                label="Template Name *"
+                value={selTemplateId}
+                onValueChange={(v) => handleTemplateSelect(v)}
+                items={availableTemplates.map(t => ({ label: t.template_name, value: String(t.id) }))}
+                placeholder={availableTemplates.length > 0 ? "Select template name..." : "Select project first"}
+                disabled={formMode === 'edit' || availableTemplates.length === 0}
               />
 
               {/* Warehouse */}
@@ -783,7 +807,6 @@ export default function TemplateIndentsScreen() {
                 placeholder="Select vehicle code..."
               />
 
-              {/* Vehicle Number (auto-filled) */}
               <Text style={styles.fieldLabel}>Vehicle Number</Text>
               <TextInput
                 style={[styles.formInput, { backgroundColor: '#F8FAFC', color: '#64748B' }]}
@@ -793,7 +816,6 @@ export default function TemplateIndentsScreen() {
                 placeholderTextColor="#94A3B8"
               />
 
-              {/* Required Date */}
               <Text style={styles.fieldLabel}>Required Date * (YYYY-MM-DD)</Text>
               <TextInput
                 style={styles.formInput}
@@ -835,18 +857,17 @@ export default function TemplateIndentsScreen() {
               ) : selProjectId ? (
                 <View style={{ backgroundColor: '#FEF3C7', borderRadius: 10, padding: 14, marginBottom: 12, alignItems: 'center' }}>
                   <Text style={{ fontSize: 13, color: '#92400E', textAlign: 'center' }}>
-                    ⚠️ No template items found for this project.{'\n'}Ensure a template is configured in the master settings.
+                    ⚠️ Select a template name above to display its fixed items.
                   </Text>
                 </View>
               ) : (
                 <View style={{ backgroundColor: '#F0E8F8', borderRadius: 10, padding: 14, marginBottom: 12, alignItems: 'center' }}>
                   <Text style={{ fontSize: 13, color: '#5B21B6', textAlign: 'center' }}>
-                    Select a project above to automatically load its fixed template items.
+                    Select a project and template name above to automatically load its fixed items.
                   </Text>
                 </View>
               )}
 
-              {/* Remarks */}
               <Text style={styles.fieldLabel}>Remarks (optional)</Text>
               <TextInput
                 style={[styles.formInput, { height: 72, textAlignVertical: 'top' }]}
@@ -857,7 +878,6 @@ export default function TemplateIndentsScreen() {
                 placeholderTextColor="#94A3B8"
               />
 
-              {/* Submit Buttons */}
               <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
                 <TouchableOpacity
                   style={[styles.submitBtn, { backgroundColor: '#F1F5F9', flex: 1 }]}

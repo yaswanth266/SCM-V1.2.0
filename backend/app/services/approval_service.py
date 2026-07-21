@@ -206,12 +206,13 @@ async def find_workflow(
     if project_id:
         # Check if any project-scoped row exists (active OR inactive). If
         # one does, only the active variant is acceptable; we never spill
-        # over to the org-wide fallback.
+        # over to the org-wide fallback. System Hierarchical Workflows (without levels) are excluded.
         any_project_row = await db.execute(
             select(ApprovalWorkflow.id).where(
                 ApprovalWorkflow.module == module,
                 ApprovalWorkflow.document_type == document_type,
                 ApprovalWorkflow.project_id == project_id,
+                ~ApprovalWorkflow.name.like("System Hierarchical Workflow%"),
             ).limit(1)
         )
         has_project_scoped = any_project_row.scalar_one_or_none() is not None
@@ -222,6 +223,7 @@ async def find_workflow(
                     ApprovalWorkflow.document_type == document_type,
                     ApprovalWorkflow.project_id == project_id,
                     ApprovalWorkflow.is_active == True,
+                    ~ApprovalWorkflow.name.like("System Hierarchical Workflow%"),
                 ).order_by(ApprovalWorkflow.id.desc()).limit(1)
             )
             return result.scalar_one_or_none()
@@ -233,6 +235,7 @@ async def find_workflow(
             ApprovalWorkflow.document_type == document_type,
             ApprovalWorkflow.is_active == True,
             ApprovalWorkflow.project_id.is_(None),
+            ~ApprovalWorkflow.name.like("System Hierarchical Workflow%"),
         ).order_by(ApprovalWorkflow.id.desc()).limit(1)
     )
     return result.scalar_one_or_none()
@@ -455,7 +458,8 @@ async def submit_for_approval(
                 select(ApprovalWorkflow).where(
                     ApprovalWorkflow.module == module,
                     ApprovalWorkflow.document_type == document_type,
-                    ApprovalWorkflow.project_id == project_id
+                    ApprovalWorkflow.project_id == project_id,
+                    ApprovalWorkflow.name.like("System Hierarchical Workflow%")
                 ).limit(1)
             )
             workflow = workflow_res.scalar_one_or_none()

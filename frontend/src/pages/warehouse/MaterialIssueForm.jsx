@@ -33,8 +33,9 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
   const location = useLocation();
   const isNew = !id || id === 'new';
   const user = useAuthStore((s) => s.user);
-  const backPath = templateType 
-    ? `/warehouse/material-issues/ap104-${templateType}`
+  const isTemplatePage = templateType || location.pathname.includes('/template');
+  const backPath = isTemplatePage 
+    ? '/warehouse/material-issues/template'
     : '/warehouse/material-issues';
 
   const [form] = Form.useForm();
@@ -48,6 +49,10 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
   const [warehouses, setWarehouses] = useState([]);
   const [allWarehouses, setAllWarehouses] = useState([]);
   const [indentOptions, setIndentOptions] = useState([]);
+  const [itemStockDetails, setItemStockDetails] = useState({});
+  const [isCentralWarehouse, setIsCentralWarehouse] = useState(true);
+  const [associatedAck, setAssociatedAck] = useState(null);
+  const [isTemplateIndent, setIsTemplateIndent] = useState(false);
 
   const [uomOptions, setUomOptions] = useState([]);
   const [userOptions, setUserOptions] = useState([]);
@@ -63,10 +68,6 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
   const [rateMap, setRateMap] = useState({});
   // item_id -> { batches: [{id, batch_number, expiry_date, rate}], bins: [{id, code}] }
   // Populated when an item is selected to allow batch/bin dropdown selection
-  const [itemStockDetails, setItemStockDetails] = useState({});
-  // Whether the source warehouse is a central warehouse (determines batch/bin UX)
-  const [isCentralWarehouse, setIsCentralWarehouse] = useState(true);
-
   // --- Tree Modal State for Asset/Consumable Codes ---
   const [treeModalOpen, setTreeModalOpen] = useState(false);
   const [activeRowKey, setActiveRowKey] = useState(null);
@@ -348,6 +349,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
 
   const prefillFromIndent = useCallback(async (indentId) => {
     if (!indentId) {
+      setIsTemplateIndent(false);
       setStockMap({});
       form.setFieldsValue({
         destination_warehouse_id: undefined,
@@ -359,6 +361,9 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
       const res = await api.get(`/indent/indents/${indentId}`);
       const ind = res.data;
       if (!ind) return;
+
+      const isTempl = Boolean(ind.template_id || ind.template_name || ind.template_type || isTemplatePage);
+      setIsTemplateIndent(isTempl);
 
       const optionLabel = `${ind.indent_number}${ind.warehouse_name ? ` · ${ind.warehouse_name}` : ''}${ind.raised_by_name ? ` · ${ind.raised_by_name}` : ''}`;
       const newOption = { label: optionLabel, value: ind.id };
@@ -555,6 +560,8 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
       const res = await api.get(`/warehouse/material-issues/${id}`);
       const data = res.data;
       setRecordData(data);
+      const isTempl = Boolean(data.template_id || data.template_name || data.template_type || isTemplatePage);
+      setIsTemplateIndent(isTempl);
       form.setFieldsValue({
         warehouse_id: data.warehouse_id,
         destination_warehouse_id: data.destination_warehouse_id,
@@ -1113,14 +1120,14 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         message.success('Material Issue created successfully');
         const newId = res.data?.id;
         if (newId) {
-          if (templateType) {
-            navigate(`/warehouse/material-issues/ap104-${templateType}/${newId}`);
+          if (isTemplatePage) {
+            navigate(`/warehouse/material-issues/template/${newId}`);
           } else {
             navigate(`/warehouse/material-issues/${newId}`);
           }
         } else {
-          if (templateType) {
-            navigate(`/warehouse/material-issues/ap104-${templateType}`);
+          if (isTemplatePage) {
+            navigate('/warehouse/material-issues/template');
           } else {
             navigate('/warehouse/material-issues');
           }
@@ -1401,9 +1408,9 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
       dataIndex: 'qty',
       width: 120,
       render: (val, record) => {
-        const disabled = !record.item_id;
+        const disabled = !record.item_id || isTemplateIndent;
         return (
-          <Tooltip title={disabled ? 'Select an item first' : ''}>
+          <Tooltip title={disabled ? (isTemplateIndent ? 'Quantity is fixed for template indents' : 'Select an item first') : ''}>
             <InputNumber
               min={0}
               value={val}
@@ -1828,7 +1835,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
       title: '',
       width: 35,
       render: (_, record) =>
-        issueItems.length > 1 ? (
+        issueItems.length > 1 && !isTemplateIndent ? (
           <MinusCircleOutlined
             style={{ color: '#ff4d4f', cursor: 'pointer' }}
             onClick={() => removeItemRow(record.key)}
@@ -2079,11 +2086,13 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
           pagination={false}
           size="small"
           scroll={{ x: 1350 }}
-          footer={() => (
-            <Button type="dashed" onClick={addItemRow} icon={<PlusOutlined />} block>
-              Add Item
-            </Button>
-          )}
+          footer={() =>
+            !isTemplateIndent && (
+              <Button type="dashed" onClick={addItemRow} icon={<PlusOutlined />} block>
+                Add Item
+              </Button>
+            )
+          }
         />
 
         <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end' }}>

@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Select, Space, Popconfirm, message } from 'antd';
+import { Button, Select, Space, Popconfirm, Tag, App } from 'antd';
 import { PlusOutlined, EyeOutlined, StopOutlined } from '@ant-design/icons';
 import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
@@ -9,7 +9,8 @@ import api from '../../config/api';
 import { formatDate, getErrorMessage } from '../../utils/helpers';
 import useAuthStore from '../../store/authStore';
 
-const TemplateIndentList = ({ templateType, title }) => {
+const TemplateIndentList = ({ title = "Template Indents" }) => {
+  const { message } = App.useApp();
   const { user: currentUser } = useAuthStore();
   const navigate = useNavigate();
   const [refreshKey, setRefreshKey] = useState(0);
@@ -33,17 +34,14 @@ const TemplateIndentList = ({ templateType, title }) => {
 
   const fetchData = useCallback(
     async (params) => {
-      const qp = { ...params, template_type: templateType };
+      const qp = { ...params, template_type: 'dp_project' };
       if (filterStatus) qp.status = filterStatus;
       if (filterProject) qp.project_id = filterProject;
       // Fetch indents
       const res = await api.get('/indent/indents', { params: qp });
-      
-      // Filter indents to only show projects that have a template if no specific project filter is chosen
-      // Or we can just let it display all. Let's filter to only show indents that have a project.
       return res;
     },
-    [filterStatus, filterProject, templateType]
+    [filterStatus, filterProject]
   );
 
   const handleAction = async (id, action) => {
@@ -65,12 +63,19 @@ const TemplateIndentList = ({ templateType, title }) => {
       width: 150,
       sorter: true,
       fixed: 'left',
-      render: (text, record) => <a onClick={() => navigate(`/indent/ap104-${templateType}/${record.id}`)}>{text}</a>,
+      render: (text, record) => <a onClick={() => navigate(`/indent/template-indents/${record.id}`)}>{text}</a>,
     },
-    { title: 'Project', dataIndex: 'project_name', key: 'project', width: 200, render: (v, r) => v || r.project || '-' },
-    { title: 'Warehouse', dataIndex: 'warehouse_name', key: 'warehouse', width: 180, render: (v, r) => v || r.warehouse || '-' },
+    { title: 'Project', dataIndex: 'project_name', key: 'project', width: 180, render: (v, r) => v || r.project || '-' },
+    {
+      title: 'Template Name',
+      dataIndex: 'template_name',
+      key: 'template_name',
+      width: 180,
+      render: (v) => <Tag color="purple" style={{ fontWeight: 600 }}>{v || '-'}</Tag>,
+    },
+    { title: 'Warehouse', dataIndex: 'warehouse_name', key: 'warehouse', width: 160, render: (v, r) => v || r.warehouse || '-' },
     { title: 'Vehicle Code', dataIndex: 'vehicle_code', key: 'vehicle_code', width: 120, render: (v) => v || '-' },
-    { title: 'Vehicle Number', dataIndex: 'vehicle_number', key: 'vehicle_number', width: 150, render: (v) => v || '-' },
+    { title: 'Vehicle Number', dataIndex: 'vehicle_number', key: 'vehicle_number', width: 140, render: (v) => v || '-' },
     { title: 'Indent Date', dataIndex: 'indent_date', key: 'indent_date', width: 120, sorter: true, render: (v) => formatDate(v) },
     { title: 'Required Date', dataIndex: 'required_date', key: 'required_date', width: 120, sorter: true, render: (v) => formatDate(v) },
     { title: 'Raised By', dataIndex: 'raised_by_name', key: 'raised_by', width: 140, render: (v, r) => v || r.raised_by || '-' },
@@ -78,11 +83,11 @@ const TemplateIndentList = ({ templateType, title }) => {
     {
       title: 'Actions',
       key: 'actions',
-      width: 120,
+      width: 100,
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
-          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/indent/ap104-${templateType}/${record.id}`)} />
+          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/indent/template-indents/${record.id}`)} />
           {record.status === 'draft' && isRaiser(record) && (
             <Popconfirm
               title="Cancel this draft?"
@@ -132,8 +137,8 @@ const TemplateIndentList = ({ templateType, title }) => {
 
   return (
     <div>
-      <PageHeader title={title} subtitle={`Template-based fixed indents for ${templateType}`}>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate(`/indent/ap104-${templateType}/new`)}>
+      <PageHeader title={title} subtitle="Create and manage project template indents with fixed items & quantities">
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/indent/template-indents/new')}>
           Create Template Indent
         </Button>
       </PageHeader>
@@ -144,7 +149,7 @@ const TemplateIndentList = ({ templateType, title }) => {
         fetchFunction={fetchData}
         rowKey="id"
         searchPlaceholder="Search by indent number..."
-        exportFileName={`template_indents_${templateType}`}
+        exportFileName="template_indents"
         toolbar={toolbar}
         scroll={{ x: 1400 }}
       />

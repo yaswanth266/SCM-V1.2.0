@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Select, Space, Popconfirm, message } from 'antd';
+import { Button, Select, Space, Popconfirm, Tag, App } from 'antd';
 import { PlusOutlined, EyeOutlined, StopOutlined } from '@ant-design/icons';
 import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
@@ -9,7 +9,8 @@ import api from '../../config/api';
 import { formatDate, getErrorMessage } from '../../utils/helpers';
 import useAuthStore from '../../store/authStore';
 
-const TemplateMaterialIssueList = ({ templateType, title }) => {
+const TemplateMaterialIssueList = ({ title = "Template Material Issues" }) => {
+  const { message } = App.useApp();
   const { user: currentUser } = useAuthStore();
   const navigate = useNavigate();
   const [refreshKey, setRefreshKey] = useState(0);
@@ -33,12 +34,12 @@ const TemplateMaterialIssueList = ({ templateType, title }) => {
 
   const fetchData = useCallback(
     async (params) => {
-      const qp = { ...params, template_type: templateType };
+      const qp = { ...params };
       if (filterStatus) qp.status = filterStatus;
       if (filterProject) qp.project_id = filterProject;
       return await api.get('/warehouse/material-issues', { params: qp });
     },
-    [filterStatus, filterProject, templateType]
+    [filterStatus, filterProject]
   );
 
   const handleAction = async (id, action) => {
@@ -61,23 +62,30 @@ const TemplateMaterialIssueList = ({ templateType, title }) => {
       sorter: true,
       fixed: 'left',
       render: (text, record) => (
-        <a onClick={() => navigate(`/warehouse/material-issues/ap104-${templateType}/${record.id}`)}>
+        <a onClick={() => navigate(`/warehouse/material-issues/template/${record.id}`)}>
           {text}
         </a>
       ),
     },
-    { title: 'Project', dataIndex: 'project_name', key: 'project', width: 200, render: (v) => v || '-' },
-    { title: 'Source WH', dataIndex: 'warehouse_name', key: 'warehouse', width: 180, render: (v) => v || '-' },
-    { title: 'Destination WH', dataIndex: 'destination_warehouse_name', key: 'dest_warehouse', width: 180, render: (v) => v || '-' },
-    { title: 'Department', dataIndex: 'department', key: 'department', width: 120, render: (v) => v || '-' },
-    { title: 'Vehicle Number', dataIndex: 'vehicle_number', key: 'vehicle_number', width: 150, render: (v) => v || '-' },
+    { title: 'Project', dataIndex: 'project_name', key: 'project', width: 180, render: (v) => v || '-' },
+    {
+      title: 'Template Name',
+      dataIndex: 'template_name',
+      key: 'template_name',
+      width: 180,
+      render: (v) => v ? <Tag color="blue" style={{ fontWeight: 600 }}>{v}</Tag> : '-',
+    },
+    { title: 'Source WH', dataIndex: 'warehouse_name', key: 'warehouse', width: 160, render: (v) => v || '-' },
+    { title: 'Destination WH', dataIndex: 'destination_warehouse_name', key: 'dest_warehouse', width: 160, render: (v) => v || '-' },
+    { title: 'Vehicle Code', dataIndex: 'vehicle_code', key: 'vehicle_code', width: 120, render: (v) => v || '-' },
+    { title: 'Vehicle Number', dataIndex: 'vehicle_number', key: 'vehicle_number', width: 140, render: (v) => v || '-' },
     { title: 'Issue Date', dataIndex: 'issue_date', key: 'issue_date', width: 120, sorter: true, render: (v) => formatDate(v) },
     { title: 'Issued To', dataIndex: 'issued_to_name', key: 'issued_to', width: 140, render: (v) => v || '-' },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 150, render: (s) => <StatusTag status={s} /> },
     {
       title: 'Actions',
       key: 'actions',
-      width: 120,
+      width: 100,
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
@@ -85,7 +93,7 @@ const TemplateMaterialIssueList = ({ templateType, title }) => {
             type="link"
             size="small"
             icon={<EyeOutlined />}
-            onClick={() => navigate(`/warehouse/material-issues/ap104-${templateType}/${record.id}`)}
+            onClick={() => navigate(`/warehouse/material-issues/template/${record.id}`)}
           />
           {record.status === 'draft' && isRaiser(record) && (
             <Popconfirm
@@ -135,11 +143,11 @@ const TemplateMaterialIssueList = ({ templateType, title }) => {
 
   return (
     <div>
-      <PageHeader title={title} subtitle={`Template-based material issues for ${templateType}`}>
+      <PageHeader title={title} subtitle="Template-based material issues for DP projects">
         <Button
           type="primary"
           icon={<PlusOutlined />}
-          onClick={() => navigate(`/warehouse/material-issues/ap104-${templateType}/new`)}
+          onClick={() => navigate('/warehouse/material-issues/template/new')}
         >
           Create Template Issue
         </Button>
@@ -151,7 +159,7 @@ const TemplateMaterialIssueList = ({ templateType, title }) => {
         fetchFunction={fetchData}
         rowKey="id"
         searchPlaceholder="Search by issue number..."
-        exportFileName={`template_material_issues_${templateType}`}
+        exportFileName="template_material_issues"
         toolbar={toolbar}
         scroll={{ x: 1400 }}
       />

@@ -276,20 +276,24 @@ export default function MaterialAcknowledgementScreen() {
       const issue = detailRes.data;
       setSelectedIssueDetail(issue);
 
-      const formatted = (issue.items || []).map((item: any) => ({
-        id: item.id,
-        item_id: item.item_id,
-        item_code: item.item_code || item.item?.item_code || '',
-        item_name: item.item_name || item.item?.name || '',
-        uom_name: item.uom_name || item.uom?.name || '',
-        issued_qty: Number(item.qty || 0),
-        received_qty: String(item.qty || 0),
-        remarks: '',
-        has_serial: item.has_serial || false,
-        serial_numbers: item.serial_numbers ? [...item.serial_numbers] : [],
-        serial_text: item.serial_numbers ? item.serial_numbers.join(', ') : '',
-        photos: [] as string[],
-      }));
+      const formatted = (issue.items || []).map((item: any) => {
+        const serials = Array.isArray(item.serial_numbers) ? item.serial_numbers : [];
+        return {
+          id: item.id,
+          item_id: item.item_id,
+          item_code: item.item_code || item.item?.item_code || '',
+          item_name: item.item_name || item.item?.name || '',
+          item_type: item.item_type || item.item?.item_type || '',
+          uom_name: item.uom_name || item.uom?.name || '',
+          issued_qty: Number(item.qty || 0),
+          received_qty: String(item.qty || 0),
+          remarks: '',
+          has_serial: item.has_serial || false,
+          serial_numbers: [...serials],
+          serial_text: serials.join(', '),
+          photos: [] as string[],
+        };
+      });
 
       setAckItems(formatted);
     } catch (e) {
@@ -887,20 +891,42 @@ export default function MaterialAcknowledgementScreen() {
                         }}
                       />
 
-                      {item.has_serial && (
-                        <>
-                          <Text style={[styles.fieldLabel, { marginTop: 4 }]}>Serial Numbers (comma-separated)</Text>
+                      {(item.has_serial || item.item_type === 'asset' || item.item_type === 'consumable' || (item.serial_numbers && item.serial_numbers.length > 0)) && (
+                        <View style={{ marginTop: 8, marginBottom: 8, padding: 8, backgroundColor: '#F1F5F9', borderRadius: 8 }}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                            <Text style={{ fontSize: 12, fontWeight: '700', color: '#1E293B' }}>
+                              Asset / Consumable / Serial Codes (Auto-selected)
+                            </Text>
+                            <View style={{ backgroundColor: '#DBEAFE', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10 }}>
+                              <Text style={{ fontSize: 10, color: '#1D4ED8', fontWeight: 'bold' }}>
+                                {item.serial_numbers ? item.serial_numbers.length : 0} Selected
+                              </Text>
+                            </View>
+                          </View>
+                          {item.serial_numbers && item.serial_numbers.length > 0 ? (
+                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                              {item.serial_numbers.map((code: string, cIdx: number) => (
+                                <View key={cIdx} style={{ backgroundColor: '#E0E7FF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 }}>
+                                  <Text style={{ fontSize: 11, color: '#3730A3', fontWeight: '600' }}>{code}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          ) : null}
+                          <Text style={[styles.fieldLabel, { marginTop: 6, fontSize: 11 }]}>Edit Selected Codes (comma-separated)</Text>
                           <TextInput
-                            style={styles.formInput}
-                            placeholder="SN123, SN124..."
+                            style={[styles.formInput, { fontSize: 12, height: 36 }]}
+                            placeholder="Code1, Code2..."
                             value={item.serial_text}
                             onChangeText={(text) => {
+                              const parsedArr = text.split(',').map((s) => s.trim()).filter(Boolean);
                               setAckItems((prev) =>
-                                prev.map((it, i) => (i === idx ? { ...it, serial_text: text } : it))
+                                prev.map((it, i) =>
+                                  i === idx ? { ...it, serial_text: text, serial_numbers: parsedArr } : it
+                                )
                               );
                             }}
                           />
-                        </>
+                        </View>
                       )}
 
                       {/* Item-wise Photos */}

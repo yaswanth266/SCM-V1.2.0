@@ -34,7 +34,7 @@ _ALL_KEYS: Set[str] = {
     'warehouse-gate-entry', 'logistics-gate-entry', 'warehouse-grn', 'warehouse-quality-inspection',
     'warehouse-putaway', 'warehouse-purchase-returns',
     'warehouse-material-issues', 'warehouse-vehicle-material-issues', 'warehouse-material-inward',
-    'warehouse-material-issues-ap104-consumables', 'warehouse-material-issues-ap104-install',
+    'warehouse-material-issues-template',
     'warehouse-dispatch',
     # 2. Inventory
     'inventory', 'inventory-dashboard', 'inventory-reports', 'inventory-notifications',
@@ -42,7 +42,7 @@ _ALL_KEYS: Set[str] = {
     'inventory-masters-features',
     'inventory-masters-user-material-mapping', 'inventory-masters-uom', 'inventory-masters-brands', 'inventory-masters-item-types',
     'inventory-masters-item-attributes', 'inventory-masters-category-attribute-mapping', 'inventory-masters-specs',
-    'inventory-masters-boms', 'inventory-masters-price-lists',
+    'inventory-masters-boms', 'inventory-masters-price-lists', 'inventory-masters-project-templates',
     'inventory-stock-balance', 'inventory-vehicle-stock-balance', 'inventory-stock-ledger', 'inventory-vehicle-stock-ledger',
     'inventory-stock-transfer', 'inventory-stock-audit',
     'inventory-replenishment',
@@ -55,7 +55,7 @@ _ALL_KEYS: Set[str] = {
     'procurement-purchase-orders',
     # 4. Indent
     'indent', 'indent-dashboard', 'indent-reports', 'indent-notifications',
-    'indent-indents', 'indent-acknowledgement', 'indent-material-acknowledgement',
+    'indent-indents', 'indent-template-indents', 'indent-acknowledgement', 'indent-material-acknowledgement',
     # Consumption
     'consumption', 'consumption-entry', 'consumption-reports',
     # Approvals
@@ -85,15 +85,13 @@ _ALL_KEYS: Set[str] = {
 _ROLE_KEYS = {
     'field_staff': {
         'lms',
-        'indent', 'indent-dashboard', 'indent-indents', 'indent-acknowledgement', 'indent-notifications',
-        'indent-ap104-consumables', 'indent-ap104-install',
+        'indent', 'indent-dashboard', 'indent-indents', 'indent-template-indents', 'indent-acknowledgement', 'indent-notifications',
         'consumption', 'consumption-entry',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-notifications',
     },
     'lab_technician': {
         'lms',
-        'indent', 'indent-dashboard', 'indent-indents', 'indent-acknowledgement', 'indent-notifications',
-        'indent-ap104-consumables', 'indent-ap104-install',
+        'indent', 'indent-dashboard', 'indent-indents', 'indent-template-indents', 'indent-acknowledgement', 'indent-notifications',
         'consumption', 'consumption-entry',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-notifications',
     },
@@ -111,26 +109,25 @@ _ROLE_KEYS = {
         'warehouse-floor-plan',
         'warehouse-gate-entry', 'warehouse-grn',
         'warehouse-quality-inspection', 'warehouse-putaway',
-        'warehouse-material-issues', 'warehouse-material-issues-ap104-consumables', 'warehouse-material-issues-ap104-install', 'warehouse-material-inward',
+        'warehouse-material-issues', 'warehouse-material-issues-template', 'warehouse-material-inward',
         'warehouse-dispatch',
         'inventory', 'inventory-dashboard', 'inventory-reports', 'inventory-notifications',
         'inventory-masters', 'inventory-masters-items', 'inventory-masters-packaging', 'inventory-masters-categories',
         'inventory-masters-features',
         'inventory-masters-user-material-mapping', 'inventory-masters-uom', 'inventory-masters-brands', 'inventory-masters-item-types',
         'inventory-masters-item-attributes', 'inventory-masters-category-attribute-mapping', 'inventory-masters-specs',
-        'inventory-masters-boms', 'inventory-masters-price-lists',
+        'inventory-masters-boms', 'inventory-masters-price-lists', 'inventory-masters-project-templates',
         'inventory-stock-balance', 'inventory-stock-ledger',
         'inventory-stock-transfer', 'inventory-stock-audit',
         'inventory-replenishment',
-        'inventory-masters-ap104-consumables', 'inventory-masters-ap104-install',
-        'indent-ap104-consumables', 'indent-ap104-install',
-        'logistics', 'logistics-dashboard', 'logistics-master', 'logistics-dispatch', 'logistics-rfq', 'logistics-so', 'logistics-gate-entry', 'logistics-consignments', 'logistics-consignments',
+        'indent-template-indents',
+        'logistics', 'logistics-dashboard', 'logistics-master', 'logistics-dispatch', 'logistics-rfq', 'logistics-so', 'logistics-gate-entry', 'logistics-consignments',
     },
     'warehouse_operator': {
         'lms',
         'warehouse', 'warehouse-dashboard', 'warehouse-gate-entry', 'warehouse-purchase-returns',
         'warehouse-material-inward', 'warehouse-dispatch', 'warehouse-notifications',
-        'warehouse-material-issues', 'warehouse-material-issues-ap104-consumables', 'warehouse-material-issues-ap104-install',
+        'warehouse-material-issues', 'warehouse-material-issues-template',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-notifications',
         'procurement-material-requests',
         'logistics', 'logistics-gate-entry', 'logistics-dashboard', 'logistics-master',
@@ -138,26 +135,24 @@ _ROLE_KEYS = {
     },
     'store_keeper': {
         'lms',
-        'indent', 'indent-dashboard', 'indent-indents',
+        'indent', 'indent-dashboard', 'indent-indents', 'indent-template-indents',
         'warehouse', 'warehouse-dashboard', 'warehouse-gate-entry', 'warehouse-grn', 'warehouse-putaway',
-        'warehouse-material-issues', 'warehouse-material-issues-ap104-consumables', 'warehouse-material-issues-ap104-install', 'warehouse-material-inward',
+        'warehouse-material-issues', 'warehouse-material-issues-template', 'warehouse-material-inward',
         'warehouse-dispatch', 'warehouse-notifications',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-stock-transfer', 'inventory-notifications',
-        'inventory-masters-ap104-consumables', 'inventory-masters-ap104-install',
-        'indent-ap104-consumables', 'indent-ap104-install',
+        'inventory-masters-project-templates',
         'procurement-material-requests',
         'logistics', 'logistics-gate-entry', 'logistics-dashboard', 'logistics-master',
         'logistics-dispatch', 'logistics-consignments', 'logistics-rfq', 'logistics-so',
     },
     'storekeeper': {
         'lms',
-        'indent', 'indent-dashboard', 'indent-indents',
+        'indent', 'indent-dashboard', 'indent-indents', 'indent-template-indents',
         'warehouse', 'warehouse-dashboard', 'warehouse-gate-entry', 'warehouse-grn', 'warehouse-putaway',
-        'warehouse-material-issues', 'warehouse-material-issues-ap104-consumables', 'warehouse-material-issues-ap104-install', 'warehouse-material-inward',
+        'warehouse-material-issues', 'warehouse-material-issues-template', 'warehouse-material-inward',
         'warehouse-dispatch', 'warehouse-notifications',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-stock-transfer', 'inventory-notifications',
-        'inventory-masters-ap104-consumables', 'inventory-masters-ap104-install',
-        'indent-ap104-consumables', 'indent-ap104-install',
+        'inventory-masters-project-templates',
         'procurement-material-requests',
         'logistics', 'logistics-gate-entry', 'logistics-dashboard', 'logistics-master',
         'logistics-dispatch', 'logistics-consignments', 'logistics-rfq', 'logistics-so',
@@ -187,7 +182,7 @@ _ROLE_KEYS = {
         'inventory', 'inventory-dashboard', 'inventory-reports', 'inventory-notifications',
         'procurement', 'procurement-dashboard', 'procurement-reports', 'procurement-notifications',
         'indent', 'indent-dashboard', 'indent-reports', 'indent-notifications',
-        'indent-ap104-consumables', 'indent-ap104-install',
+        'indent-template-indents',
         'consumption', 'consumption-reports',
     },
     'accounts_manager': {
@@ -205,8 +200,8 @@ _ROLE_KEYS = {
         'lms',
         'approvals', 'approvals-pending',
         'inventory', 'inventory-dashboard', 'inventory-stock-balance', 'inventory-stock-ledger', 'inventory-reports', 'inventory-notifications',
-        'inventory-masters-ap104-consumables', 'inventory-masters-ap104-install',
-        'indent-ap104-consumables', 'indent-ap104-install',
+        'inventory-masters-project-templates',
+        'indent-template-indents',
         'procurement', 'procurement-dashboard', 'procurement-reports', 'procurement-notifications',
         'consumption', 'consumption-reports',
     },
@@ -275,6 +270,15 @@ async def allowed_keys_for_role(db: AsyncSession, role: Role) -> List[str]:
         elif key == "warehouse-material-issues":
             mapped_keys.extend([
                 "warehouse-vehicle-material-issues",
+                "warehouse-material-issues-template",
+            ])
+        elif key == "inventory-masters":
+            mapped_keys.extend([
+                "inventory-masters-project-templates",
+            ])
+        elif key == "indent-transactions" or key == "indent-indents" or key == "indent":
+            mapped_keys.extend([
+                "indent-template-indents",
             ])
         elif key == "inventory-stock-balance":
             mapped_keys.extend([

@@ -1,33 +1,29 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Space, message, Tooltip } from 'antd';
+import { Button, Space, Tooltip, Tag, App } from 'antd';
 import { PlusOutlined, EditOutlined } from '@ant-design/icons';
 import PageHeader from '../../../components/PageHeader';
 import DataTable from '../../../components/DataTable';
 import { formatDate } from '../../../utils/helpers';
 import api from '../../../config/api';
 
-const ProjectIndentTemplateList = ({ templateType, title }) => {
+const ProjectIndentTemplateList = ({ title = "Template Master for DP Project" }) => {
+  const { message } = App.useApp();
   const navigate = useNavigate();
   const [refreshKey, setRefreshKey] = useState(0);
 
   const fetchTemplates = async (params) => {
     return api.get('/masters/project-indent-templates/list', {
-      params: {
-        ...params,
-        template_type: templateType,
-      },
+      params,
     });
   };
 
   const handleConfigure = () => {
-    const routeType = templateType === 'consumables' ? 'ap104-consumables' : 'ap104-install';
-    navigate(`/inventory/masters/${routeType}/new`);
+    navigate('/inventory/masters/project-templates/new');
   };
 
   const handleEdit = (record) => {
-    const routeType = templateType === 'consumables' ? 'ap104-consumables' : 'ap104-install';
-    navigate(`/inventory/masters/${routeType}/edit/${record.project_id}`);
+    navigate(`/inventory/masters/project-templates/edit/${record.id}`);
   };
 
   const columns = [
@@ -38,8 +34,19 @@ const ProjectIndentTemplateList = ({ templateType, title }) => {
       sorter: true,
       render: (text, record) => (
         <a onClick={() => handleEdit(record)} style={{ fontWeight: 600, color: '#096dd9' }}>
-          {text}
+          {text || 'N/A'}
         </a>
+      ),
+    },
+    {
+      title: 'Template Name',
+      dataIndex: 'template_name',
+      key: 'template_name',
+      width: 220,
+      render: (text) => (
+        <Tag color="blue" style={{ fontSize: 13, padding: '4px 8px', fontWeight: 600 }}>
+          {text}
+        </Tag>
       ),
     },
     {
@@ -50,21 +57,10 @@ const ProjectIndentTemplateList = ({ templateType, title }) => {
       render: (text) => text || '-',
     },
     {
-      title: 'Template Type',
-      dataIndex: 'template_type',
-      key: 'template_type',
-      width: 150,
-      render: (text) => (
-        <span style={{ textTransform: 'capitalize', fontWeight: 500 }}>
-          {text}
-        </span>
-      ),
-    },
-    {
-      title: 'Total Configured Items',
+      title: 'Configured Items',
       dataIndex: 'items_count',
       key: 'items_count',
-      width: 200,
+      width: 180,
       align: 'center',
       render: (count) => (
         <span style={{ fontWeight: 'bold', color: count > 0 ? '#52c41a' : '#faad14' }}>
@@ -82,11 +78,11 @@ const ProjectIndentTemplateList = ({ templateType, title }) => {
     {
       title: 'Actions',
       key: 'actions',
-      width: 120,
+      width: 100,
       align: 'center',
       render: (_, record) => (
         <Space size="middle">
-          <Tooltip title="Edit configured items">
+          <Tooltip title="Edit template items">
             <Button
               type="primary"
               ghost
@@ -104,14 +100,14 @@ const ProjectIndentTemplateList = ({ templateType, title }) => {
     <div>
       <PageHeader
         title={title}
-        subtitle={`Manage fixed items and quantities master templates for project ${templateType}`}
+        subtitle="Manage master item templates with fixed quantities for DP projects"
       >
         <Button
           type="primary"
           icon={<PlusOutlined />}
           onClick={handleConfigure}
         >
-          Configure Project Template
+          Create Template Master
         </Button>
       </PageHeader>
 
@@ -120,8 +116,8 @@ const ProjectIndentTemplateList = ({ templateType, title }) => {
         columns={columns}
         fetchFunction={fetchTemplates}
         rowKey="id"
-        searchPlaceholder="Search by project name or code..."
-        exportFileName={`project_indent_templates_${templateType}`}
+        searchPlaceholder="Search by template name, project name or code..."
+        exportFileName="dp_project_templates"
       />
     </div>
   );

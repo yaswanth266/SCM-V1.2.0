@@ -95,8 +95,8 @@ export default function AcknowledgementSelectorScreen() {
             <Feather name="file-text" size={22} color="#481890" />
           </View>
           <View style={styles.textContainer}>
-            <Text style={styles.cardTitle}>Field Indents</Text>
-            <Text style={styles.cardDesc}>Acknowledge and accept material issues raised for field site indents.</Text>
+            <Text style={styles.cardTitle}>Indents</Text>
+            <Text style={styles.cardDesc}>Acknowledge and accept material issues raised for site indents.</Text>
           </View>
           <Feather name="chevron-right" size={18} color="#94A3B8" />
         </TouchableOpacity>

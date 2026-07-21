@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import {
-  Card, Form, Space, Button, Select, InputNumber, Row, Col, Spin, Tooltip, message
+  Card, Form, Space, Button, Select, Input, InputNumber, Row, Col, Spin, Tooltip, App
 } from 'antd';
 import { ArrowLeftOutlined, PlusOutlined, DeleteOutlined, SaveOutlined } from '@ant-design/icons';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -9,16 +9,16 @@ import ItemSelector from '../../../components/ItemSelector';
 import api from '../../../config/api';
 import { getErrorMessage } from '../../../utils/helpers';
 
-const ProjectIndentTemplateForm = ({ templateType, title }) => {
+const ProjectIndentTemplateForm = ({ title = "Template Master for DP Project" }) => {
+  const { message } = App.useApp();
   const navigate = useNavigate();
-  const { projectId } = useParams();
+  const { id } = useParams();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [projects, setProjects] = useState([]);
   const [uoms, setUoms] = useState([]);
 
-  // Fetch Lookups
   const loadLookups = useCallback(async () => {
     try {
       const [projRes, uomRes] = await Promise.allSettled([
@@ -28,7 +28,7 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
 
       if (projRes.status === 'fulfilled') {
         const data = projRes.value.data?.items || projRes.value.data?.data || projRes.value.data || [];
-        setProjects(data.map((p) => ({ label: p.name || p.project_name, value: p.id })));
+        setProjects(data.map((p) => ({ label: `${p.name} (${p.code || ''})`, value: p.id })));
       }
 
       if (uomRes.status === 'fulfilled') {
@@ -40,30 +40,21 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
     }
   }, []);
 
-  const fetchTemplateForProject = useCallback(async (pId) => {
-    if (!pId) {
-      form.setFieldsValue({ items: [{ item_id: undefined, quantity: 1, uom_id: undefined }] });
-      return;
-    }
-
+  const fetchTemplateById = useCallback(async (templateId) => {
+    if (!templateId) return;
     setLoading(true);
     try {
-      const res = await api.get('/masters/project-indent-templates', {
-        params: { project_id: pId, template_type: templateType }
-      });
+      const res = await api.get(`/masters/project-indent-templates/${templateId}`);
       const data = res.data;
       if (data) {
         form.setFieldsValue({
+          project_id: data.project_id,
+          template_name: data.template_name,
           items: (data.items || []).map((c) => ({
             item_id: c.item_id,
             quantity: Number(c.quantity) || 1,
             uom_id: c.uom_id,
           })),
-        });
-        message.info(`Loaded existing template configuration for this project`);
-      } else {
-        form.setFieldsValue({
-          items: [{ item_id: undefined, quantity: 1, uom_id: undefined }],
         });
       }
     } catch (err) {
@@ -71,28 +62,27 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
     } finally {
       setLoading(false);
     }
-  }, [form, templateType]);
+  }, [form]);
 
   useEffect(() => {
     loadLookups();
-    if (projectId) {
-      const pId = Number(projectId);
-      form.setFieldsValue({ project_id: pId });
-      fetchTemplateForProject(pId);
+    if (id) {
+      fetchTemplateById(id);
     } else {
       form.setFieldsValue({
         project_id: undefined,
+        template_name: '',
         items: [{ item_id: undefined, quantity: 1, uom_id: undefined }],
       });
     }
-  }, [templateType, projectId, loadLookups, fetchTemplateForProject, form]);
+  }, [id, loadLookups, fetchTemplateById, form]);
 
   const handleItemChange = (val, itemObj, index) => {
     if (itemObj) {
       const currentItems = form.getFieldValue('items') || [];
       const isDuplicate = currentItems.some((item, idx) => item?.item_id === val && idx !== index);
       if (isDuplicate) {
-        message.warning('Item already exists in the template. Please update its quantity.');
+        message.warning('Item already added to this template form. Please update its quantity.');
         currentItems[index] = {
           ...currentItems[index],
           item_id: undefined,
@@ -111,8 +101,7 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
   };
 
   const handleBack = () => {
-    const routeType = templateType === 'consumables' ? 'ap104-consumables' : 'ap104-install';
-    navigate(`/inventory/masters/${routeType}`);
+    navigate('/inventory/masters/project-templates');
   };
 
   const handleSubmit = async () => {
@@ -131,8 +120,10 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
       }
 
       const payload = {
+        ...(id && id !== 'new' ? { id: Number(id) } : {}),
         project_id: values.project_id,
-        template_type: templateType,
+        template_name: values.template_name.trim(),
+        template_type: 'dp_project',
         items: values.items.map((c) => ({
           item_id: c.item_id,
           quantity: c.quantity,
@@ -142,7 +133,7 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
 
       setSubmitting(true);
       await api.post('/masters/project-indent-templates', payload);
-      message.success('Project indent template configured successfully');
+      message.success('Template Master saved successfully');
       handleBack();
     } catch (err) {
       if (err.errorFields) return;
@@ -154,7 +145,7 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
 
   return (
     <div>
-      <PageHeader title={title} subtitle="Configure fixed items and quantities for this project">
+      <PageHeader title={title} subtitle="Create or edit master item template for DP projects">
         <Space>
           <Button icon={<ArrowLeftOutlined />} onClick={handleBack}>Back to List</Button>
           <Button type="primary" icon={<SaveOutlined />} onClick={handleSubmit} loading={submitting}>
@@ -162,7 +153,7 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
           </Button>
         </Space>
       </PageHeader>
-      <Card>
+      <Card style={{ borderRadius: 12, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
         <Spin spinning={loading}>
           <Form form={form} layout="vertical">
             <Row gutter={16}>
@@ -173,19 +164,29 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
                   rules={[{ required: true, message: 'Please select a project' }]}
                 >
                   <Select
-                    placeholder="Select project to configure template"
+                    placeholder="Select project"
                     options={projects}
                     showSearch
                     optionFilterProp="label"
-                    onChange={(val) => fetchTemplateForProject(val)}
-                    disabled={!!projectId}
                   />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12}>
+                <Form.Item
+                  name="template_name"
+                  label="Template Name"
+                  rules={[{ required: true, message: 'Template Name is mandatory' }]}
+                >
+                  <Input placeholder="Enter unique template name (e.g. Consumables Pack A, Install Kit 1)" />
                 </Form.Item>
               </Col>
             </Row>
 
             <div style={{ marginTop: 24 }}>
-              <span style={{ fontWeight: 'bold', fontSize: 16 }}>Template Items & Quantities</span>
+              <span style={{ fontWeight: 'bold', fontSize: 16 }}>Template Items & Fixed Quantities</span>
+              <p style={{ color: '#8c8c8c', fontSize: 13, marginTop: 4 }}>
+                Note: Each item can only be part of one template per project.
+              </p>
               <div style={{ marginTop: 12 }}>
                 <Form.List
                   name="items"
@@ -213,9 +214,6 @@ const ProjectIndentTemplateForm = ({ templateType, title }) => {
                               <ItemSelector
                                 placeholder="Search item..."
                                 onChange={(val, itemObj) => handleItemChange(val, itemObj, index)}
-                                extraParams={{
-                                  item_type: templateType === 'consumables' ? 'consumable' : 'asset'
-                                }}
                               />
                             </Form.Item>
                           </Col>

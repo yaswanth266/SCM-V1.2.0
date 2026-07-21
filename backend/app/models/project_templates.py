@@ -7,12 +7,13 @@ from app.database import Base
 class ProjectIndentTemplate(Base):
     __tablename__ = "project_indent_templates"
     __table_args__ = (
-        UniqueConstraint("project_id", "template_type", name="uq_project_template_type"),
+        UniqueConstraint("project_id", "template_name", name="uq_project_template_name"),
     )
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     project_id = Column(BigInteger, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    template_type = Column(String(50), nullable=False)  # consumables, install
+    template_name = Column(String(100), nullable=True)
+    template_type = Column(String(50), nullable=True, default="dp_project")  # legacy or category
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
 
