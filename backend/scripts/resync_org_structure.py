@@ -335,9 +335,14 @@ async def fetch_all(client, headers):
         print(f"  Total: {len(employee_rows)} employees\n")
 
         print("[3/5] Fetching positions from HRMS API...")
-        position_rows, pos_count = await _fetch_all_paginated(client, headers,
-                                                             _pos_base_url(), "positions")
-        print(f"  Total: {len(position_rows)} positions\n")
+        try:
+            position_rows, pos_count = await _fetch_all_paginated(client, headers,
+                                                                 _pos_base_url(), "positions")
+            print(f"  Total: {len(position_rows)} positions\n")
+        except Exception as e:
+            print(f"\n  WARNING: Failed to fetch positions from positions API: {e}")
+            print("  Gracefully falling back to extracting positions exclusively from employee records.\n")
+            position_rows, pos_count = [], 0
         return employee_rows, emp_count, position_rows, pos_count
 
 
@@ -346,6 +351,104 @@ async def fetch_all(client, headers):
 # ---------------------------------------------------------------------------
 
 async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos_expected=0):
+    # Normalize employee_rows if they are in the flat live API format
+    normalized_employee_rows = []
+    for row in employee_rows:
+        if "employee" not in row:
+            # Extract office details
+            loc = row.get("location_details") or {}
+            pos_list = row.get("positions_details") or []
+            p = pos_list[0] if pos_list else {}
+            
+            # Generate a code if not present
+            pos_code = p.get("code") or p.get("position_code")
+            if not pos_code and p.get("name"):
+                pos_code = normalize_position_key(p.get("name"))
+            if not pos_code:
+                pos_code = f"POS-{p.get('id') or 'UNKNOWN'}"
+                
+            office_data = {
+                "id": loc.get("office_id") or p.get("office_id"),
+                "name": loc.get("office_name") or p.get("office_name") or f"Office-{loc.get('office_id') or p.get('office_id') or 'UNKNOWN'}",
+                "level": loc.get("office_level_name") or loc.get("level") or "FACILITATE",
+                "geo_location": {
+                    "country": loc.get("country") or "India",
+                    "state": loc.get("state") or "ANDHRA PRADESH",
+                    "district": loc.get("district"),
+                    "mandal": loc.get("mandal"),
+                    "cluster": loc.get("cluster"),
+                    "cluster_type": loc.get("cluster_type"),
+                    "specific_location": loc.get("specific_location"),
+                    "address": loc.get("address")
+                }
+            }
+            
+            # Extract parent reporting details
+            rep = row.get("reporting_to_details") or {}
+            reporting_to_list = []
+            if rep:
+                reporting_to_list.append({
+                    "id": rep.get("position_id"),
+                    "position_name": rep.get("position_name"),
+                    "code": rep.get("position_code"),
+                    "employee_id": rep.get("id"),
+                    "employee_name": rep.get("name")
+                })
+            
+            pos_data = {
+                "id": p.get("id"),
+                "name": p.get("name") or "Unknown Position",
+                "code": pos_code,
+                "role_name": p.get("role_name"),
+                "role_code": p.get("role_code"),
+                "level_name": p.get("level_name") or f"Level-{p.get('level_id') or 5}",
+                "level_rank": p.get("level_rank") or p.get("level_id") or 5,
+                "department": p.get("department_name"),
+                "section": p.get("section_name") or p.get("section"),
+                "job_name": p.get("job_name") or p.get("role_name"),
+                "job_family_name": p.get("job_family_name"),
+                "job_family_id": p.get("job_family_id"),
+                "role_type_id": p.get("role_type_id"),
+                "status": p.get("status") or "active",
+                "start_date": p.get("start_date"),
+                "reporting_to": reporting_to_list
+            }
+            
+            proj_name = row.get("project_name") or p.get("project_name") or "AP-104-MMUS"
+            proj_code = row.get("project_code") or p.get("project_code") or (proj_name.replace(" ", "-") if proj_name else "AP-104-MMUS")
+            
+            project_data = {
+                "id": row.get("project_id") or p.get("project_id") or 4,
+                "name": proj_name,
+                "code": proj_code
+            }
+            
+            normalized_row = {
+                "employee": {
+                    "id": row.get("id"),
+                    "name": row.get("name"),
+                    "employee_code": row.get("employee_code"),
+                    "photo": row.get("photo"),
+                    "status": row.get("status") or "Active",
+                    "dob": row.get("dob"),
+                    "gender": row.get("gender"),
+                    "pan_number": row.get("pan_number"),
+                    "aadhaar_number": row.get("aadhaar_number"),
+                    "email": row.get("email"),
+                    "phone": row.get("phone")
+                },
+                "position": pos_data,
+                "project": project_data,
+                "office": office_data,
+                "bank_details": row.get("bank_details"),
+                "hire_date": row.get("hire_date")
+            }
+            normalized_employee_rows.append(normalized_row)
+        else:
+            normalized_employee_rows.append(row)
+            
+    employee_rows = normalized_employee_rows
+
     print("[4/5] Syncing projects, offices, positions, employees...")
     stats = {"projects": 0, "offices": 0, "positions": 0, "employees": 0}
     created_parent_employees = set()
@@ -911,6 +1014,7 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
         await db.commit()
     except Exception as e:
         print(f"  WARN: Error during post-sync warehousing/user linkage: {e}")
+        await db.rollback()
 
     # Run post-sync database integrity validations
     print("Running post-sync database integrity validations...")
