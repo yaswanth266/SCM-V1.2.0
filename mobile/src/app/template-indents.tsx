@@ -204,6 +204,115 @@ const StatusFlow = ({ currentStatus }: { currentStatus: string }) => {
   );
 };
 
+// ─── Custom Pagination Footer ──────────────────────────────────────────────────
+const PaginationFooter = ({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  loading = false,
+  themeColor = '#7C3AED',
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (newPage: number) => void;
+  loading?: boolean;
+  themeColor?: string;
+}) => {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const startItem = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const endItem = Math.min(page * pageSize, total);
+
+  if (total <= 0) return null;
+
+  return (
+    <View style={paginationStyles.container}>
+      <Text style={paginationStyles.infoText}>
+        Showing <Text style={{ fontWeight: '700', color: '#1E293B' }}>{startItem}-{endItem}</Text> of <Text style={{ fontWeight: '700', color: '#1E293B' }}>{total}</Text> items
+      </Text>
+      <View style={paginationStyles.controlsRow}>
+        <TouchableOpacity
+          style={[paginationStyles.pageBtn, { backgroundColor: themeColor }, (page <= 1 || loading) && paginationStyles.pageBtnDisabled]}
+          disabled={page <= 1 || loading}
+          onPress={() => onPageChange(page - 1)}
+        >
+          <Text style={[paginationStyles.pageBtnText, (page <= 1 || loading) && paginationStyles.pageBtnTextDisabled]}>‹ Prev</Text>
+        </TouchableOpacity>
+
+        <View style={paginationStyles.pageBadge}>
+          <Text style={paginationStyles.pageBadgeText}>Page {page} of {totalPages}</Text>
+        </View>
+
+        <TouchableOpacity
+          style={[paginationStyles.pageBtn, { backgroundColor: themeColor }, (page >= totalPages || loading) && paginationStyles.pageBtnDisabled]}
+          disabled={page >= totalPages || loading}
+          onPress={() => onPageChange(page + 1)}
+        >
+          <Text style={[paginationStyles.pageBtnText, (page >= totalPages || loading) && paginationStyles.pageBtnTextDisabled]}>Next ›</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
+
+const paginationStyles = StyleSheet.create({
+  container: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    marginTop: 12,
+    marginBottom: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  infoText: {
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 10,
+  },
+  controlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  pageBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#7C3AED',
+  },
+  pageBtnDisabled: {
+    backgroundColor: '#E2E8F0',
+  },
+  pageBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  pageBtnTextDisabled: {
+    color: '#94A3B8',
+  },
+  pageBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 6,
+  },
+  pageBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#334155',
+  },
+});
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function TemplateIndentsScreen() {
   const typeTitle = 'Template Indent';
@@ -214,8 +323,7 @@ export default function TemplateIndentsScreen() {
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-
-  // List state
+  const [loadingMore, setLoadingMore] = useState(false);
   const [indents, setIndents] = useState<any[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -271,7 +379,7 @@ export default function TemplateIndentsScreen() {
 
   const fetchList = async (tok: string, pageNum: number, searchQ: string, statusQ: string) => {
     try {
-      if (pageNum === 1) setLoading(true);
+      if (pageNum === 1) setLoading(true); else setLoadingMore(true);
       const params: any = { page: pageNum, page_size: 20, template_type: 'dp_project' };
       if (searchQ) params.search = searchQ;
       if (statusQ) params.status = statusQ;
@@ -280,14 +388,21 @@ export default function TemplateIndentsScreen() {
       });
       const data = res.data;
       const items = data.items || data.data || [];
-      if (pageNum === 1) setIndents(items); else setIndents(p => [...p, ...items]);
-      setTotal(data.total || items.length);
+      setIndents(items);
+      setTotal(data.total ?? data.total_items ?? data.count ?? items.length);
       setPage(pageNum);
     } catch (e) {
       console.error(e);
     } finally {
       setLoading(false);
       setRefreshing(false);
+      setLoadingMore(false);
+    }
+  };
+
+  const loadMore = () => {
+    if (indents.length < total && !loading && !loadingMore && !refreshing) {
+      fetchList(token, page + 1, search, filterStatus);
     }
   };
 
@@ -587,10 +702,17 @@ export default function TemplateIndentsScreen() {
         <FlatList
           data={indents}
           keyExtractor={(item) => item.id.toString()}
-          contentContainerStyle={styles.listContent}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-          onEndReached={() => { if (indents.length < total && !loading) fetchList(token, page + 1, search, filterStatus); }}
-          onEndReachedThreshold={0.2}
+          ListFooterComponent={
+            <PaginationFooter
+              page={page}
+              pageSize={20}
+              total={total}
+              loading={loading || loadingMore}
+              themeColor={themeColor}
+              onPageChange={(p) => fetchList(token, p, search, filterStatus)}
+            />
+          }
           renderItem={({ item }) => (
             <TouchableOpacity style={styles.card} activeOpacity={0.7} onPress={() => openDetail(item.id)}>
               <View style={styles.cardHeader}>

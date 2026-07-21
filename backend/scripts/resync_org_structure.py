@@ -243,7 +243,7 @@ async def _fetch_all_paginated(client, headers, base_url, label):
     import math
     PAGE_SIZE = 100
     print(f"  Fetching page 1 for {label}...")
-    url = f"{base_url}?page_size={PAGE_SIZE}&page=1"
+    url = f"{base_url}?page_size={PAGE_SIZE}&limit={PAGE_SIZE}&per_page={PAGE_SIZE}&page=1"
     
     first_page_items, payload = await _fetch_page(client, url, headers, 1, label)
     count = payload.get("count") or len(first_page_items)
@@ -263,7 +263,7 @@ async def _fetch_all_paginated(client, headers, base_url, label):
     batch_size = 2
     tasks = []
     for page in range(2, total_pages + 1):
-        url = f"{base_url}?page_size={PAGE_SIZE}&page={page}"
+        url = f"{base_url}?page_size={PAGE_SIZE}&limit={PAGE_SIZE}&per_page={PAGE_SIZE}&page={page}"
         tasks.append((page, url))
 
     for i in range(0, len(tasks), batch_size):
@@ -1222,7 +1222,15 @@ async def main():
 
         async with AsyncSessionLocal() as db:
             org_res = await db.execute(text("SELECT id FROM organizations LIMIT 1"))
-            org_id = org_res.scalar() or 1
+            org_id = org_res.scalar()
+            if not org_id:
+                await db.execute(text("""
+                    INSERT INTO organizations (id, name, code, is_active, created_at, updated_at)
+                    VALUES (1, 'BHSPL', 'BHSPL', 1, NOW(), NOW())
+                    ON DUPLICATE KEY UPDATE name=VALUES(name)
+                """))
+                await db.commit()
+                org_id = 1
             await sync_all(db, employee_rows, position_rows, org_id=org_id, emp_expected=emp_count, pos_expected=pos_count)
 
     print("\nDone!")

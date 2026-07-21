@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   StyleSheet,
   Text,
@@ -134,11 +134,119 @@ const formatDateTime = (dateStr: string | null | undefined): string => {
   }
 };
 
+// ─── Custom Pagination Footer ──────────────────────────────────────────────────
+const PaginationFooter = ({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+  loading = false,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (newPage: number) => void;
+  loading?: boolean;
+}) => {
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const startItem = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const endItem = Math.min(page * pageSize, total);
+
+  if (total <= 0) return null;
+
+  return (
+    <View style={paginationStyles.container}>
+      <Text style={paginationStyles.infoText}>
+        Showing <Text style={{ fontWeight: '700', color: '#1E293B' }}>{startItem}-{endItem}</Text> of <Text style={{ fontWeight: '700', color: '#1E293B' }}>{total}</Text> items
+      </Text>
+      <View style={paginationStyles.controlsRow}>
+        <TouchableOpacity
+          style={[paginationStyles.pageBtn, (page <= 1 || loading) && paginationStyles.pageBtnDisabled]}
+          disabled={page <= 1 || loading}
+          onPress={() => onPageChange(page - 1)}
+        >
+          <Text style={[paginationStyles.pageBtnText, (page <= 1 || loading) && paginationStyles.pageBtnTextDisabled]}>‹ Prev</Text>
+        </TouchableOpacity>
+
+        <View style={paginationStyles.pageBadge}>
+          <Text style={paginationStyles.pageBadgeText}>Page {page} of {totalPages}</Text>
+        </View>
+
+        <TouchableOpacity
+          style={[paginationStyles.pageBtn, (page >= totalPages || loading) && paginationStyles.pageBtnDisabled]}
+          disabled={page >= totalPages || loading}
+          onPress={() => onPageChange(page + 1)}
+        >
+          <Text style={[paginationStyles.pageBtnText, (page >= totalPages || loading) && paginationStyles.pageBtnTextDisabled]}>Next ›</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
+
+const paginationStyles = StyleSheet.create({
+  container: {
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    marginTop: 12,
+    marginBottom: 24,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  infoText: {
+    fontSize: 12,
+    color: '#64748B',
+    marginBottom: 10,
+  },
+  controlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  pageBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#4A1060',
+  },
+  pageBtnDisabled: {
+    backgroundColor: '#E2E8F0',
+  },
+  pageBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  pageBtnTextDisabled: {
+    color: '#94A3B8',
+  },
+  pageBadge: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#F1F5F9',
+    borderRadius: 6,
+  },
+  pageBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#334155',
+  },
+});
+
 export default function ApprovalsScreen() {
   const [token, setToken] = useState<string>('');
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
 
   // List & Filter
   const [approvals, setApprovals] = useState<any[]>([]);
@@ -191,7 +299,11 @@ export default function ApprovalsScreen() {
     tab: string
   ) => {
     try {
-      if (pageNum === 1) setLoading(true);
+      if (pageNum === 1) {
+        setLoading(true);
+      } else {
+        setLoadingMore(true);
+      }
       const response = await axios.get(`${apiBase}/api/v1/approvals/pending`, {
         headers: { Authorization: `Bearer ${authToken}` },
         params: {
@@ -203,12 +315,8 @@ export default function ApprovalsScreen() {
 
       const resData = response.data;
       const items = resData.items || resData.data || response.data || [];
-      if (pageNum === 1) {
-        setApprovals(items);
-      } else {
-        setApprovals((prev) => [...prev, ...items]);
-      }
-      setTotal(resData.total || items.length);
+      setApprovals(items);
+      setTotal(resData.total ?? resData.total_items ?? resData.count ?? items.length);
       setPage(pageNum);
     } catch (e) {
       console.error(e);
@@ -216,6 +324,7 @@ export default function ApprovalsScreen() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+      setLoadingMore(false);
     }
   };
 
@@ -225,7 +334,7 @@ export default function ApprovalsScreen() {
   };
 
   const loadMore = () => {
-    if (approvals.length < total && !loading) {
+    if (approvals.length < total && !loading && !loadingMore && !refreshing) {
       fetchApprovals(API_BASE_URL, token, page + 1, activeTab);
     }
   };
@@ -414,9 +523,16 @@ export default function ApprovalsScreen() {
           data={approvals}
           keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={styles.listContent}
-          onEndReached={loadMore}
-          onEndReachedThreshold={0.2}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
+          ListFooterComponent={
+            <PaginationFooter
+              page={page}
+              pageSize={15}
+              total={total}
+              loading={loading || loadingMore}
+              onPageChange={(p) => fetchApprovals(API_BASE_URL, token, p, activeTab)}
+            />
+          }
           renderItem={({ item }) => {
             const statusStyle = getStatusStyle(item.status);
             const dateStr = item.created_at ? formatDateTime(item.created_at) : '-';
