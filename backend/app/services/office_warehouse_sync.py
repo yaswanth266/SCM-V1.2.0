@@ -68,11 +68,16 @@ async def sync_office_to_warehouse(db: AsyncSession, office: Office, organizatio
         wh.address_line1 = office.address or office.specific_location
         wh.parent_id = parent_wh_id
     else:
-        code_dup = await db.scalar(select(Warehouse).where(Warehouse.code == wh_code))
-        if code_dup:
-            wh_code = f"{wh_code}_{office.id}"
-            if len(wh_code) > 50:
-                wh_code = wh_code[-50:]
+        attempt = 0
+        base_wh_code = wh_code
+        while True:
+            code_dup = await db.scalar(select(Warehouse).where(Warehouse.code == wh_code))
+            if not code_dup:
+                break
+            attempt += 1
+            suffix = f"_{office.id}" if attempt == 1 else f"_{office.id}_{attempt}"
+            max_len = 50 - len(suffix)
+            wh_code = f"{base_wh_code[:max_len]}{suffix}"
                 
         wh = Warehouse(
             organization_id=organization_id,

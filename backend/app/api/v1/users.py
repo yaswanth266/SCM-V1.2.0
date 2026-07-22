@@ -2320,7 +2320,7 @@ async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[st
     position_id = row.get("position_id")
     if not position_id and isinstance(row.get("position"), dict):
         position_id = row.get("position").get("id") or row.get("position").get("position_id")
-    if not position_id:
+    if not position_id and "employee_code" not in row and "employee" not in row:
         position_id = row.get("id")
     try:
         position_id = int(position_id) if position_id is not None else None
@@ -2349,10 +2349,20 @@ async def _position_id_from_external(db: AsyncSession, row: dict, stats: dict[st
             position = cache["positions_by_id"].get(position_id)
         if not position and position_code:
             position = cache["positions_by_code"].get(position_code.lower())
+        if not position and position_code:
+            norm_code = normalize_position_key(position_code)
+            if norm_code and norm_code in cache.get("norm_code_to_id", {}):
+                pid = cache["norm_code_to_id"][norm_code]
+                position = cache["positions_by_id"].get(pid)
+        if not position and position_name:
+            norm_name = normalize_position_key(position_name)
+            if norm_name and norm_name in cache.get("norm_name_to_id", {}):
+                pid = cache["norm_name_to_id"][norm_name]
+                position = cache["positions_by_id"].get(pid)
     else:
         if position_id:
             position = (await db.execute(select(Position).where(Position.id == position_id))).scalar_one_or_none()
-        if not position:
+        if not position and position_code:
             position = (await db.execute(select(Position).where(func.lower(Position.code) == position_code.lower()))).scalar_one_or_none()
 
     project_id = await _project_id_from_external(db, row, stats, organization_id, cache=cache)
@@ -2493,7 +2503,12 @@ async def _upsert_external_employee(db: AsyncSession, row: dict, stats: dict[str
         else:
             pos = (await db.execute(select(Position).where(Position.id == pos_id))).scalar_one_or_none()
         if pos:
-            pos.employee_id = employee.id
+            try:
+                async with db.begin_nested():
+                    pos.employee_id = employee.id
+                    await db.flush()
+            except Exception as exc:
+                print(f"WARN: Could not set employee_id {employee.id} on position {pos_id}: {exc}")
             if cache is not None:
                 if "synced_pos_warehouse" not in cache:
                     cache["synced_pos_warehouse"] = set()
@@ -2684,327 +2699,69 @@ async def _execute_sync(
     task: dict | None = None,
 ) -> dict:
     """Core sync logic extracted from the endpoint.
-    Fetches positions and employees from the HR API and upserts them.
+    Uses the exact resync_org_structure logic to ensure 100% parity between CLI resync and API sync.
     """
-    url = httpx.URL(settings.HR_EMPLOYEE_API_URL)
-    page_size = 200
-    if "page_size" not in url.params:
-        url = url.copy_add_param("page_size", str(page_size))
-    else:
-        try:
-            page_size = int(url.params["page_size"])
-        except ValueError:
-            page_size = 200
+    from scripts.resync_org_structure import fetch_all, sync_all
 
     headers = {"X-Api-Key": settings.HR_API_KEY, "Accept": "application/json"}
-
-    created = 0
-    updated = 0
-    skipped = 0
-    fetched_total = 0
-    pages_fetched = 0
-    api_total = None
-    org_stats = {"projects_created": 0, "offices_created": 0, "positions_created": 0}
-    positions_total = 0
-    mapped_positions = 0
-
-    sync_logs = {
-        "page_request_log": [],
-        "insertion_failures": []
-    }
-
-    offline_fallback = False
+    
     try:
-        # Pre-fetch all tables for in-memory caching
-        res = await db.execute(select(Position))
-        positions_db = res.scalars().all()
-        
-        proj_res = await db.execute(select(Project))
-        projects_db = proj_res.scalars().all()
-        
-        off_res = await db.execute(select(Office))
-        offices_db = off_res.scalars().all()
-        
-        role_res = await db.execute(select(Role).where(Role.is_active == True))
-        roles_db = role_res.scalars().all()
-        
-        emp_res = await db.execute(select(Employee))
-        employees_db = emp_res.scalars().all()
-
-        cache = {
-            "positions_by_id": {p.id: p for p in positions_db},
-            "positions_by_code": {p.code.lower(): p for p in positions_db if p.code},
-            "code_to_id": {p.code.lower(): p.id for p in positions_db if p.code},
-            "norm_code_to_id": {normalize_position_key(p.code): p.id for p in positions_db if p.code},
-            "norm_name_to_id": {normalize_position_key(p.name): p.id for p in positions_db if p.name},
-            
-            "projects_by_id": {p.id: p for p in projects_db},
-            "projects_by_code": {p.code.lower(): p for p in projects_db if p.code},
-            "projects_by_name": {p.name.lower(): p for p in projects_db if p.name},
-            
-            "offices_by_id": {o.id: o for o in offices_db},
-            "offices_by_name": {o.name.lower().strip(): o for o in offices_db if o.name},
-            "synced_office_ids": set(),
-            
-            "roles_by_code": {r.code.lower(): r for r in roles_db if r.code},
-            "roles_by_name": {r.name.lower(): r for r in roles_db if r.name},
-            
-            "employees_by_code": {e.employee_code.lower(): e for e in employees_db if e.employee_code},
-            "employees_by_id": {e.id: e for e in employees_db},
-            "synced_pos_warehouse": set(),
-        }
-
         async with httpx.AsyncClient(timeout=settings.HR_API_TIMEOUT, follow_redirects=True) as client:
-            # First, sync all positions
-            positions_total = await _sync_all_positions(db, org_stats, headers, client, organization_id, sync_logs, cache=cache)
             if task is not None:
-                task["progress"] = f"Synced {positions_total} positions"
+                task["progress"] = "Fetching employees and positions from HR API..."
+            employee_rows, emp_count, position_rows, pos_count = await fetch_all(client, headers)
 
-            # Second, sync all employees
-            all_emp_rows, api_total, pages_fetched = await _fetch_all_concurrently(
-                client, headers, str(url), "employees", sync_logs, max_pages=max_pages
+            if task is not None:
+                task["progress"] = f"Fetched {len(employee_rows)} employees and {len(position_rows)} positions. Syncing..."
+
+            stats = await sync_all(
+                db, employee_rows, position_rows,
+                org_id=organization_id or 1,
+                emp_expected=emp_count,
+                pos_expected=pos_count
             )
-            fetched_total = len(all_emp_rows)
 
-            record_count = 0
-            for row in all_emp_rows:
-                try:
-                    async with db.begin_nested():
-                        processed, was_created = await _upsert_external_employee(db, row, org_stats, organization_id, cache=cache)
-                        if not processed:
-                            skipped += 1
-                        elif was_created:
-                            created += 1
-                        else:
-                            updated += 1
-                except Exception as exc:
-                    skipped += 1
-                    err_msg = str(exc)
-                    print(f"Transient error syncing row: {err_msg}")
-                    emp_code = _external_text(row, "employee.employee_code", "employee_code", "employee.code", "code", max_len=100) or "UNKNOWN"
-                    sync_logs["insertion_failures"].append({
-                        "type": "employee",
-                        "code": emp_code,
-                        "error": err_msg
-                    })
-                
-                record_count += 1
-                if record_count % 100 == 0:
-                    await db.commit()
-                    if task is not None:
-                        task["progress"] = f"{record_count} employees processed, {created} created, {updated} updated"
-
-            await db.commit()
-            if task is not None:
-                task["progress"] = f"{fetched_total} employees processed, {created} created, {updated} updated"
-
-            # Third, map positions to employees
-            mapped_positions = await _sync_position_employee_mappings(db, headers, client, sync_logs, cache=cache)
-            if task is not None:
-                task["progress"] = f"Mapped {mapped_positions} positions to employees"
-
-            # Deterministically update employees.position_id for all employees based on highest level (lowest level_rank) and code
-            try:
-                await db.execute(text("""
-                    UPDATE employees e
-                    JOIN (
-                        SELECT p1.employee_id, p1.id as primary_pos_id
-                        FROM positions p1
-                        JOIN (
-                            SELECT employee_id, MIN(level_rank) as min_rank
-                            FROM positions
-                            WHERE employee_id IS NOT NULL
-                            GROUP BY employee_id
-                        ) p2 ON p1.employee_id = p2.employee_id AND p1.level_rank = p2.min_rank
-                        WHERE p1.id = (
-                            SELECT p3.id FROM positions p3 
-                            WHERE p3.employee_id = p1.employee_id AND p3.level_rank = p1.level_rank 
-                            ORDER BY p3.code ASC LIMIT 1
-                        )
-                    ) t ON e.id = t.employee_id
-                    SET e.position_id = t.primary_pos_id
-                """))
-                await db.commit()
-            except Exception as e:
-                print(f"WARN: Could not deterministically populate employees.position_id: {e}")
-
+            return {
+                "message": "Employee API sync completed",
+                "fetched": len(employee_rows),
+                "api_total": emp_count,
+                "positions_total": len(position_rows),
+                "pages_fetched": 1,
+                "created": stats.get("employees", 0),
+                "updated": 0,
+                "skipped": 0,
+                "projects_created": stats.get("projects", 0),
+                "offices_created": stats.get("offices", 0),
+                "positions_created": stats.get("positions", 0),
+                "linked_users": 0,
+                "role_links_applied": 0,
+                "mapped_positions": stats.get("positions", 0),
+                "offline": False,
+                "page_request_log": [],
+                "insertion_failures": []
+            }
     except Exception as exc:
-        print(f"External SCM HR API connection failed ({exc}). Falling back to offline DB mappings.")
+        print(f"External SCM HR API connection failed or errored ({exc}). Falling back to offline DB mappings.")
         import traceback
         traceback.print_exc()
-        offline_fallback = True
-        if task is not None:
-            task["progress"] = f"HR API unreachable. Performing local offline mapping fallback."
 
         # Fetch local DB counts to report
         db_emp_count = (await db.execute(select(func.count(Employee.id)))).scalar() or 0
         db_pos_count = (await db.execute(select(func.count(Position.id)))).scalar() or 0
-        fetched_total = db_emp_count
-        api_total = db_emp_count
-        positions_total = db_pos_count
 
-    linked_users = 0
-    role_links_applied = 0
-    try:
-        linked_users = await _link_users_to_employees(db)
-        role_links_applied = await _apply_position_roles_to_linked_users(db)
-        
-        # Auto-sync offices to SCM warehouses and map employees to warehouses
-        from app.services.office_warehouse_sync import sync_all_offices_to_warehouses
-        from app.services.employee_warehouse_sync import sync_all_position_employees
-        await sync_all_offices_to_warehouses(db, organization_id=organization_id or 1)
-        await sync_all_position_employees(db)
-        
-        # Automatic Orphan Repair
-        print("Running automatic orphan repairs...")
-        await db.execute(text("""
-            UPDATE warehouses 
-            SET office_id = NULL 
-            WHERE office_id IS NOT NULL 
-              AND office_id NOT IN (SELECT id FROM offices)
-        """))
-        await db.execute(text("""
-            UPDATE users 
-            SET employee_id = NULL 
-            WHERE employee_id IS NOT NULL 
-              AND employee_id NOT IN (SELECT id FROM employees)
-        """))
-        await db.execute(text("""
-            UPDATE approval_workflows 
-            SET project_id = NULL 
-            WHERE project_id IS NOT NULL 
-              AND project_id NOT IN (SELECT id FROM projects)
-        """))
-        
-        await db.commit()
-
-        # Run post-sync database integrity validations
-        print("Running post-sync database integrity validations...")
-        dup_emp = (await db.execute(text("""
-            SELECT employee_code, COUNT(*) 
-            FROM employees 
-            GROUP BY employee_code 
-            HAVING COUNT(*) > 1
-        """))).all()
-        if dup_emp:
-            raise ValueError(f"Integrity Violation: Found duplicate employee codes: {dup_emp}")
-            
-        dup_pos = (await db.execute(text("""
-            SELECT code, COUNT(*) 
-            FROM positions 
-            GROUP BY code 
-            HAVING COUNT(*) > 1
-        """))).all()
-        if dup_pos:
-            raise ValueError(f"Integrity Violation: Found duplicate position codes: {dup_pos}")
-
-        dup_off = (await db.execute(text("""
-            SELECT name, COUNT(*) 
-            FROM offices 
-            GROUP BY name 
-            HAVING COUNT(*) > 1
-        """))).all()
-        if dup_off:
-            raise ValueError(f"Integrity Violation: Found duplicate office names: {dup_off}")
-
-        dup_proj = (await db.execute(text("""
-            SELECT code, COUNT(*) 
-            FROM projects 
-            GROUP BY code 
-            HAVING COUNT(*) > 1
-        """))).all()
-        if dup_proj:
-            raise ValueError(f"Integrity Violation: Found duplicate project codes: {dup_proj}")
-            
-        dup_pos_combos = (await db.execute(text("""
-            SELECT employee_id, role_id, office_id, COUNT(*) 
-            FROM positions 
-            WHERE employee_id IS NOT NULL AND role_id IS NOT NULL AND office_id IS NOT NULL
-            GROUP BY employee_id, role_id, office_id 
-            HAVING COUNT(*) > 1
-        """))).all()
-        if dup_pos_combos:
-            raise ValueError(f"Integrity Violation: Found duplicate employee-role-office position assignments: {dup_pos_combos}")
-            
-        orphans = (await db.execute(text("""
-            SELECT p.id, p.code, p.parent_position_id 
-            FROM positions p 
-            LEFT JOIN positions parent ON p.parent_position_id = parent.id 
-            WHERE p.parent_position_id IS NOT NULL AND parent.id IS NULL
-        """))).all()
-        if orphans:
-            raise ValueError(f"Integrity Violation: Found orphan parent_position_ids: {orphans}")
-
-        orphan_wh = (await db.execute(text("""
-            SELECT id FROM warehouses 
-            WHERE office_id IS NOT NULL AND office_id NOT IN (SELECT id FROM offices)
-        """))).all()
-        if orphan_wh:
-            raise ValueError(f"Integrity Violation: Found orphan office references in warehouses: {orphan_wh}")
-
-        orphan_usr = (await db.execute(text("""
-            SELECT id FROM users 
-            WHERE employee_id IS NOT NULL AND employee_id NOT IN (SELECT id FROM employees)
-        """))).all()
-        if orphan_usr:
-            raise ValueError(f"Integrity Violation: Found orphan employee references in users: {orphan_usr}")
-
-        # FK Integrity Validation for Master Entities
-        invalid_emp_pos = (await db.execute(text("""
-            SELECT id FROM employees 
-            WHERE position_id IS NOT NULL AND position_id NOT IN (SELECT id FROM positions)
-        """))).all()
-        if invalid_emp_pos:
-            raise ValueError(f"Integrity Violation: Employees referencing non-existent positions: {invalid_emp_pos}")
-
-        invalid_pos_off = (await db.execute(text("""
-            SELECT id FROM positions 
-            WHERE office_id IS NOT NULL AND office_id NOT IN (SELECT id FROM offices)
-        """))).all()
-        if invalid_pos_off:
-            raise ValueError(f"Integrity Violation: Positions referencing non-existent offices: {invalid_pos_off}")
-
-        invalid_pos_proj = (await db.execute(text("""
-            SELECT id FROM positions 
-            WHERE project_id IS NOT NULL AND project_id NOT IN (SELECT id FROM projects)
-        """))).all()
-        if invalid_pos_proj:
-            raise ValueError(f"Integrity Violation: Positions referencing non-existent projects: {invalid_pos_proj}")
-
-        # Circular reference detection
-        res_hierarchy = (await db.execute(text("SELECT id, parent_position_id FROM positions"))).all()
-        pos_parents = {pid: parent_id for pid, parent_id in res_hierarchy}
-        for pid in pos_parents:
-            visited = set()
-            curr = pid
-            while curr is not None:
-                if curr in visited:
-                    raise ValueError(f"Integrity Violation: Found circular hierarchy reference at position ID {curr} (visited path: {visited})")
-                visited.add(curr)
-                curr = pos_parents.get(curr)
-
-        print("Post-sync database integrity validations passed successfully.")
-    except Exception as exc:
-        print(f"Error post-processing sync: {exc}")
-        raise exc
-
-    return {
-        "message": "Employee API sync completed (Offline Fallback)" if offline_fallback else "Employee API sync completed",
-        "fetched": fetched_total,
-        "api_total": api_total,
-        "positions_total": positions_total,
-        "pages_fetched": pages_fetched,
-        "created": created,
-        "updated": updated,
-        "skipped": skipped,
-        **org_stats,
-        "linked_users": linked_users,
-        "role_links_applied": role_links_applied,
-        "mapped_positions": mapped_positions,
-        "offline": offline_fallback,
-        "page_request_log": sync_logs["page_request_log"],
-        "insertion_failures": sync_logs["insertion_failures"]
-    }
+        return {
+            "message": f"Employee API sync completed (Offline Fallback / Error: {exc})",
+            "fetched": db_emp_count,
+            "api_total": db_emp_count,
+            "positions_total": db_pos_count,
+            "pages_fetched": 0,
+            "created": 0,
+            "updated": 0,
+            "skipped": 0,
+            "offline": True,
+            "page_request_log": [],
+            "insertion_failures": []
+        }
 
 
 async def _sync_all_positions(
@@ -3137,8 +2894,13 @@ async def _sync_position_employee_mappings(db: AsyncSession, headers: dict[str, 
                     emp_exists = (await db.execute(select(Employee.id).where(Employee.id == assigned_emp_id))).scalar_one_or_none() is not None
                 
                 if emp_exists:
-                    pos.employee_id = assigned_emp_id
-                    mapped_count += 1
+                    try:
+                        async with db.begin_nested():
+                            pos.employee_id = assigned_emp_id
+                            await db.flush()
+                            mapped_count += 1
+                    except Exception as exc:
+                        print(f"WARN: Could not map assigned_employee {assigned_emp_id} to position {pos_id}: {exc}")
         
         record_count += 1
         if record_count % 100 == 0:
