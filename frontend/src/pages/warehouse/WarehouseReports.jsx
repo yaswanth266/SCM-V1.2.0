@@ -301,9 +301,64 @@ const WarehouseReports = () => {
           monthMap[monthStr].totalQty += qty;
         });
 
+
         const chartList = Object.values(monthMap).sort((a, b) => new Date(a.name) - new Date(b.name));
+
+        // Flatten to serial-level rows with precomputed rowSpan values
+        // Pass 1: build raw rows with _issueId, _itemKey, _serial, _colorIdx
+        const rawRows = [];
+        let colorIdx = 0;
+        const seenIssues = {};
+        filtered.forEach(mi => {
+          const miId = mi.id || mi.issue_number;
+          if (seenIssues[miId] === undefined) {
+            seenIssues[miId] = colorIdx++;
+          }
+          const miColor = seenIssues[miId];
+          const miItems = mi.items || [];
+          if (miItems.length === 0) {
+            rawRows.push({ ...mi, _item: null, _serial: null, _issueId: miId, _itemKey: null, _colorIdx: miColor });
+          } else {
+            miItems.forEach((item, itemIdx) => {
+              const itemKey = `${miId}_${item.item_id || item.id || itemIdx}`;
+              const serials = item.serial_numbers || [];
+              if (serials.length === 0) {
+                rawRows.push({ ...mi, _item: item, _serial: null, _issueId: miId, _itemKey: itemKey, _colorIdx: miColor });
+              } else {
+                serials.forEach(serial => {
+                  rawRows.push({ ...mi, _item: item, _serial: serial, _issueId: miId, _itemKey: itemKey, _colorIdx: miColor });
+                });
+              }
+            });
+          }
+        });
+
+        // Pass 2: compute rowSpan counts
+        const issueCount = {};
+        const itemCount = {};
+        rawRows.forEach(row => {
+          issueCount[row._issueId] = (issueCount[row._issueId] || 0) + 1;
+          if (row._itemKey) itemCount[row._itemKey] = (itemCount[row._itemKey] || 0) + 1;
+        });
+
+        // Pass 3: mark first rows and attach rowSpan
+        const issueSeen = new Set();
+        const itemSeen = new Set();
+        const flatRows = rawRows.map(row => {
+          const firstIssue = !issueSeen.has(row._issueId);
+          if (firstIssue) issueSeen.add(row._issueId);
+          const firstItem = row._itemKey && !itemSeen.has(row._itemKey);
+          if (firstItem) itemSeen.add(row._itemKey);
+          return {
+            ...row,
+            _issueRowSpan: firstIssue ? issueCount[row._issueId] : 0,
+            _itemRowSpan: row._itemKey ? (firstItem ? itemCount[row._itemKey] : 0) : 1,
+            _isFirstOfIssue: firstIssue,
+          };
+        });
+
         setChartData(chartList);
-        setData(filtered);
+        setData(flatRows);
       } else if (reportType === 'grn_log') {
         const res = await api.get('/warehouse/grn', { params });
         const grns = res.data?.items || res.data || [];
@@ -435,6 +490,28 @@ const WarehouseReports = () => {
   const handleExport = () => {
     const title = REPORT_TYPES.find(r => r.value === reportType)?.label || 'Report';
 
+    // For material_issues_log we produce serial-level rows (one row per serial number)
+    if (reportType === 'material_issues_log') {
+      const exportRows = data.map(row => ({
+        'Issue Number': row.issue_number || '-',
+        'Issue Date': row.issue_date ? new Date(row.issue_date).toLocaleDateString() : '-',
+        'Source Warehouse': row.warehouse_name || '-',
+        'Destination Warehouse': row.destination_warehouse_name || '-',
+        'Vehicle Code': row.vehicle_code || '-',
+        'Vehicle Number': row.vehicle_number || '-',
+        'Item Name': row._item?.item_name || '-',
+        'Item Code': row._item?.item_code || '-',
+        'Item Type': row._item?.item_type || '-',
+        'Qty Issued': row._itemRowSpan > 0 ? (row._item?.qty ?? '-') : '',
+        'Serial / Asset No': row._serial || '-',
+        'Department': row.department || '-',
+        'Issued To': row.issued_to_name || row.issued_to || '-',
+        'Status': row.status || '-',
+      }));
+      downloadExcel(exportRows, `warehouse_${reportType}`, title);
+      return;
+    }
+
     // Structure export data to match UI columns for better readability
     const cols = getColumns();
     const exportData = data.map((row) => {
@@ -504,20 +581,92 @@ const WarehouseReports = () => {
         { title: 'Average Yard Wait Time', dataIndex: 'avgWaitMins', key: 'avgWaitMins', align: 'right', render: (v) => `${v} mins` },
         { title: 'Max Yard Wait Time', dataIndex: 'maxWaitMins', key: 'maxWaitMins', align: 'right', render: (v) => `${v} mins` },
       ];
-    }
-
-    // --- NEW TRANSACTION COLUMNS ---
-    else if (reportType === 'material_issues_log') {
+    } else if (reportType === 'material_issues_log') {
+      // Issue-level cell helper (merged across all rows of same issue)
+      const issueCell = (content, row) => ({
+        children: content,
+        props: { rowSpan: row._issueRowSpan ?? 1 },
+      });
+      // Item-level cell helper (merged across all serial rows of same item)
+      const itemCell = (content, row) => ({
+        children: content,
+        props: { rowSpan: row._itemRowSpan ?? 1 },
+      });
       return [
-        { title: 'Issue Number', dataIndex: 'issue_number', key: 'issue_number' },
-        { title: 'Source Warehouse', dataIndex: 'warehouse_name', key: 'warehouse' },
-        { title: 'Destination Warehouse', dataIndex: 'destination_warehouse_name', key: 'destination_warehouse' },
-        { title: 'Department', dataIndex: 'department', key: 'department' },
-        { title: 'Issue Date', dataIndex: 'issue_date', key: 'issue_date', render: (v) => v ? new Date(v).toLocaleDateString() : '-' },
-        { title: 'Issued To', dataIndex: 'issued_to_name', key: 'issued_to' },
-        { title: 'Line Items', key: 'items_count', align: 'right', render: (_, r) => (r.items || []).length },
-        { title: 'Total Qty', key: 'total_qty', align: 'right', render: (_, r) => (r.items || []).reduce((sum, item) => sum + (parseFloat(item.qty) || 0), 0) },
-        { title: 'Status', dataIndex: 'status', key: 'status', render: (s) => <Tag color={s === 'completed' || s === 'issued' ? 'green' : s === 'cancelled' ? 'red' : 'blue'}>{(s || '').toUpperCase()}</Tag> }
+        {
+          title: 'Issue Number', key: 'issue_number', width: 150, fixed: 'left',
+          render: (_, row) => issueCell(
+            <div>
+              <div style={{ fontWeight: 700, color: '#1d3557', fontSize: 13 }}>{row.issue_number || '-'}</div>
+              <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>
+                {row.issue_date ? new Date(row.issue_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : ''}
+              </div>
+            </div>, row),
+        },
+        {
+          title: 'Source → Destination', key: 'warehouses', width: 220,
+          render: (_, row) => issueCell(
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>{row.warehouse_name || '-'}</div>
+              <div style={{ fontSize: 11, color: '#888' }}>→ {row.destination_warehouse_name || 'N/A'}</div>
+            </div>, row),
+        },
+        {
+          title: 'Vehicle', key: 'vehicle', width: 150,
+          render: (_, row) => issueCell(
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>{row.vehicle_code || '—'}</div>
+              <div style={{ fontSize: 11, color: '#888' }}>{row.vehicle_number || ''}</div>
+            </div>, row),
+        },
+        {
+          title: 'Department / Issued To', key: 'dept_to', width: 170,
+          render: (_, row) => issueCell(
+            <div>
+              <div style={{ fontSize: 12 }}>{row.department || '—'}</div>
+              <div style={{ fontSize: 11, color: '#888' }}>{row.issued_to_name || row.issued_to || ''}</div>
+            </div>, row),
+        },
+        {
+          title: 'Status', key: 'status', width: 100,
+          render: (_, row) => issueCell(
+            <Tag color={row.status === 'completed' || row.status === 'issued' ? 'green' : row.status === 'cancelled' ? 'red' : 'blue'} style={{ fontSize: 11 }}>
+              {(row.status || '').toUpperCase()}
+            </Tag>, row),
+        },
+        {
+          title: 'Item Name', key: 'item_name', width: 200,
+          render: (_, row) => itemCell(
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 600 }}>{row._item?.item_name || '—'}</div>
+              <div style={{ fontSize: 11, color: '#888' }}>{row._item?.item_code || ''}</div>
+            </div>, row),
+        },
+        {
+          title: 'Type', key: 'item_type', width: 100,
+          render: (_, row) => itemCell(
+            row._item?.item_type
+              ? <Tag color={row._item.item_type === 'asset' ? 'gold' : row._item.item_type === 'consumable' ? 'cyan' : 'default'} style={{ fontSize: 11 }}>
+                  {row._item.item_type.toUpperCase()}
+                </Tag>
+              : <span style={{ color: '#bbb' }}>—</span>, row),
+        },
+        {
+          title: 'Qty', key: 'qty', width: 70, align: 'right',
+          render: (_, row) => itemCell(
+            <span style={{ fontWeight: 600 }}>{row._item?.qty ?? '—'}</span>, row),
+        },
+        {
+          title: 'Serial / Asset No',
+          key: 'serial',
+          width: 180,
+          render: (_, row) =>
+            row._serial
+              ? <span style={{ fontFamily: 'monospace', fontSize: 12, background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 4, padding: '2px 6px', display: 'inline-block' }}>
+                  {row._serial}
+                </span>
+              : <span style={{ color: '#bbb', fontSize: 12 }}>No serial</span>,
+        },
       ];
     } else if (reportType === 'grn_log') {
       return [
@@ -715,13 +864,27 @@ const WarehouseReports = () => {
           </Card>
 
           {/* Details Table */}
-          <Card title="Report Details Table" style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}>
+          <Card
+              title={
+                reportType === 'material_issues_log'
+                  ? <span>Material Issues — Item &amp; Serial Detail <span style={{ fontSize: 12, fontWeight: 400, color: '#888' }}>(one row per serial number)</span></span>
+                  : 'Report Details Table'
+              }
+              style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.03)' }}
+            >
             <Table
               dataSource={data.map((item, index) => ({ ...item, key: index }))}
               columns={getColumns()}
-              pagination={data.length > 10 ? { pageSize: 10 } : false}
-              size="middle"
-              scroll={{ x: 1000 }}
+              pagination={data.length > 20 ? { pageSize: 20, showSizeChanger: true } : false}
+              size="small"
+              scroll={{ x: 1200 }}
+              bordered
+              onRow={(row) => ({
+                style: reportType === 'material_issues_log' ? {
+                  backgroundColor: (row._colorIdx ?? 0) % 2 === 0 ? '#f0f4ff' : '#ffffff',
+                  borderTop: row._isFirstOfIssue ? '2px solid #4361ee' : undefined,
+                } : {},
+              })}
             />
           </Card>
         </>

@@ -376,7 +376,7 @@ const TemplateIndentForm = ({ templateType, title }) => {
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={8}>
-              <Form.Item name="warehouse_id" label="Warehouse" rules={[{ required: true, message: 'Warehouse is required' }]}>
+              <Form.Item name="warehouse_id" label="Warehouse">
                   <Select options={warehouses} placeholder="Select warehouse" allowClear showSearch optionFilterProp="label" />
               </Form.Item>
             </Col>

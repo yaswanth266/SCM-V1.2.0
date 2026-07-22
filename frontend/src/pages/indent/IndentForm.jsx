@@ -329,11 +329,6 @@ const IndentForm = () => {
     if (submitting) return;
     try {
       const values = await form.validateFields();
-      // Ensure warehouse_id is present (required by backend)
-      if (!values.warehouse_id) {
-        message.error('Warehouse is required');
-        return;
-      }
       const validItems = indentItems.filter((item) => item.item_id);
       if (validItems.length === 0) {
         message.error('Please add at least one item');
@@ -827,7 +822,7 @@ const IndentForm = () => {
           <Row gutter={16}>
             {warehouses.length > 0 && (
               <Col xs={24} sm={12} md={8}>
-                <Form.Item name="warehouse_id" label="Warehouse" rules={[{ required: true, message: 'Warehouse is required' }]}>
+                <Form.Item name="warehouse_id" label="Warehouse">
                   <Select options={warehouses} placeholder="Select warehouse" allowClear showSearch optionFilterProp="label" />
                 </Form.Item>
               </Col>

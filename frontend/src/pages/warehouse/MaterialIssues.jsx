@@ -12,7 +12,7 @@ import DataTable from '../../components/DataTable';
 import StatusTag from '../../components/StatusTag';
 import api from '../../config/api';
 import {
-  formatDate, getErrorMessage
+  formatDate, getErrorMessage, downloadExcel
 } from '../../utils/helpers';
 
 const MI_STATUSES = [
@@ -222,6 +222,73 @@ const MaterialIssues = () => {
     </Space>
   );
 
+  const handleCustomExport = (data) => {
+    const exportRows = [];
+    data.forEach(row => {
+      const items = row.items || [];
+      if (items.length === 0) {
+        exportRows.push({
+          'Issue Number': row.issue_number || '-',
+          'Issue Date': row.issue_date ? new Date(row.issue_date).toLocaleDateString() : '-',
+          'Source Warehouse': row.warehouse_name || '-',
+          'Destination Warehouse': row.destination_warehouse_name || '-',
+          'Vehicle Code': row.vehicle_code || '-',
+          'Vehicle Number': row.vehicle_number || '-',
+          'Item Name': '-',
+          'Item Code': '-',
+          'Item Type': '-',
+          'Qty Issued': '-',
+          'Serial / Asset No': '-',
+          'Department': row.department || '-',
+          'Issued To': row.issued_to_name || row.issued_to || '-',
+          'Status': row.status || '-',
+        });
+      } else {
+        items.forEach(item => {
+          const serials = item.serial_numbers || [];
+          if (serials.length === 0) {
+            exportRows.push({
+              'Issue Number': row.issue_number || '-',
+              'Issue Date': row.issue_date ? new Date(row.issue_date).toLocaleDateString() : '-',
+              'Source Warehouse': row.warehouse_name || '-',
+              'Destination Warehouse': row.destination_warehouse_name || '-',
+              'Vehicle Code': row.vehicle_code || '-',
+              'Vehicle Number': row.vehicle_number || '-',
+              'Item Name': item.item_name || '-',
+              'Item Code': item.item_code || '-',
+              'Item Type': item.item_type || '-',
+              'Qty Issued': item.qty ?? '-',
+              'Serial / Asset No': '-',
+              'Department': row.department || '-',
+              'Issued To': row.issued_to_name || row.issued_to || '-',
+              'Status': row.status || '-',
+            });
+          } else {
+            serials.forEach((serial, idx) => {
+              exportRows.push({
+                'Issue Number': row.issue_number || '-',
+                'Issue Date': row.issue_date ? new Date(row.issue_date).toLocaleDateString() : '-',
+                'Source Warehouse': row.warehouse_name || '-',
+                'Destination Warehouse': row.destination_warehouse_name || '-',
+                'Vehicle Code': row.vehicle_code || '-',
+                'Vehicle Number': row.vehicle_number || '-',
+                'Item Name': item.item_name || '-',
+                'Item Code': item.item_code || '-',
+                'Item Type': item.item_type || '-',
+                'Qty Issued': idx === 0 ? (item.qty ?? '-') : '',
+                'Serial / Asset No': serial || '-',
+                'Department': row.department || '-',
+                'Issued To': row.issued_to_name || row.issued_to || '-',
+                'Status': row.status || '-',
+              });
+            });
+          }
+        });
+      }
+    });
+    downloadExcel(exportRows, 'material_issues_list', 'Material Issues Log');
+  };
+
   return (
     <div>
       <PageHeader title="Material Issues" subtitle="Manage material issues from warehouse">
@@ -241,6 +308,7 @@ const MaterialIssues = () => {
         exportFileName="material_issues_list"
         toolbar={toolbar}
         scroll={{ x: 1200 }}
+        customExport={handleCustomExport}
       />
     </div>
   );

@@ -35,6 +35,7 @@ const DataTable = ({
   summary,
   loading: externalLoading,
   initialSearch = '',
+  customExport,
 }) => {
   const [data, setData] = useState(externalData || []);
   const [loading, setLoading] = useState(false);
@@ -183,6 +184,10 @@ const DataTable = ({
   };
 
   const handleExport = () => {
+    if (typeof customExport === 'function') {
+      customExport(data);
+      return;
+    }
     const exportData = data.map((row) => {
       const exportRow = {};
       columns.forEach((col) => {
