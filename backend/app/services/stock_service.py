@@ -45,6 +45,7 @@ async def post_stock_ledger(
     posting_date: Optional[date] = None,
     created_by: Optional[int] = None,
     allow_negative: bool = False,
+    _is_recursive: bool = False,
 ) -> StockLedger:
     """Post an entry to the stock ledger and update the stock balance.
 
@@ -73,7 +74,7 @@ async def post_stock_ledger(
         wh_row = await db.execute(select(Warehouse.parent_id).where(Warehouse.id == warehouse_id))
         is_central = (wh_row.scalar() is None)
 
-    if not is_central and qty_out > 0 and batch_id is None and bin_id is None:
+    if not _is_recursive and qty_out > 0 and bin_id is None:
         # Distribute the outbound stock ledger posting across existing stock balances for this item in this warehouse.
         stmt = select(StockBalance).where(
             StockBalance.item_id == item_id,
@@ -117,6 +118,7 @@ async def post_stock_ledger(
                         posting_date=posting_date,
                         created_by=created_by,
                         allow_negative=allow_negative,
+                        _is_recursive=True,
                     )
                     remaining -= take
 
@@ -138,6 +140,7 @@ async def post_stock_ledger(
                     posting_date=posting_date,
                     created_by=created_by,
                     allow_negative=allow_negative,
+                    _is_recursive=True,
                 )
 
             return last_ledger

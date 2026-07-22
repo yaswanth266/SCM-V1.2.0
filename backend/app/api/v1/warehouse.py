@@ -241,6 +241,7 @@ async def list_grns(
                 "uom_id": gi.uom_id,
                 "rate": float(gi.rate or 0),
                 "amount": float(gi.amount or 0),
+                "remarks": gi.remarks,
             })
         items_list.append(grn_dict)
 
@@ -303,6 +304,9 @@ async def get_grn(
         response["items"][i]["requires_quality_inspection"] = gi.item.requires_quality_inspection if gi.item else False
         response["items"][i]["has_serial"] = bool(gi.item.has_serial) if gi.item else False
         response["items"][i]["serial_numbers"] = [s.serial_number for s in gi.serials] if hasattr(gi, "serials") else []
+
+    # Compute total_amount from items (no dedicated column on GRN header)
+    response["total_amount"] = float(sum(gi.amount or 0 for gi in grn.items))
     return response
 
 
@@ -1025,6 +1029,12 @@ async def list_quality_inspections(
             .group_by(QualityInspection.grn_id)
         )
         latest_qi_per_grn = {r[0]: r[1] for r in latest_qi_rows.all()}
+        pa_time_rows = await db.execute(
+            select(PutawayOrder.grn_id, PutawayOrder.created_at).where(
+                PutawayOrder.grn_id.in_(qi_grn_ids)
+            )
+        )
+        pa_created_at_map = {r[0]: r[1] for r in pa_time_rows.all()}
 
     # Bulk lookup user names for inspected_by
     user_ids = {q.inspected_by for q in qis if q.inspected_by}
@@ -1048,6 +1058,8 @@ async def list_quality_inspections(
         # the active completed one. Older duplicates are stale/cancelled.
         if gst in ("putaway_pending", "putaway_done", "completed", "qi_done"):
             data["status"] = "completed" if is_latest else "cancelled"
+            if is_latest:
+                data["completed_at"] = pa_created_at_map.get(q.grn_id)
         elif gst in ("qi_in_progress",):
             data["status"] = "in_progress"
         else:
@@ -2014,11 +2026,25 @@ async def get_quality_inspection_alias(
                 or u_row.username
             )
 
-    # Virtual status
+    # Virtual status & completed_at
     pa_r = await db.execute(
-        select(PutawayOrder.id).where(PutawayOrder.grn_id == qi.grn_id).limit(1)
+        select(PutawayOrder).where(PutawayOrder.grn_id == qi.grn_id).limit(1)
     )
-    data["status"] = "completed" if pa_r.scalar_one_or_none() else "draft"
+    pa_order = pa_r.scalar_one_or_none()
+    
+    created_at = qi.created_at
+    raw_completed_at = qi.completed_at or (pa_order.created_at if pa_order else None)
+
+    data["created_at"] = created_at
+    if pa_order or qi.completed_at:
+        data["status"] = "completed"
+        # Sanitizer rule: Completed At can never precede Created At
+        if created_at and raw_completed_at and raw_completed_at < created_at:
+            raw_completed_at = created_at
+        data["completed_at"] = raw_completed_at
+    else:
+        data["status"] = "draft"
+        data["completed_at"] = None
 
     for i, qi_item in enumerate(qi.items):
         if i < len(data.get("items", [])):
@@ -2295,6 +2321,7 @@ async def complete_quality_inspection(
     qi = result.scalar_one_or_none()
     if not qi:
         raise HTTPException(status_code=404, detail="Quality inspection not found")
+    
     # QI table has no 'status' column — we track completion via
     # the linked GRN's status transition (pending_qi -> putaway_pending).
 
@@ -3338,11 +3365,6 @@ async def validate_material_issue_items_flow(
             )
 
         # 2. Bin Validation
-        if is_central and it.bin_id is None:
-            raise HTTPException(
-                status_code=400,
-                detail=f"{m.item_code}: bin_id is required for central warehouse issues."
-            )
         if is_central and it.bin_id is not None:
             wh_for_bin = bin_to_wh.get(it.bin_id)
             if wh_for_bin is None:

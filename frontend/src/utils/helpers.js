@@ -74,7 +74,8 @@ export const formatDateTime = (date) => {
   if (typeof date === 'string' && DATE_ONLY_RE.test(date)) {
     return dayjs(date, 'YYYY-MM-DD').format(DATETIME_FORMAT);
   }
-  return dayjs.utc(date).tz(IST_TZ).format(DATETIME_FORMAT);
+  const d = typeof date === 'string' && !date.endsWith('Z') && !date.includes('+') && !date.includes('-0') ? dayjs(date) : dayjs.utc(date);
+  return d.tz(IST_TZ).format(DATETIME_FORMAT);
 };
 
 export const formatDateForAPI = (date) => {

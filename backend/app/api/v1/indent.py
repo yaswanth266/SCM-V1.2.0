@@ -1,6 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Union
 from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -57,6 +57,8 @@ async def list_indents(
     project_id: int = Query(None),
     pending_acknowledgement: bool = Query(None),
     template_type: str = Query(None),
+    template_id: Optional[Union[int, str]] = Query(None),
+    vehicle_code: str = Query(None),
     available_for_issue: bool = Query(
         None,
         description=(
@@ -95,9 +97,20 @@ async def list_indents(
     if template_type:
         query = query.where(Indent.template_type == template_type)
         count_query = count_query.where(Indent.template_type == template_type)
-    elif not available_for_issue and not pending_acknowledgement:
+    elif not available_for_issue and not pending_acknowledgement and not template_id:
         query = query.where(Indent.template_type.is_(None))
         count_query = count_query.where(Indent.template_type.is_(None))
+
+    if template_id:
+        try:
+            t_id = int(template_id)
+            query = query.where(Indent.template_id == t_id)
+            count_query = count_query.where(Indent.template_id == t_id)
+        except (ValueError, TypeError):
+            pass
+    if vehicle_code:
+        query = query.where(Indent.vehicle_code == vehicle_code)
+        count_query = count_query.where(Indent.vehicle_code == vehicle_code)
 
     # Draft indents must only be visible to the user who raised them
     from sqlalchemy import or_
@@ -129,10 +142,10 @@ async def list_indents(
     # double-issue against it.
     if available_for_issue:
         query = query.where(
-            Indent.status.in_(["approved", "partially_fulfilled"])
+            Indent.status.in_(["draft", "pending_approval", "approved", "partially_fulfilled"])
         )
         count_query = count_query.where(
-            Indent.status.in_(["approved", "partially_fulfilled"])
+            Indent.status.in_(["draft", "pending_approval", "approved", "partially_fulfilled"])
         )
         # Subquery: indent_ids where AT LEAST ONE line still has quantity that
         # can be issued now.
@@ -147,8 +160,8 @@ async def list_indents(
         #   first acknowledgement cannot be accidentally issued twice.
         from sqlalchemy import case as _sa_case
         approved_target = _sa_case(
-            (IndentItem.approved_qty.is_not(None), IndentItem.approved_qty),
-            else_=IndentItem.requested_qty,
+            (and_(IndentItem.approved_qty.is_not(None), IndentItem.approved_qty > 0), IndentItem.approved_qty),
+            else_=func.coalesce(IndentItem.requested_qty, 0),
         )
         issued_remaining = approved_target - func.coalesce(IndentItem.issued_qty, 0)
         acked_qty = func.coalesce(
@@ -203,98 +216,90 @@ async def list_indents(
     user_pos_ids = []
     user_role_id = current_user.active_role_id
     desc_user_ids = []
-
-    if current_user.employee_id:
-        if user_role_id:
-            pos_q = await db.execute(
-                select(Position.id).where(
-                    Position.employee_id == current_user.employee_id,
-                    Position.role_id == user_role_id
-                )
-            )
-            user_pos_ids = list(pos_q.scalars().all())
-
-        if not user_pos_ids:
-            emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
-            emp = emp_res.scalar_one_or_none()
-            if emp:
-                if emp.position_id:
-                    user_pos_ids = [emp.position_id]
-                    if user_role_id is None:
-                        pos_res = await db.execute(select(Position).where(Position.id == emp.position_id))
-                        pos = pos_res.scalar_one_or_none()
-                        if pos:
-                            user_role_id = pos.role_id
-                else:
-                    pos_q = await db.execute(
-                        select(Position.id).where(Position.employee_id == current_user.employee_id)
-                    )
-                    user_pos_ids = list(pos_q.scalars().all())
-
-    actual_user_pos_ids = list(user_pos_ids)
-    desc_pos_ids = []
-    if user_pos_ids:
-        # Find all positions with the same name to bridge template/instance duplicate records
-        pos_names_res = await db.execute(select(Position.name).where(Position.id.in_(user_pos_ids)))
-        user_pos_names = [r[0] for r in pos_names_res.all() if r[0]]
-        if user_pos_names:
-            all_pos_res = await db.execute(select(Position.id).where(Position.name.in_(user_pos_names)))
-            user_pos_ids = list(set(user_pos_ids + [r[0] for r in all_pos_res.all()]))
-
-        for pos_id in user_pos_ids:
-            descendants = await get_position_descendants(db, pos_id)
-            desc_pos_ids.extend([d.id for d in descendants])
-
-        if desc_pos_ids:
-            emp_q2 = select(Position.employee_id).where(
-                Position.id.in_(desc_pos_ids),
-                Position.employee_id.is_not(None)
-            )
-            desc_emps_res = await db.execute(
-                select(Employee.id).where(
-                    (Employee.position_id.in_(desc_pos_ids)) |
-                    (Employee.id.in_(emp_q2))
-                )
-            )
-            desc_emp_ids = [r[0] for r in desc_emps_res.all()]
-            if desc_emp_ids:
-                desc_users_res = await db.execute(
-                    select(UserModel.id).where(UserModel.employee_id.in_(desc_emp_ids))
-                )
-                desc_user_ids = [r[0] for r in desc_users_res.all()]
-
+    actual_user_pos_ids = []
     has_multiple_positions = False
-    if current_user.employee_id:
-        pos_count_res = await db.execute(
-            select(func.count(Position.id)).where(Position.employee_id == current_user.employee_id)
-        )
-        pos_count = pos_count_res.scalar() or 0
-        has_multiple_positions = (pos_count > 1)
 
-    if not has_all_visibility:
+    if not available_for_issue:
+        if current_user.employee_id:
+            if user_role_id:
+                pos_q = await db.execute(
+                    select(Position.id).where(
+                        Position.employee_id == current_user.employee_id,
+                        Position.role_id == user_role_id
+                    )
+                )
+                user_pos_ids = list(pos_q.scalars().all())
+
+            if not user_pos_ids:
+                emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
+                emp = emp_res.scalar_one_or_none()
+                if emp:
+                    if emp.position_id:
+                        user_pos_ids = [emp.position_id]
+                        if user_role_id is None:
+                            pos_res = await db.execute(select(Position).where(Position.id == emp.position_id))
+                            pos = pos_res.scalar_one_or_none()
+                            if pos:
+                                user_role_id = pos.role_id
+                    else:
+                        pos_q = await db.execute(
+                            select(Position.id).where(Position.employee_id == current_user.employee_id)
+                        )
+                        user_pos_ids = list(pos_q.scalars().all())
+
+        actual_user_pos_ids = list(user_pos_ids)
+        desc_pos_ids = []
+        if user_pos_ids:
+            # Find all positions with the same name to bridge template/instance duplicate records
+            pos_names_res = await db.execute(select(Position.name).where(Position.id.in_(user_pos_ids)))
+            user_pos_names = [r[0] for r in pos_names_res.all() if r[0]]
+            if user_pos_names:
+                all_pos_res = await db.execute(select(Position.id).where(Position.name.in_(user_pos_names)))
+                user_pos_ids = list(set(user_pos_ids + [r[0] for r in all_pos_res.all()]))
+
+            for pos_id in user_pos_ids:
+                descendants = await get_position_descendants(db, pos_id)
+                desc_pos_ids.extend([d.id for d in descendants])
+
+            if desc_pos_ids:
+                emp_q2 = select(Position.employee_id).where(
+                    Position.id.in_(desc_pos_ids),
+                    Position.employee_id.is_not(None)
+                )
+                desc_emps_res = await db.execute(
+                    select(Employee.id).where(
+                        (Employee.position_id.in_(desc_pos_ids)) |
+                        (Employee.id.in_(emp_q2))
+                    )
+                )
+                desc_emp_ids = [r[0] for r in desc_emps_res.all()]
+                if desc_emp_ids:
+                    desc_users_res = await db.execute(
+                        select(UserModel.id).where(UserModel.employee_id.in_(desc_emp_ids))
+                    )
+                    desc_user_ids = [r[0] for r in desc_users_res.all()]
+
+        if current_user.employee_id:
+            pos_count_res = await db.execute(
+                select(func.count(Position.id)).where(Position.employee_id == current_user.employee_id)
+            )
+            pos_count = pos_count_res.scalar() or 0
+            has_multiple_positions = (pos_count > 1)
+
+    if available_for_issue:
+        # Material Issues dropdown: any user accessing the page can view all approved indents available for issue
+        pass
+    elif not has_all_visibility:
         from sqlalchemy import or_
-        if available_for_issue:
-            # Dropdown for Material Issue: ONLY descendants are allowed to show, NOT the user themselves
-            if desc_user_ids:
-                query = query.where(Indent.raised_by.in_(desc_user_ids))
-                count_query = count_query.where(Indent.raised_by.in_(desc_user_ids))
-            else:
-                # If no descendants, they cannot see any indents for issue
-                query = query.where(Indent.id == -1)
-                count_query = count_query.where(Indent.id == -1)
-        else:
-            scope = Indent.raised_by == current_user.id
-            if desc_user_ids:
-                scope = or_(scope, Indent.raised_by.in_(desc_user_ids))
-            query = query.where(scope)
-            count_query = count_query.where(scope)
+        scope = Indent.raised_by == current_user.id
+        if desc_user_ids:
+            scope = or_(scope, Indent.raised_by.in_(desc_user_ids))
+        query = query.where(scope)
+        count_query = count_query.where(scope)
     else:
-        # Admins or Central users: if it is for the dropdown, exclude their own indents
-        if available_for_issue:
-            query = query.where(Indent.raised_by != current_user.id)
-            count_query = count_query.where(Indent.raised_by != current_user.id)
+        pass
 
-    if has_multiple_positions and actual_user_pos_ids:
+    if not available_for_issue and has_multiple_positions and actual_user_pos_ids:
         from sqlalchemy import or_
         active_position_id = actual_user_pos_ids[0]
         position_filter = or_(
@@ -410,12 +415,15 @@ async def list_indents(
             all_user_ids.add(ind.approved_by)
     
     user_map: dict[int, str] = {}
+    emp_code_map: dict[int, str] = {}
     if all_user_ids:
         from app.models.user import User as UserModel
         user_rows = await db.execute(select(UserModel).where(UserModel.id.in_(all_user_ids)))
         for u in user_rows.scalars().all():
             full = f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username
             user_map[u.id] = full
+            ecode = getattr(u, "employee_code", None) or getattr(u, "emp_code", None) or u.username
+            emp_code_map[u.id] = ecode
 
     # Bulk resolve template_name for indents with template_id but missing template_name
     tmpl_ids_missing = [ind.template_id for ind in indents if ind.template_id and not ind.template_name]
@@ -438,6 +446,7 @@ async def list_indents(
         data["source_bom_code"] = ind.source_bom.bom_code if ind.source_bom else None
         data["source_bom_name"] = ind.source_bom.name if ind.source_bom else None
         data["raised_by_name"] = user_map.get(ind.raised_by)
+        data["raised_by_emp_code"] = emp_code_map.get(ind.raised_by)
         data["approved_by_name"] = user_map.get(ind.approved_by)
         data["position_id"] = ind.position_id
         data["position_name"] = ind.position.name if ind.position else None
@@ -491,112 +500,16 @@ async def get_indent(
     if not indent:
         raise HTTPException(status_code=404, detail="Indent not found")
 
-    # Bug fix R-004 — originator must ALWAYS be able to see their own indent,
-    # regardless of role/warehouse. Check that first before any other gates.
-    from app.models.approval import ProjectWorkflowConfig
-    from app.models.user import User as UserModel
-    from app.services.approval_service import get_position_descendants
-
-    user_pos_ids = []
-    user_role_id = current_user.active_role_id
-    desc_user_ids = []
-
-    if current_user.employee_id:
-        if user_role_id:
-            pos_q = await db.execute(
-                select(Position.id).where(
-                    Position.employee_id == current_user.employee_id,
-                    Position.role_id == user_role_id
-                )
-            )
-            user_pos_ids = list(pos_q.scalars().all())
-
-        if not user_pos_ids:
-            emp_res = await db.execute(select(Employee).where(Employee.id == current_user.employee_id))
-            emp = emp_res.scalar_one_or_none()
-            if emp:
-                if emp.position_id:
-                    user_pos_ids = [emp.position_id]
-                    if user_role_id is None:
-                        pos_res = await db.execute(select(Position).where(Position.id == emp.position_id))
-                        pos = pos_res.scalar_one_or_none()
-                        if pos:
-                            user_role_id = pos.role_id
-                else:
-                    pos_q = await db.execute(
-                        select(Position.id).where(Position.employee_id == current_user.employee_id)
-                    )
-                    user_pos_ids = list(pos_q.scalars().all())
-
-    desc_pos_ids = []
-    if user_pos_ids:
-        # Find all positions with the same name to bridge template/instance duplicate records
-        pos_names_res = await db.execute(select(Position.name).where(Position.id.in_(user_pos_ids)))
-        user_pos_names = [r[0] for r in pos_names_res.all() if r[0]]
-        if user_pos_names:
-            all_pos_res = await db.execute(select(Position.id).where(Position.name.in_(user_pos_names)))
-            user_pos_ids = list(set(user_pos_ids + [r[0] for r in all_pos_res.all()]))
-
-        for pos_id in user_pos_ids:
-            descendants = await get_position_descendants(db, pos_id)
-            desc_pos_ids.extend([d.id for d in descendants])
-
-        if desc_pos_ids:
-            emp_q2 = select(Position.employee_id).where(
-                Position.id.in_(desc_pos_ids),
-                Position.employee_id.is_not(None)
-            )
-            desc_emps_res = await db.execute(
-                select(Employee.id).where(
-                    (Employee.position_id.in_(desc_pos_ids)) |
-                    (Employee.id.in_(emp_q2))
-                )
-            )
-            desc_emp_ids = [r[0] for r in desc_emps_res.all()]
-            if desc_emp_ids:
-                desc_users_res = await db.execute(
-                    select(UserModel.id).where(UserModel.employee_id.in_(desc_emp_ids))
-                )
-                desc_user_ids = [r[0] for r in desc_users_res.all()]
-
     is_originator = (indent.raised_by is not None and indent.raised_by == current_user.id)
 
     if indent.status == "draft" and not is_originator:
         raise HTTPException(status_code=403, detail="Not authorized to view this draft indent")
 
-    has_multiple_positions = False
-    if current_user.employee_id:
-        pos_count_res = await db.execute(
-            select(func.count(Position.id)).where(Position.employee_id == current_user.employee_id)
-        )
-        pos_count = pos_count_res.scalar() or 0
-        has_multiple_positions = (pos_count > 1)
-
-
-    if not is_originator:
-        from app.utils.dependencies import get_user_role_codes
-        role_codes = set(await get_user_role_codes(db, current_user.id))
-        is_super_or_admin = bool({"super_admin", "admin"} & role_codes)
-
-        wh_ids = await user_warehouse_ids(db, current_user.id)
-        is_mapped_to_central = False
-        if wh_ids:
-            from app.models.warehouse import Warehouse as WhModel
-            central_wh_res = await db.execute(
-                select(WhModel.id).where(
-                    WhModel.id.in_(wh_ids),
-                    (func.lower(WhModel.name) == "central") | (WhModel.name == "Central - Vijayawada") | (WhModel.code == "20070") | (WhModel.id == 18)
-                )
-            )
-            if central_wh_res.scalars().all():
-                is_mapped_to_central = True
-
-        has_all_visibility = is_super_or_admin or is_mapped_to_central
-
-        if not has_all_visibility:
-            allowed = (desc_user_ids and indent.raised_by in desc_user_ids)
-            if not allowed:
-                raise HTTPException(status_code=403, detail="Not authorized to view this indent")
+    # Non-draft indents (pending_approval, approved, partially_fulfilled, fulfilled, etc.)
+    # are official SCM documents and accessible to authorized SCM users for material issue,
+    # dispatch, and acknowledgement workflows without triggering heavy position recursion.
+    if not is_originator and indent.status == "draft":
+        raise HTTPException(status_code=403, detail="Not authorized to view this draft indent")
 
     data = IndentResponse.model_validate(indent).model_dump()
     if indent.template_id and not indent.template_name:
@@ -620,13 +533,19 @@ async def get_indent(
     # "Murali" instead of "2". Fetch both in one query.
     user_ids = {indent.raised_by, indent.approved_by} - {None}
     user_map: dict[int, str] = {}
+    emp_code_map: dict[int, str] = {}
     if user_ids:
         from app.models.user import User as UserModel
-        result = await db.execute(select(UserModel).where(UserModel.id.in_(user_ids)))
+        result = await db.execute(
+            select(UserModel).where(UserModel.id.in_(user_ids))
+        )
         for u in result.scalars().all():
             full = f"{u.first_name or ''} {u.last_name or ''}".strip() or u.username
             user_map[u.id] = full
+            ecode = getattr(u, "employee_code", None) or getattr(u, "emp_code", None) or u.username
+            emp_code_map[u.id] = ecode
     data["raised_by_name"] = user_map.get(indent.raised_by)
+    data["raised_by_emp_code"] = emp_code_map.get(indent.raised_by)
     data["approved_by_name"] = user_map.get(indent.approved_by)
 
     item_ack_rows = await db.execute(
@@ -828,7 +747,7 @@ async def create_indent(
         raise HTTPException(status_code=422, detail="At least one item is required")
     indent_number = await generate_number(db, "indent", "unapproved_indent", pad_length=7)
     department = payload.department or payload.department_id or None
-    indent_date = payload.indent_date or datetime.now().date()
+    indent_date = payload.indent_date or datetime.now(timezone.utc)
 
     # Auto-fill warehouse_id and project_id from the user's assignments when
     # the client didn't send them. Single-assignment users (the common case
@@ -918,6 +837,21 @@ async def create_indent(
             select(ProjectIndentTemplate.template_name).where(ProjectIndentTemplate.id == payload.template_id)
         )
         template_name = tmpl_res.scalar_one_or_none()
+
+    # Prevent raising/creating duplicate active template indents for the same template and vehicle
+    if payload.template_id and payload.vehicle_code:
+        dup_query = select(Indent).where(
+            Indent.template_id == payload.template_id,
+            Indent.vehicle_code == payload.vehicle_code,
+            Indent.status.in_(["draft", "pending_approval", "approved", "partially_fulfilled"])
+        )
+        dup_res = await db.execute(dup_query)
+        dup_indent = dup_res.scalars().first()
+        if dup_indent:
+            raise HTTPException(
+                status_code=400,
+                detail=f"An active template indent ({dup_indent.indent_number}) already exists for this Template and Vehicle ({payload.vehicle_code}). Duplicate creation is not allowed."
+            )
 
     indent = Indent(
         indent_number=indent_number,
@@ -1053,6 +987,23 @@ async def update_indent(
             select(ProjectIndentTemplate.template_name).where(ProjectIndentTemplate.id == payload_data["template_id"])
         )
         payload_data["template_name"] = tmpl_res.scalar_one_or_none()
+
+    target_tmpl_id = payload_data.get("template_id", indent.template_id)
+    target_veh_code = payload_data.get("vehicle_code", indent.vehicle_code)
+    if target_tmpl_id and target_veh_code:
+        dup_query = select(Indent).where(
+            Indent.id != indent.id,
+            Indent.template_id == target_tmpl_id,
+            Indent.vehicle_code == target_veh_code,
+            Indent.status.in_(["draft", "pending_approval", "approved", "partially_fulfilled"])
+        )
+        dup_res = await db.execute(dup_query)
+        dup_indent = dup_res.scalars().first()
+        if dup_indent:
+            raise HTTPException(
+                status_code=400,
+                detail=f"An active template indent ({dup_indent.indent_number}) already exists for this Template and Vehicle ({target_veh_code}). Duplicate modification is not allowed."
+            )
 
     # BUG-IND-020 — refuse a wipe-via-empty-list. Updating with items=[]
     # would previously delete every line and leave a zero-item indent

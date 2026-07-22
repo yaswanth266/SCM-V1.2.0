@@ -57,6 +57,7 @@ const VehicleMaterialIssueForm = () => {
   const [isCentralWarehouse, setIsCentralWarehouse] = useState(true);
   const [associatedAck, setAssociatedAck] = useState(null);
   const [isTemplateIndent, setIsTemplateIndent] = useState(false);
+  const [indentDetails, setIndentDetails] = useState(null);
 
   // Modals state
   const [activeRowKey, setActiveRowKey] = useState(null);
@@ -175,10 +176,13 @@ const VehicleMaterialIssueForm = () => {
       const res = await api.get('/indent/indents', { params });
       const data = res.data;
       const items = data.items || data.data || data || [];
-      const newOptions = items.map((ind) => ({
-        label: `${ind.indent_number}${ind.vehicle_code ? ` · ${ind.vehicle_code}` : ''}${ind.raised_by_name ? ` · ${ind.raised_by_name}` : ''}`,
-        value: ind.id,
-      }));
+      const newOptions = items.map((ind) => {
+        const typeTag = ind.template_name ? ` [Template: ${ind.template_name}]` : ind.template_type ? ` [Template: ${ind.template_type}]` : '';
+        return {
+          label: `${ind.indent_number}${ind.vehicle_code ? ` · ${ind.vehicle_code}` : ''}${typeTag}${ind.raised_by_name ? ` · ${ind.raised_by_name}` : ''}`,
+          value: ind.id,
+        };
+      });
 
       const currentVal = form.getFieldValue('indent_id');
       if (currentVal) {
@@ -372,12 +376,21 @@ const VehicleMaterialIssueForm = () => {
       const isTempl = Boolean(ind.template_id || ind.template_name || ind.template_type || location.pathname.includes('/template'));
       setIsTemplateIndent(isTempl);
 
-      let sourceWarehouseId = user?.warehouse_id ? Number(user.warehouse_id) : ind.warehouse_id;
+      let sourceWarehouseId = form.getFieldValue('warehouse_id') || (warehouses.length > 0 ? warehouses[0].value : 10);
 
+      setIndentDetails({
+        empCode: ind.raised_by_emp_code || ind.employee_code || ind.emp_code || '-',
+        empName: ind.raised_by_name || ind.created_by_name || '-',
+        position: ind.position_name || ind.raising_position || ind.position || '-',
+      });
+
+      const empDept = user?.department_name || user?.department || user?.employee?.department || user?.employee?.department_name || '';
       form.setFieldsValue({
         warehouse_id: sourceWarehouseId,
-        department: ind.department || form.getFieldValue('department'),
-        issued_to: ind.raised_by || form.getFieldValue('issued_to'),
+        department: ind.department || empDept || form.getFieldValue('department'),
+        raised_by_emp_code: ind.raised_by_emp_code || ind.employee_code || ind.emp_code || '',
+        raised_by_name: ind.raised_by_name || ind.created_by_name || '',
+        position_name: ind.position_name || ind.raising_position || ind.position || '',
         vehicle_code: ind.vehicle_code || undefined,
         vehicle_number: ind.vehicle_number || undefined,
         project_id: ind.project_id || undefined,
@@ -388,33 +401,48 @@ const VehicleMaterialIssueForm = () => {
       }
 
       const lines = (ind.items || [])
-        .map((it) => ({
-          key: `${it.id}-${Date.now()}-${Math.random()}`,
-          item_id: it.item_id,
-          item_name: it.item_name || it.name || '',
-          item_code: it.item_code || '',
-          item_type: it.item_type || '',
-          uom_id: it.uom_id || null,
-          qty: Math.max((Number(it.approved_qty ?? it.requested_qty) || 0) - (Number(it.issued_qty) || 0), 0),
-          batch_id: null,
-          bin_id: null,
-          rate: Number(it.rate) || Number(it.purchase_price) || 0,
-          amount: 0,
-          has_batch: !!it.has_batch,
-          has_serial: !!it.has_serial,
-          serial_numbers: [],
-        }))
-        .filter((line) => line.qty > 0);
+        .map((it) => {
+          const approvedQty = (it.approved_qty !== null && it.approved_qty !== undefined && Number(it.approved_qty) > 0)
+            ? Number(it.approved_qty)
+            : Number(it.requested_qty || it.qty || 0);
+          const issuedQty = Number(it.issued_qty || 0);
+          const calcRem = approvedQty - issuedQty;
+          const remainingQty = it.issue_remaining_qty !== undefined ? Number(it.issue_remaining_qty) : calcRem;
+          const finalQty = remainingQty > 0 ? remainingQty : (approvedQty > 0 ? approvedQty : 1);
+
+          return {
+            key: `${it.id || it.item_id}-${Date.now()}-${Math.random()}`,
+            item_id: it.item_id,
+            item_name: it.item_name || it.item?.name || it.name || '',
+            item_code: it.item_code || it.item?.item_code || '',
+            item_type: it.item_type || it.item?.item_type || '',
+            uom_id: it.uom_id || it.uom?.id || null,
+            uom_name: it.uom_name || it.uom?.name || it.uom || '',
+            qty: finalQty,
+            batch_id: null,
+            bin_id: null,
+            rate: Number(it.rate) || Number(it.purchase_price) || Number(it.item?.purchase_price) || 0,
+            amount: 0,
+            has_batch: !!(it.has_batch ?? it.item?.has_batch),
+            has_serial: !!(it.has_serial ?? it.item?.has_serial),
+            serial_numbers: [],
+          };
+        })
+        .filter((line) => line.item_id);
 
       setIssueItems(lines.length > 0 ? lines : [createEmptyItem()]);
-      const itemIds = lines.map((l) => l.item_id).filter(Boolean);
-      await refreshStockForItems(sourceWarehouseId, itemIds);
-      itemIds.forEach((id) => fetchItemStockDetails(sourceWarehouseId, id));
-      message.success(`Loaded ${lines.length} lines from ${ind.indent_number}`);
+      message.success(`Loaded ${lines.length} line${lines.length === 1 ? '' : 's'} from ${ind.indent_number}`);
+      
+      // Refresh stock balance once in background without blocking UI
+      const itemIds = [...new Set(lines.map((l) => l.item_id).filter(Boolean))];
+      if (itemIds.length > 0) {
+        refreshStockForItems(sourceWarehouseId, itemIds).catch(() => {});
+        itemIds.forEach((id) => fetchItemStockDetails(sourceWarehouseId, id));
+      }
     } catch (err) {
       message.error(getErrorMessage(err) || 'Could not load indent');
     }
-  }, [form, user?.warehouse_id, refreshStockForItems, fetchItemStockDetails, message]);
+  }, [form, refreshStockForItems, fetchItemStockDetails, message]);
 
   // --- Fetch existing record ---
   const fetchRecord = useCallback(async () => {
@@ -436,6 +464,25 @@ const VehicleMaterialIssueForm = () => {
         vehicle_number: data.vehicle_number || undefined,
         project_id: data.project_id || undefined,
       });
+
+      if (data.indent_id) {
+        try {
+          const indRes = await api.get(`/indent/indents/${data.indent_id}`);
+          const ind = indRes.data;
+          if (ind) {
+            setIndentDetails({
+              empCode: ind.raised_by_emp_code || ind.employee_code || ind.emp_code || '-',
+              empName: ind.raised_by_name || ind.created_by_name || '-',
+              position: ind.position_name || ind.raising_position || ind.position || '-',
+            });
+            form.setFieldsValue({
+              raised_by_emp_code: ind.raised_by_emp_code || ind.employee_code || ind.emp_code || '',
+              raised_by_name: ind.raised_by_name || ind.created_by_name || '',
+              position_name: ind.position_name || ind.raising_position || ind.position || '',
+            });
+          }
+        } catch { /* silent */ }
+      }
 
       if (data.vehicle_code) {
         loadVehicleOptions(data.vehicle_code);
@@ -536,12 +583,26 @@ const VehicleMaterialIssueForm = () => {
     if (!isNew) {
       fetchRecord();
     } else {
+      const empDept = user?.department_name || user?.department || user?.employee?.department || user?.employee?.department_name || '';
       form.setFieldsValue({
         issue_date: dayjs(),
+        department: empDept,
       });
       setIssueItems([createEmptyItem()]);
     }
-  }, [id, isNew, fetchRecord, loadLookups, loadIndentOptions, loadVehicleOptions]);
+  }, [id, isNew, fetchRecord, loadLookups, loadIndentOptions, loadVehicleOptions, user, form]);
+
+  useEffect(() => {
+    if (!isNew || warehouses.length === 0) return;
+    if (form.getFieldValue('warehouse_id') || form.getFieldValue('indent_id') || form.getFieldValue('project_id')) return;
+
+    const queryParams = new URLSearchParams(location.search);
+    if (queryParams.get('indent_id')) return;
+
+    const defaultWarehouseId = warehouses[0]?.value || 10;
+    form.setFieldsValue({ warehouse_id: defaultWarehouseId });
+    loadIndentOptions();
+  }, [form, isNew, loadIndentOptions, location.search, warehouses]);
 
   // --- Actions ---
   const handleIssue = async () => {
@@ -1009,7 +1070,6 @@ const VehicleMaterialIssueForm = () => {
     { title: 'Qty', dataIndex: 'qty', width: 90, align: 'right', render: (v) => formatNumber(v) },
     { title: 'UOM', dataIndex: 'uom_name', width: 80, render: (v) => v || '-' },
     { title: 'Batch', dataIndex: 'batch_id', width: 120, render: (v, r) => r.batch_number || r.batch_number_text || v || '-' },
-    { title: 'Bin', dataIndex: 'bin_id', width: 120, render: (v, r) => r.bin_code || r.bin_code_text || v || '-' },
     {
       title: 'Serial Numbers',
       dataIndex: 'serial_numbers',
@@ -1081,7 +1141,6 @@ const VehicleMaterialIssueForm = () => {
         );
       }
     },
-    { title: 'Rate', dataIndex: 'rate', width: 110, align: 'right', render: (v) => formatCurrency(v) },
     { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right', render: (v) => <Text strong>{formatCurrency(v)}</Text> },
   ];
 
@@ -1338,109 +1397,6 @@ const VehicleMaterialIssueForm = () => {
       },
     },
     {
-      title: 'Bin Code',
-      dataIndex: 'bin_id',
-      width: 160,
-      render: (val, record) => {
-        const warehouseId = form.getFieldValue('warehouse_id');
-        const details = itemStockDetails[record.item_id] || { batches: [], bins: [], rawRows: [] };
-        if (!record.item_id || !warehouseId) {
-          return (
-            <Select
-              value={val}
-              disabled
-              placeholder={!record.item_id ? 'Select item first' : 'Select warehouse'}
-              size="small"
-              style={{ width: '100%' }}
-            />
-          );
-        }
-
-        const selectedBatches = record.batch_ids || (record.batch_id ? [record.batch_id] : []);
-        if (record.has_batch && selectedBatches.length === 0) {
-          return (
-            <Select
-              value={val}
-              disabled
-              placeholder="Select batch first"
-              size="small"
-              style={{ width: '100%' }}
-            />
-          );
-        }
-
-        let binOptions = details.bins;
-        if (selectedBatches.length > 0) {
-          const filteredRows = (details.rawRows || []).filter(r =>
-            selectedBatches.some(bId => String(bId) === String(r.batch_id))
-          );
-          const filteredBinMap = new Map();
-          filteredRows.forEach((r) => {
-            const bnid = r.bin_id;
-            const bCode = r.bin_code || r.bin_name || (bnid ? `Bin ${bnid}` : 'General Area');
-            const bnidKey = bnid === null ? 'null_bin' : bnid;
-            if (!filteredBinMap.has(bnidKey)) {
-              filteredBinMap.set(bnidKey, {
-                id: bnid,
-                code: bCode,
-                qty: Number(r.available_qty) || 0,
-              });
-            } else {
-              filteredBinMap.get(bnidKey).qty += Number(r.available_qty) || 0;
-            }
-          });
-          binOptions = Array.from(filteredBinMap.values());
-        }
-
-        if (binOptions.length === 0) {
-          if (!isCentralWarehouse) {
-            return (
-              <Input
-                value={record.bin_code_text || ''}
-                onChange={(e) => updateIssueItem(record.key, 'bin_code_text', e.target.value)}
-                placeholder="Source location (optional)"
-                size="small"
-                style={{ width: '100%' }}
-                allowClear
-              />
-            );
-          }
-          return (
-            <Select
-              value={val}
-              disabled
-              placeholder="No bins available"
-              size="small"
-              style={{ width: '100%' }}
-            />
-          );
-        }
-        return (
-          <Select
-            mode="multiple"
-            value={record.bin_ids || (record.bin_id ? [record.bin_id] : [])}
-            onChange={(selectedValues) => {
-              updateIssueItemFields(record.key, {
-                bin_ids: selectedValues,
-                bin_id: selectedValues[0] || null,
-                serial_numbers: [],
-              });
-            }}
-            options={binOptions.map((b) => ({
-              label: `${b.code} - Qty: ${formatNumber(b.qty)}`,
-              value: b.id,
-            }))}
-            placeholder="Select bin(s)"
-            size="small"
-            style={{ width: '100%' }}
-            allowClear
-            showSearch
-            optionFilterProp="label"
-          />
-        );
-      },
-    },
-    {
       title: 'Serial / Asset Codes',
       dataIndex: 'serial_numbers',
       width: 170,
@@ -1526,20 +1482,6 @@ const VehicleMaterialIssueForm = () => {
       },
     },
     {
-      title: 'Rate',
-      dataIndex: 'rate',
-      width: 120,
-      render: (val, record) => (
-        <InputNumber
-          min={0}
-          value={val}
-          onChange={(v) => updateIssueItem(record.key, 'rate', v || 0)}
-          style={{ width: '100%' }}
-          size="small"
-        />
-      ),
-    },
-    {
       title: 'Amount',
       dataIndex: 'amount',
       width: 110,
@@ -1561,100 +1503,104 @@ const VehicleMaterialIssueForm = () => {
 
   if (!isNew && recordData && !editMode) {
     return (
-      <div style={{ padding: '24px' }}>
-        <PageHeader
-          title={recordData.issue_number || `Issue #${id}`}
-          subtitle="Vehicle Material Issue Details"
-          onBack={() => navigate(backPath)}
-        >
-          <Space>
-            {recordData.items && recordData.items.some(item => item.serial_numbers && item.serial_numbers.length > 0) && (
-              <Button icon={<QrcodeOutlined />} onClick={handlePrintAllIssueQRs} style={{ background: '#f0fdf4', color: '#16a34a', borderColor: '#bbf7d0', fontWeight: 600 }}>
-                Print QR Labels
+      <Form form={form} component={false}>
+        <div style={{ padding: '24px' }}>
+          <PageHeader
+            title={recordData.issue_number || `Issue #${id}`}
+            subtitle="Vehicle Material Issue Details"
+            onBack={() => navigate(backPath)}
+          >
+            <Space>
+              {recordData.items && recordData.items.some(item => item.serial_numbers && item.serial_numbers.length > 0) && (
+                <Button icon={<QrcodeOutlined />} onClick={handlePrintAllIssueQRs} style={{ background: '#f0fdf4', color: '#16a34a', borderColor: '#bbf7d0', fontWeight: 600 }}>
+                  Print QR Labels
+                </Button>
+              )}
+              <Button
+                type="default"
+                style={{ borderColor: '#52c41a', color: '#52c41a', fontWeight: 600 }}
+                onClick={() => exportDetailsToExcel(recordData, 'vehicle_issue')}
+              >
+                Export Excel
               </Button>
-            )}
-            <Button
-              type="default"
-              style={{ borderColor: '#52c41a', color: '#52c41a', fontWeight: 600 }}
-              onClick={() => exportDetailsToExcel(recordData, 'vehicle_issue')}
-            >
-              Export Excel
-            </Button>
-            <Button
-              type="primary"
-              style={{ background: '#1890ff', borderColor: '#1890ff', fontWeight: 600 }}
-              onClick={() => printDetailsToPDF(recordData, 'vehicle_issue')}
-            >
-              Print PDF
-            </Button>
-            {recordData.status === 'draft' && (
-              <>
-                <Button icon={<EditOutlined />} onClick={() => setEditMode(true)} type="primary">
-                  Edit
-                </Button>
-                <Popconfirm title="Issue this material? Stock will be reserved." onConfirm={handleIssue}>
-                  <Button type="default" icon={<SendOutlined />} style={{ color: '#eb2f96' }}>Issue</Button>
+              <Button
+                type="primary"
+                style={{ background: '#1890ff', borderColor: '#1890ff', fontWeight: 600 }}
+                onClick={() => printDetailsToPDF(recordData, 'vehicle_issue')}
+              >
+                Print PDF
+              </Button>
+              {recordData.status === 'draft' && (
+                <>
+                  <Button icon={<EditOutlined />} onClick={() => setEditMode(true)} type="primary">
+                    Edit
+                  </Button>
+                  <Popconfirm title="Issue this material? Stock will be reserved." onConfirm={handleIssue}>
+                    <Button type="default" icon={<SendOutlined />} style={{ color: '#eb2f96' }}>Issue</Button>
+                  </Popconfirm>
+                </>
+              )}
+              {recordData.status === 'issued' && (
+                <Popconfirm title="Are you sure you want to cancel this issue? Reservations will be released." onConfirm={handleCancel}>
+                  <Button type="primary" danger>
+                    Cancel Issue
+                  </Button>
                 </Popconfirm>
-              </>
-            )}
-            {recordData.status === 'issued' && (
-              <Popconfirm title="Are you sure you want to cancel this issue? Reservations will be released." onConfirm={handleCancel}>
-                <Button type="primary" danger>
-                  Cancel Issue
-                </Button>
-              </Popconfirm>
-            )}
-            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(backPath)}>
-              Back
-            </Button>
-          </Space>
-        </PageHeader>
+              )}
+              <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(backPath)}>
+                Back
+              </Button>
+            </Space>
+          </PageHeader>
 
-        <Card style={{ marginBottom: 16 }}>
-          <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
-            <Descriptions.Item label="Issue Number">{recordData.issue_number}</Descriptions.Item>
-            <Descriptions.Item label="Status"><StatusTag status={recordData.status} /></Descriptions.Item>
-            <Descriptions.Item label="Issue Date">{formatDate(recordData.issue_date)}</Descriptions.Item>
-            <Descriptions.Item label="Source Warehouse">{recordData.warehouse_name || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Department">{recordData.department || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Issued To">{recordData.issued_to_name || recordData.issued_to || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Indent Reference">{recordData.indent_number || recordData.indent_id || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Vehicle Code">{recordData.vehicle_code || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Vehicle Number">{recordData.vehicle_number || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Remarks" span={3}>{recordData.remarks || '-'}</Descriptions.Item>
-            
-            {associatedAck && associatedAck.photos && associatedAck.photos.length > 0 && (
-              <Descriptions.Item label="Acknowledgement Photos" span={3}>
-                <Space wrap size={12}>
-                  <Image.PreviewGroup>
-                    {associatedAck.photos.map((url, i) => (
-                      <div key={i} style={{ border: '2px solid #f0f0f0', borderRadius: 8, padding: 2, background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
-                        <Image
-                          src={url}
-                          width={80}
-                          height={80}
-                          style={{ objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in' }}
-                        />
-                      </div>
-                    ))}
-                  </Image.PreviewGroup>
-                </Space>
-              </Descriptions.Item>
-            )}
-          </Descriptions>
-        </Card>
+          <Card style={{ marginBottom: 16 }}>
+            <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
+              <Descriptions.Item label="Issue Number">{recordData.issue_number}</Descriptions.Item>
+              <Descriptions.Item label="Status"><StatusTag status={recordData.status} /></Descriptions.Item>
+              <Descriptions.Item label="Issue Date">{formatDate(recordData.issue_date)}</Descriptions.Item>
+              <Descriptions.Item label="Source Warehouse">{recordData.warehouse_name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Department">{recordData.department || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Indent Reference">{recordData.indent_number || recordData.indent_id || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Emp Code">{recordData.raised_by_emp_code || indentDetails?.empCode || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Emp Name">{recordData.raised_by_name || indentDetails?.empName || recordData.issued_to_name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Position">{recordData.position_name || indentDetails?.position || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Vehicle Code">{recordData.vehicle_code || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Vehicle Number">{recordData.vehicle_number || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Remarks" span={3}>{recordData.remarks || '-'}</Descriptions.Item>
+              
+              {associatedAck && associatedAck.photos && associatedAck.photos.length > 0 && (
+                <Descriptions.Item label="Acknowledgement Photos" span={3}>
+                  <Space wrap size={12}>
+                    <Image.PreviewGroup>
+                      {associatedAck.photos.map((url, i) => (
+                        <div key={i} style={{ border: '2px solid #f0f0f0', borderRadius: 8, padding: 2, background: '#fff', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
+                          <Image
+                            src={url}
+                            width={80}
+                            height={80}
+                            style={{ objectFit: 'cover', borderRadius: 6, cursor: 'zoom-in' }}
+                          />
+                        </div>
+                      ))}
+                    </Image.PreviewGroup>
+                  </Space>
+                </Descriptions.Item>
+              )}
+            </Descriptions>
+          </Card>
 
-        <Card title="Material Issue Items">
-          <Table
-            dataSource={groupMaterialIssueItems(recordData.items || [])}
-            columns={viewItemColumns}
-            rowKey="id"
-            pagination={false}
-            size="small"
-            scroll={{ x: 800 }}
-          />
-        </Card>
-      </div>
+          <Card title="Material Issue Items">
+            <Table
+              dataSource={groupMaterialIssueItems(recordData.items || [])}
+              columns={viewItemColumns}
+              rowKey="id"
+              pagination={false}
+              size="small"
+              scroll={{ x: 800 }}
+            />
+          </Card>
+        </div>
+      </Form>
     );
   }
 
@@ -1672,7 +1618,7 @@ const VehicleMaterialIssueForm = () => {
         <Form form={form} layout="vertical">
           <Card title="Vehicle Issue Information" style={{ marginBottom: '24px' }}>
             <Row gutter={16}>
-              <Col span={8}>
+              <Col xs={24} sm={12} md={8}>
                 <Form.Item
                   label="Source Warehouse"
                   name="warehouse_id"
@@ -1682,7 +1628,7 @@ const VehicleMaterialIssueForm = () => {
                     showSearch
                     optionFilterProp="label"
                     options={warehouses}
-                    disabled={!editMode || !isNew}
+                    disabled={true}
                     onChange={async (val) => {
                       setStockMap({});
                       setRateMap({});
@@ -1702,16 +1648,16 @@ const VehicleMaterialIssueForm = () => {
                   />
                 </Form.Item>
               </Col>
-              <Col span={8}>
+              <Col xs={24} sm={12} md={8}>
                 <Form.Item
                   label="Issue Date"
                   name="issue_date"
                   rules={[{ required: true, message: 'Issue date is required' }]}
                 >
-                  <DatePicker format={DATE_FORMAT} disabled={!editMode} style={{ width: '100%' }} />
+                  <DatePicker showTime={{ format: 'HH:mm:ss' }} format="DD/MM/YYYY HH:mm:ss" disabled={!editMode} style={{ width: '100%' }} />
                 </Form.Item>
               </Col>
-              <Col span={8}>
+              <Col xs={24} sm={12} md={8}>
                 <Form.Item label="Reference Indent" name="indent_id">
                   <Select
                     placeholder="Search / Select Indent"
@@ -1726,10 +1672,7 @@ const VehicleMaterialIssueForm = () => {
                   />
                 </Form.Item>
               </Col>
-            </Row>
-
-            <Row gutter={16}>
-              <Col span={8}>
+              <Col xs={24} sm={12} md={8}>
                 <Form.Item
                   label="Vehicle Code"
                   name="vehicle_code"
@@ -1739,7 +1682,7 @@ const VehicleMaterialIssueForm = () => {
                     showSearch
                     placeholder="Search Vehicle Code"
                     loading={vehiclesLoading}
-                    disabled={!editMode}
+                    disabled={true}
                     onChange={handleVehicleChange}
                     onSearch={(val) => loadVehicleOptions(val)}
                     filterOption={false}
@@ -1747,31 +1690,38 @@ const VehicleMaterialIssueForm = () => {
                   />
                 </Form.Item>
               </Col>
-              <Col span={8}>
+              <Col xs={24} sm={12} md={8}>
                 <Form.Item
                   label="Vehicle Number"
                   name="vehicle_number"
                   rules={[{ required: true, message: 'Vehicle Number is required' }]}
                 >
-                  <Input placeholder="Vehicle Number" disabled={!editMode} />
+                  <Input placeholder="Vehicle Number" disabled={true} />
                 </Form.Item>
               </Col>
-              <Col span={8}>
+              <Col xs={24} sm={12} md={8}>
                 <Form.Item label="Department" name="department">
-                  <Input disabled={!editMode} />
+                  <Input disabled={true} placeholder="Department" />
                 </Form.Item>
               </Col>
-            </Row>
-
-            <Row gutter={16}>
-              <Col span={8}>
-                <Form.Item label="Issued To (Employee)" name="issued_to">
-                  <Select showSearch optionFilterProp="label" options={userOptions} disabled={!editMode} />
+              <Col xs={24} sm={12} md={8}>
+                <Form.Item label="Emp Code" name="raised_by_emp_code">
+                  <Input disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} placeholder="-" />
                 </Form.Item>
               </Col>
-              <Col span={8}>
+              <Col xs={24} sm={12} md={8}>
+                <Form.Item label="Emp Name" name="raised_by_name">
+                  <Input disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} placeholder="-" />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} md={8}>
+                <Form.Item label="Position" name="position_name">
+                  <Input disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} placeholder="-" />
+                </Form.Item>
+              </Col>
+              <Col xs={24} sm={12} md={8}>
                 <Form.Item label="Project" name="project_id">
-                  <Select options={projects} disabled={!editMode} />
+                  <Select options={projects} disabled={true} placeholder="Select project" />
                 </Form.Item>
               </Col>
             </Row>
@@ -1802,7 +1752,7 @@ const VehicleMaterialIssueForm = () => {
               pagination={false}
               rowKey="key"
               size="small"
-              scroll={{ x: 1200 }}
+              scroll={{ x: 1000 }}
               summary={() => (
                 <Table.Summary.Row>
                   <Table.Summary.Cell index={0}><strong>Total</strong></Table.Summary.Cell>
@@ -1812,9 +1762,8 @@ const VehicleMaterialIssueForm = () => {
                   <Table.Summary.Cell index={4} />
                   <Table.Summary.Cell index={5} />
                   <Table.Summary.Cell index={6} />
-                  <Table.Summary.Cell index={7} />
-                  <Table.Summary.Cell index={8}><strong>{formatCurrency(calcTotalAmount())}</strong></Table.Summary.Cell>
-                  <Table.Summary.Cell index={9} />
+                  <Table.Summary.Cell index={7}><strong>{formatCurrency(calcTotalAmount())}</strong></Table.Summary.Cell>
+                  <Table.Summary.Cell index={8} />
                 </Table.Summary.Row>
               )}
             />
@@ -1833,7 +1782,7 @@ const VehicleMaterialIssueForm = () => {
               </Button>
               {editMode && (
                 <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={submitting}>
-                  Save Draft
+                  {isTemplateIndent ? 'Submit / Save Issue' : (isNew ? 'Save Issue' : 'Update Issue')}
                 </Button>
               )}
             </Space>

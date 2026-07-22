@@ -669,12 +669,14 @@ export default function ApprovalsScreen() {
                       </Text>
                     </View>
                   </View>
-                  <View style={styles.descCol}>
-                    <Text style={styles.descLabel}>Amount</Text>
-                    <Text style={[styles.descValue, { fontWeight: '700', color: '#4A1060' }]}>
-                      {selectedRecord.amount != null ? `₹${selectedRecord.amount}` : '-'}
-                    </Text>
-                  </View>
+                  {selectedRecord.document_type !== 'indent' && (
+                    <View style={styles.descCol}>
+                      <Text style={styles.descLabel}>Amount</Text>
+                      <Text style={[styles.descValue, { fontWeight: '700', color: '#4A1060' }]}>
+                        {selectedRecord.amount != null ? `₹${selectedRecord.amount}` : '-'}
+                      </Text>
+                    </View>
+                  )}
                 </View>
 
                 {(detailData?.project_name || detailData?.warehouse_name) && (

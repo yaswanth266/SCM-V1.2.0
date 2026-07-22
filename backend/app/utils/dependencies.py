@@ -857,16 +857,24 @@ async def get_user_warehouse_scope_ids(
 
     assigned_whs = await user_warehouse_ids(db, user_id)
     scoped_whs = await get_warehouse_and_descendants(db, assigned_whs)
-    if exclude_virtual and scoped_whs:
+
+    # Always include top-level main warehouses (parent_id IS NULL, e.g. Mallavalli Main Warehouse)
+    top_wh_res = await db.execute(
+        select(Warehouse.id).where(Warehouse.is_active == True, Warehouse.parent_id.is_(None))
+    )
+    top_wh_ids = [row[0] for row in top_wh_res.all()]
+    all_scoped = list(set(scoped_whs + top_wh_ids))
+
+    if exclude_virtual and all_scoped:
         result = await db.execute(
             select(Warehouse.id).where(
-                Warehouse.id.in_(scoped_whs),
+                Warehouse.id.in_(all_scoped),
                 Warehouse.type != "virtual",
             )
         )
-        scoped_whs = [row[0] for row in result.all()]
+        return [row[0] for row in result.all()]
 
-    return scoped_whs
+    return all_scoped
 
 
 # =============================================================

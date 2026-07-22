@@ -5,7 +5,7 @@ import {
   Typography, Tooltip, Tag, Spin, Popconfirm, Alert, Badge, App,
 } from 'antd';
 import {
-  PlusOutlined, ArrowLeftOutlined, SaveOutlined,
+  PlusOutlined, ArrowLeftOutlined,
   SendOutlined, MinusCircleOutlined, CheckOutlined,
   CloseCircleOutlined, EditOutlined, ExperimentOutlined, PrinterOutlined,
 } from '@ant-design/icons';
@@ -523,7 +523,7 @@ const GRNForm = () => {
   const calcTotalAmount = () => grnItems.reduce((s, i) => s + (i.amount || 0), 0);
 
   // --- Submit ---
-  const handleSubmit = async (submitAction = 'draft') => {
+  const handleSubmit = async () => {
     try {
       setErrorAlert(null);
       // For non-PO receipt types, clear po_id from form store so it doesn't
@@ -640,6 +640,7 @@ const GRNForm = () => {
           rate: Number(item.rate) || 0,
           remarks: item.remarks || null,
         })),
+        is_draft: false,
       };
 
       if (isNew) {
@@ -807,11 +808,15 @@ const GRNForm = () => {
             </Col>
             <Col xs={12} sm={8} md={6}>
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>PO Reference</Text>
-              <Text style={{ fontSize: 14 }}>{grn.po_number || '-'}</Text>
+              <Text style={{ fontSize: 14, color: grn.po_number ? undefined : '#8c8c8c', fontStyle: grn.po_number ? 'normal' : 'italic' }}>
+                {grn.po_number || 'N/A'}
+              </Text>
             </Col>
             <Col xs={12} sm={8} md={6}>
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Inward Reference</Text>
-              <Text style={{ fontSize: 14 }}>{grn.inward_number || '-'}</Text>
+              <Text style={{ fontSize: 14, color: grn.inward_number ? undefined : '#8c8c8c', fontStyle: grn.inward_number ? 'normal' : 'italic' }}>
+                {grn.inward_number || 'N/A'}
+              </Text>
             </Col>
 
             <Col xs={12} sm={8} md={6}>
@@ -824,11 +829,15 @@ const GRNForm = () => {
             </Col>
             <Col xs={12} sm={8} md={6}>
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Vehicle Number</Text>
-              <Text style={{ fontSize: 14 }}>{grn.vehicle_number || '-'}</Text>
+              <Text style={{ fontSize: 14, color: grn.vehicle_number ? undefined : '#8c8c8c', fontStyle: grn.vehicle_number ? 'normal' : 'italic' }}>
+                {grn.vehicle_number || 'N/A'}
+              </Text>
             </Col>
             <Col xs={12} sm={8} md={6}>
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>LR Number</Text>
-              <Text style={{ fontSize: 14 }}>{grn.lr_number || '-'}</Text>
+              <Text style={{ fontSize: 14, color: grn.lr_number ? undefined : '#8c8c8c', fontStyle: grn.lr_number ? 'normal' : 'italic' }}>
+                {grn.lr_number || 'N/A'}
+              </Text>
             </Col>
 
             <Col xs={12} sm={8} md={6}>
@@ -837,7 +846,15 @@ const GRNForm = () => {
             </Col>
             <Col xs={12} sm={8} md={6}>
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Total Amount</Text>
-              <Text strong style={{ fontSize: 14, color: '#eb2f96' }}>{formatCurrency(grn.total_amount) || '0.00'}</Text>
+              {(() => {
+                // Compute from items if header field is missing/zero
+                const computedAmt = grn.total_amount ?? grnItemsList.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0);
+                const isDirect = !grn.po_number && !grn.inward_number;
+                if (isDirect && computedAmt === 0) {
+                  return <Text style={{ fontSize: 14, color: '#8c8c8c', fontStyle: 'italic' }}>N/A</Text>;
+                }
+                return <Text strong style={{ fontSize: 14, color: '#eb2f96' }}>{formatCurrency(computedAmt)}</Text>;
+              })()}
             </Col>
             <Col xs={12} sm={8} md={6}>
               <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 4 }}>Received By</Text>
@@ -881,11 +898,14 @@ const GRNForm = () => {
                 title: 'Item Name', width: 220,
                 render: (_, r) => r.item_name || (r.item && (r.item.item_name || r.item.name)) || '-',
               },
-              { title: 'UOM', dataIndex: 'uom', width: 80, render: (v) => v || '-' },
-              { title: 'Ordered Qty', dataIndex: 'ordered_qty', width: 100, align: 'right', render: (v) => formatNumber(v || 0) },
-              { title: 'Received Qty', dataIndex: 'received_qty', width: 110, align: 'right', render: (v) => <Text strong>{formatNumber(v || 0)}</Text> },
+              {
+                title: 'UOM', width: 80,
+                render: (_, r) => r.uom_name || r.uom || '-',
+              },
+              { title: 'Ordered Qty', dataIndex: 'ordered_qty', width: 100, align: 'right', render: (v) => formatNumber(parseFloat(v) || 0) },
+              { title: 'Received Qty', dataIndex: 'received_qty', width: 110, align: 'right', render: (v) => <Text strong>{formatNumber(parseFloat(v) || 0)}</Text> },
               { title: 'Batch No', dataIndex: 'batch_number', width: 100, render: (v) => v || '-' },
-              { title: 'Expiry / Warranty End Date', dataIndex: 'expiry_date', width: 110, render: (v, r) => {
+              { title: 'Expiry / Warranty End Date', dataIndex: 'expiry_date', width: 130, render: (v, r) => {
                 if (!v) return '-';
                 const isAsset = r.item_type === 'asset' || (r.item && r.item.item_type === 'asset');
                 const label = isAsset ? 'Warranty: ' : 'Exp: ';
@@ -895,40 +915,21 @@ const GRNForm = () => {
                   </Tooltip>
                 );
               } },
-              { title: 'Rate', dataIndex: 'rate', width: 100, align: 'right', render: (v) => formatCurrency(v) },
-              { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right', render: (v) => <Text strong>{formatCurrency(v)}</Text> },
-              { title: 'Remarks', dataIndex: 'remarks', width: 150, ellipsis: true, render: (v) => v || '-' },
-              {
-                title: 'Serial Numbers',
-                dataIndex: 'serial_numbers',
-                width: 200,
-                render: (v, r) => {
-                  if (!r.has_serial) return <Text type="secondary">-</Text>;
-                  const sns = Array.isArray(v) ? v.filter(Boolean) : [];
-                  if (sns.length === 0) return <Text type="danger">None recorded</Text>;
-                  return (
-                    <div>
-                      {sns.map((sn, i) => (
-                        <div key={i} style={{ fontSize: 12 }}>
-                          <Text type="secondary">{i + 1}.</Text> <Tag style={{ marginBottom: 2 }}>{sn}</Tag>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                },
-              },
+              { title: 'Rate', dataIndex: 'rate', width: 100, align: 'right', render: (v) => formatCurrency(parseFloat(v) || 0) },
+              { title: 'Amount', dataIndex: 'amount', width: 120, align: 'right', render: (v) => <Text strong>{formatCurrency(parseFloat(v) || 0)}</Text> },
+              { title: 'Remarks', dataIndex: 'remarks', width: 150, ellipsis: true, render: (v) => v || <Text type="secondary">-</Text> },
             ]}
             summary={() => (
               <Table.Summary>
                 <Table.Summary.Row>
                   <Table.Summary.Cell colSpan={5} align="right"><Text strong>Totals:</Text></Table.Summary.Cell>
                   <Table.Summary.Cell align="right">
-                    <Text strong>{formatNumber(grnItemsList.reduce((s, i) => s + (i.received_qty || 0), 0))}</Text>
+                    <Text strong>{formatNumber(grnItemsList.reduce((s, i) => s + (parseFloat(i.received_qty) || 0), 0))}</Text>
                   </Table.Summary.Cell>
                   <Table.Summary.Cell colSpan={3} />
                   <Table.Summary.Cell align="right">
                     <Text strong style={{ color: '#eb2f96' }}>
-                      {formatCurrency(grnItemsList.reduce((s, i) => s + (i.amount || 0), 0))}
+                      {formatCurrency(grnItemsList.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0))}
                     </Text>
                   </Table.Summary.Cell>
                   <Table.Summary.Cell />
@@ -1336,10 +1337,7 @@ const GRNForm = () => {
         <Divider />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button onClick={() => navigate('/warehouse/grn')}>Cancel</Button>
-          <Button icon={<SaveOutlined />} onClick={() => handleSubmit('draft')} loading={submitting}>
-            Save as Draft
-          </Button>
-          <Button type="primary" icon={<SendOutlined />} onClick={() => handleSubmit('submit_qi')} loading={submitting}>
+          <Button type="primary" icon={<SendOutlined />} onClick={() => handleSubmit()} loading={submitting}>
             Save &amp; Submit for QI
           </Button>
         </div>

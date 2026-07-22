@@ -591,11 +591,66 @@ async def get_vehicle_stock_balance(
         for row in val_res.all():
             valuation_rates_map[row[0]] = float(row[1] or 0.0)
 
+    all_v_serials = set()
+    for r in records:
+        if r.serial_numbers:
+            for s in r.serial_numbers:
+                if s:
+                    all_v_serials.add(str(s))
+
+    sn_obj_map = {}
+    if all_v_serials:
+        from app.models.warehouse import SerialNumber
+        sn_res = await db.execute(
+            select(SerialNumber).where(SerialNumber.serial_number.in_(list(all_v_serials)))
+        )
+        for sn_obj in sn_res.scalars().all():
+            sn_obj_map[sn_obj.serial_number] = sn_obj
+
     data = []
     for r in records:
         val_rate = valuation_rates_map.get(r.item_id)
         if val_rate is None or val_rate == 0.0:
             val_rate = float(r.item.purchase_price or 0.0) if r.item else 0.0
+
+        sns = []
+        acs = []
+        ccs = []
+        if r.serial_numbers:
+            from app.services.asset_service import generate_asset_code
+            for s in r.serial_numbers:
+                raw_sn = str(s)
+                sns.append(raw_sn)
+                sn_obj = sn_obj_map.get(raw_sn)
+                act_ac = sn_obj.asset_code if sn_obj else None
+                act_cc = sn_obj.consumable_code if sn_obj else None
+
+                if r.item:
+                    if r.item.item_type == "asset" and not act_ac:
+                        act_ac = generate_asset_code(raw_sn, r.item.item_code)
+                    elif r.item.item_type == "consumable" and not act_cc:
+                        act_cc = generate_asset_code(raw_sn, r.item.item_code)
+
+                if act_ac:
+                    acs.append(act_ac)
+                if act_cc:
+                    ccs.append(act_cc)
+
+        # Fallback if item is asset or consumable, and no serials exist
+        if r.item and r.item.item_type in ("asset", "consumable") and not sns and not acs and not ccs:
+            qty_int = int(r.qty or 0)
+            if qty_int > 0:
+                from app.services.asset_service import generate_asset_code
+                for i in range(1, qty_int + 1):
+                    if i > 1000:
+                        break
+                    v_sn = f"V{i}"
+                    v_code = generate_asset_code(v_sn, r.item.item_code)
+                    sns.append(v_sn)
+                    if r.item.item_type == "asset":
+                        acs.append(v_code)
+                    else:
+                        ccs.append(v_code)
 
         data.append({
             "id": r.id,
@@ -604,12 +659,20 @@ async def get_vehicle_stock_balance(
             "item_id": r.item_id,
             "item_code": r.item.item_code if r.item else None,
             "item_name": r.item.name if r.item else None,
+            "item_type": r.item.item_type if r.item else None,
+            "has_serial": bool(r.item.has_serial) if r.item else False,
+            "uom_id": r.item.primary_uom_id if r.item else None,
             "uom_name": r.item.primary_uom.name if r.item and r.item.primary_uom else None,
             "batch_id": r.batch_id,
             "batch_number": r.batch.batch_number if r.batch else None,
             "qty": float(r.qty),
+            "total_qty": float(r.qty),
+            "available_qty": float(r.qty),
             "valuation_rate": val_rate,
-            "serial_numbers": r.serial_numbers,
+            "stock_value": float(r.qty) * val_rate,
+            "serial_numbers": sns,
+            "asset_codes": acs,
+            "consumable_codes": ccs,
             "last_updated": r.last_updated.isoformat() if r.last_updated else None,
         })
     return build_paginated_response(data, total, page, page_size)

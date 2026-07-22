@@ -53,6 +53,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
   const [isCentralWarehouse, setIsCentralWarehouse] = useState(true);
   const [associatedAck, setAssociatedAck] = useState(null);
   const [isTemplateIndent, setIsTemplateIndent] = useState(false);
+  const [indentDetails, setIndentDetails] = useState(null);
 
   const [uomOptions, setUomOptions] = useState([]);
   const [userOptions, setUserOptions] = useState([]);
@@ -372,89 +373,66 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         return [newOption, ...prev];
       });
 
-      let sourceWarehouseId = null;
-      try {
-        const whRes = await api.get('/masters/warehouses', { params: { page_size: 200 } });
-        const whList = Array.isArray(whRes.data) ? whRes.data : (whRes.data?.items || []);
-        
-        const userRole = (user?.user_type || '').toLowerCase();
-        const isAdmin = ['admin', 'superadmin', 'super_admin', 'manager'].includes(userRole);
-        
-        if (isAdmin) {
-          // Look for central warehouse: parent_id is null/undefined or name/code contains central
-          const centralWh = whList.find(w => 
-            w.parent_id === null || 
-            w.parent_id === undefined || 
-            (w.code || '').toUpperCase().includes('CENTRAL') || 
-            (w.name || '').toUpperCase().includes('CENTRAL')
-          );
-          if (centralWh) {
-            sourceWarehouseId = centralWh.id;
-          }
-        }
-        
-        // If not admin, or central warehouse not found, default to user's assigned warehouse
-        if (!sourceWarehouseId && user?.warehouse_id) {
-          sourceWarehouseId = Number(user.warehouse_id);
-        }
-        
-        // If still not resolved, fall back to indent's warehouse
-        if (!sourceWarehouseId) {
-          sourceWarehouseId = ind.warehouse_id;
-          const indentWh = whList.find((w) => w.id === ind.warehouse_id);
-          const isVirtual = indentWh && indentWh.type === 'virtual';
-          if (isVirtual) {
-            const realWh = whList.find((w) => w.type === 'main' || w.type === 'regional');
-            if (realWh) sourceWarehouseId = realWh.id;
-          }
-        }
-      } catch {
-        sourceWarehouseId = ind.warehouse_id;
-      }
+      let sourceWarehouseId = form.getFieldValue('warehouse_id') || (warehouses.length > 0 ? warehouses[0].value : 10);
+
+      setIndentDetails({
+        empCode: ind.raised_by_emp_code || ind.employee_code || ind.emp_code || '-',
+        empName: ind.raised_by_name || ind.created_by_name || '-',
+        position: ind.position_name || ind.raising_position || ind.position || '-',
+      });
 
       form.setFieldsValue({
         warehouse_id: sourceWarehouseId,
         destination_warehouse_id: ind.warehouse_id,
         department: ind.department || form.getFieldValue('department'),
         issued_to: ind.raised_by || form.getFieldValue('issued_to'),
+        raised_by_emp_code: ind.raised_by_emp_code || ind.employee_code || ind.emp_code || '',
+        raised_by_name: ind.raised_by_name || ind.created_by_name || '',
+        position_name: ind.position_name || ind.raising_position || ind.position || '',
         vehicle_code: ind.vehicle_code || undefined,
         vehicle_number: ind.vehicle_number || undefined,
         service_code: ind.service_code || undefined,
       });
 
       const lines = (ind.items || [])
-        .map((it) => ({
-          key: `${it.id}-${Date.now()}-${Math.random()}`,
-          item_id: it.item_id,
-          item_name: it.item_name || it.name || '',
-          item_code: it.item_code || '',
-          item_type: it.item_type || '',
-          uom_id: it.uom_id || null,
-          qty: Math.max(
-            Number(
-              it.issue_remaining_qty ?? (
-                (Number(it.approved_qty ?? it.requested_qty) || 0)
-                - (Number(it.issued_qty) || 0)
-              ),
-            ) || 0,
-            0,
-          ),
-          batch_id: null,
-          bin_id: null,
-          rate: Number(it.rate) || Number(it.purchase_price) || 0,
-          amount: 0,
-          has_batch: !!it.has_batch,
-          has_serial: !!it.has_serial,
-          serial_numbers: [],
-        }))
-        // Exclude lines already fully issued — nothing left to issue for them
-        .filter((line) => line.qty > 0);
+        .map((it) => {
+          const approvedQty = (it.approved_qty !== null && it.approved_qty !== undefined && Number(it.approved_qty) > 0)
+            ? Number(it.approved_qty)
+            : Number(it.requested_qty || it.qty || 0);
+          const issuedQty = Number(it.issued_qty || 0);
+          const calcRem = approvedQty - issuedQty;
+          const remainingQty = it.issue_remaining_qty !== undefined ? Number(it.issue_remaining_qty) : calcRem;
+          const finalQty = remainingQty > 0 ? remainingQty : (approvedQty > 0 ? approvedQty : 1);
+
+          return {
+            key: `${it.id || it.item_id}-${Date.now()}-${Math.random()}`,
+            item_id: it.item_id,
+            item_name: it.item_name || it.item?.name || it.name || '',
+            item_code: it.item_code || it.item?.item_code || '',
+            item_type: it.item_type || it.item?.item_type || '',
+            uom_id: it.uom_id || it.uom?.id || null,
+            uom_name: it.uom_name || it.uom?.name || it.uom || '',
+            qty: finalQty,
+            batch_id: null,
+            bin_id: null,
+            rate: Number(it.rate) || Number(it.purchase_price) || Number(it.item?.purchase_price) || 0,
+            amount: 0,
+            has_batch: !!(it.has_batch ?? it.item?.has_batch),
+            has_serial: !!(it.has_serial ?? it.item?.has_serial),
+            serial_numbers: [],
+          };
+        })
+        .filter((line) => line.item_id);
 
       setIssueItems(lines.length > 0 ? lines : [createEmptyItem()]);
-      const itemIds = lines.map((l) => l.item_id).filter(Boolean);
-      await refreshStockForItems(sourceWarehouseId, itemIds);
-      itemIds.forEach((id) => fetchItemStockDetails(sourceWarehouseId, id));
       message.success(`Loaded ${lines.length} line${lines.length === 1 ? '' : 's'} from ${ind.indent_number}`);
+      
+      // Refresh stock balance once in background without blocking UI
+      const itemIds = [...new Set(lines.map((l) => l.item_id).filter(Boolean))];
+      if (itemIds.length > 0) {
+        refreshStockForItems(sourceWarehouseId, itemIds).catch(() => {});
+        itemIds.forEach((id) => fetchItemStockDetails(sourceWarehouseId, id));
+      }
     } catch (err) {
       message.error(getErrorMessage(err) || 'Could not load indent');
     }
@@ -577,6 +555,25 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         template_type: data.template_type || undefined,
       });
 
+      if (data.indent_id) {
+        try {
+          const indRes = await api.get(`/indent/indents/${data.indent_id}`);
+          const ind = indRes.data;
+          if (ind) {
+            setIndentDetails({
+              empCode: ind.raised_by_emp_code || ind.employee_code || ind.emp_code || '-',
+              empName: ind.raised_by_name || ind.created_by_name || '-',
+              position: ind.position_name || ind.raising_position || ind.position || '-',
+            });
+            form.setFieldsValue({
+              raised_by_emp_code: ind.raised_by_emp_code || ind.employee_code || ind.emp_code || '',
+              raised_by_name: ind.raised_by_name || ind.created_by_name || '',
+              position_name: ind.position_name || ind.raising_position || ind.position || '',
+            });
+          }
+        } catch { /* silent */ }
+      }
+
       if (data.vehicle_code) {
         loadVehicleOptions(data.vehicle_code);
       }
@@ -695,40 +692,10 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
     const queryParams = new URLSearchParams(location.search);
     if (queryParams.get('indent_id')) return;
 
-    const userRole = (user?.user_type || '').toLowerCase();
-    const isAdmin = ['admin', 'superadmin', 'super_admin', 'manager'].includes(userRole);
-    
-    let defaultWarehouseId = null;
-    if (isAdmin) {
-      const centralOption = warehouses.find(w => 
-        (w.label || '').toUpperCase().includes('CENTRAL') || 
-        (w.label || '').toUpperCase().includes('HQ') ||
-        (w.label || '').toUpperCase().includes('HEAD')
-      );
-      if (centralOption) {
-        defaultWarehouseId = centralOption.value;
-      }
-    }
-    
-    if (!defaultWarehouseId && user?.warehouse_id) {
-      const assignedWarehouseId = Number(user?.warehouse_id);
-      const assignedWarehouseOption = warehouses.find(
-        (warehouse) => Number(warehouse.value) === assignedWarehouseId
-      );
-      if (assignedWarehouseOption) {
-        defaultWarehouseId = assignedWarehouseOption.value;
-      }
-    }
-    
-    if (!defaultWarehouseId) {
-      defaultWarehouseId = warehouses.length === 1 ? warehouses[0].value : null;
-    }
-
-    if (!defaultWarehouseId) return;
-
+    const defaultWarehouseId = warehouses[0]?.value || 10;
     form.setFieldsValue({ warehouse_id: defaultWarehouseId });
     loadIndentOptions();
-  }, [form, isNew, loadIndentOptions, location.search, user?.warehouse_id, warehouses]);
+  }, [form, isNew, loadIndentOptions, location.search, warehouses]);
 
   // --- Actions ---
   const handleIssue = async () => {
@@ -1331,9 +1298,12 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
             <Descriptions.Item label="Issued To">{recordData.issued_to_name || recordData.issued_to || '-'}</Descriptions.Item>
 
             <Descriptions.Item label="Indent Reference">{recordData.indent_number || recordData.indent_id || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Emp Code">{recordData.raised_by_emp_code || indentDetails?.empCode || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Emp Name">{recordData.raised_by_name || indentDetails?.empName || recordData.issued_to_name || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Position">{recordData.position_name || indentDetails?.position || '-'}</Descriptions.Item>
             <Descriptions.Item label="Vehicle Code">{recordData.vehicle_code || '-'}</Descriptions.Item>
             <Descriptions.Item label="Vehicle Number">{recordData.vehicle_number || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Service Code">{recordData.service_code || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Service Code" span={2}>{recordData.service_code || '-'}</Descriptions.Item>
             <Descriptions.Item label="Remarks" span={3}>{recordData.remarks || '-'}</Descriptions.Item>
           </Descriptions>
         </Card>
@@ -2018,6 +1988,24 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
                         />
                       </Form.Item>
                     )}
+                  </Form.Item>
+                </Col>
+              </Row>
+
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Form.Item label="Emp Code" name="raised_by_emp_code">
+                    <Input disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} placeholder="-" />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item label="Emp Name" name="raised_by_name">
+                    <Input disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} placeholder="-" />
+                  </Form.Item>
+                </Col>
+                <Col span={8}>
+                  <Form.Item label="Position" name="position_name">
+                    <Input disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} placeholder="-" />
                   </Form.Item>
                 </Col>
               </Row>

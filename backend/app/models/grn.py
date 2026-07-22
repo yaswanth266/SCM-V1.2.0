@@ -102,6 +102,10 @@ class QualityInspection(Base):
     remarks = Column(Text)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    @property
+    def completed_at(self):
+        return None
+
     grn = relationship("GoodsReceiptNote")
     items = relationship("QualityInspectionItem", back_populates="inspection", cascade="all, delete-orphan")
 

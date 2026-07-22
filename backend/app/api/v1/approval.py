@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from typing import Optional, List
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, distinct
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from app.database import get_db
@@ -638,16 +638,90 @@ async def list_approval_requests(
 
 @router.get("/pending/counts")
 async def get_pending_counts(
+    document_type: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Get count of pending approvals per document type for tab badges."""
-    pending = await get_pending_approvals(db, current_user.id)
-    counts = {}
-    for r in pending:
-        dt = r.document_type or "other"
-        counts[dt] = counts.get(dt, 0) + 1
-    return counts
+    """Get count of pending approvals per document type and status counts for tab badges."""
+    active_module = document_type if document_type and document_type != "all" else None
+    active_status = status if status in ("pending", "on_hold", "approved", "rejected") else "pending"
+
+    # 1. Fetch pending & on_hold requests for user
+    pending_all = await get_pending_approvals(db, current_user.id, include_on_hold=True)
+
+    # Helper for status counts (filtered by active_module)
+    status_pending_list = pending_all
+    if active_module:
+        status_pending_list = [r for r in pending_all if r.document_type == active_module]
+
+    pending_cnt = sum(1 for r in status_pending_list if r.status == "pending")
+    on_hold_cnt = sum(1 for r in status_pending_list if r.status == "on_hold")
+
+    # Approved by me (filtered by active_module)
+    app_q = (
+        select(func.count(distinct(ApprovalHistory.request_id)))
+        .join(ApprovalRequest, ApprovalRequest.id == ApprovalHistory.request_id)
+        .where(ApprovalHistory.action_by == current_user.id)
+        .where(ApprovalHistory.action == "approved")
+    )
+    if active_module:
+        app_q = app_q.where(ApprovalRequest.document_type == active_module)
+    approved_cnt = (await db.execute(app_q)).scalar() or 0
+
+    # Rejected by me (filtered by active_module)
+    rej_q = (
+        select(func.count(distinct(ApprovalHistory.request_id)))
+        .join(ApprovalRequest, ApprovalRequest.id == ApprovalHistory.request_id)
+        .where(ApprovalHistory.action_by == current_user.id)
+        .where(ApprovalHistory.action == "rejected")
+    )
+    if active_module:
+        rej_q = rej_q.where(ApprovalRequest.document_type == active_module)
+    rejected_cnt = (await db.execute(rej_q)).scalar() or 0
+
+    status_counts = {
+        "pending": pending_cnt,
+        "on_hold": on_hold_cnt,
+        "approved": approved_cnt,
+        "rejected": rejected_cnt,
+    }
+
+    # 2. Module counts for active_status
+    module_counts = {
+        "all": 0,
+        "indent": 0,
+        "material_request": 0,
+        "purchase_order": 0,
+    }
+
+    if active_status in ("pending", "on_hold"):
+        for r in pending_all:
+            if r.status == active_status:
+                dt = r.document_type or "other"
+                if dt in module_counts:
+                    module_counts[dt] += 1
+                module_counts["all"] += 1
+    elif active_status in ("approved", "rejected"):
+        mod_q = (
+            select(ApprovalRequest.document_type, func.count(distinct(ApprovalHistory.request_id)))
+            .join(ApprovalRequest, ApprovalRequest.id == ApprovalHistory.request_id)
+            .where(ApprovalHistory.action_by == current_user.id)
+            .where(ApprovalHistory.action == active_status)
+            .group_by(ApprovalRequest.document_type)
+        )
+        mod_res = await db.execute(mod_q)
+        for dt, count in mod_res.all():
+            if dt in module_counts:
+                module_counts[dt] = count
+            module_counts["all"] += count
+
+    return {
+        "status_counts": status_counts,
+        "module_counts": module_counts,
+        **status_counts,
+        **module_counts,
+    }
 
 
 @router.get("/pending/{request_id}/detail")
@@ -703,7 +777,10 @@ async def get_pending_steps(
     """Get approval workflow steps/history for a request."""
     result = await db.execute(
         select(ApprovalRequest)
-        .options(selectinload(ApprovalRequest.history))
+        .options(
+            selectinload(ApprovalRequest.history),
+            selectinload(ApprovalRequest.requester),
+        )
         .where(ApprovalRequest.id == request_id)
     )
     req = result.scalar_one_or_none()
@@ -722,8 +799,11 @@ async def get_pending_steps(
     )
     levels = levels_result.scalars().all()
 
-    # Fetch action_by user names for history actions
+    # Fetch user names for requester and history actors
     action_by_ids = {h.action_by for h in (req.history or []) if h.action_by}
+    if req.requested_by:
+        action_by_ids.add(req.requested_by)
+
     user_map = {}
     if action_by_ids:
         users_result = await db.execute(
@@ -735,42 +815,58 @@ async def get_pending_steps(
             user_map[row.id] = name
 
     steps = []
-    
+
     if not levels:
-        # Fallback to history rows only if no levels are configured
+        # Group history by level — keep only the latest action per level
+        history_by_level = {}
         for h in (req.history or []):
+            lvl_key = h.level
+            existing = history_by_level.get(lvl_key)
+            if existing is None or (h.action_date and existing.action_date and h.action_date > existing.action_date):
+                history_by_level[lvl_key] = h
+
+        for lvl_key, h in sorted(history_by_level.items()):
+            # Derive a meaningful display status — hold/unhold chatter should
+            # resolve to the current request status for the current level
             action_status = h.action
-            if action_status == "on_hold":
-                action_status = "pending"
+            if lvl_key == req.current_level:
+                action_status = req.status  # reflects actual current state
             steps.append({
-                "level": h.level,
-                "title": f"Level {h.level} Approval",
+                "level": lvl_key,
+                "title": f"Level {lvl_key} Approval",
                 "status": action_status,
                 "approver_name": user_map.get(h.action_by, f"User {h.action_by}"),
                 "action_date": h.action_date,
                 "remarks": h.comments,
             })
+
+        # If current_level has no history yet — show pending step
+        if req.current_level not in history_by_level and req.status in ("pending", "on_hold"):
+            steps.append({
+                "level": req.current_level,
+                "title": f"Level {req.current_level} Approval",
+                "status": req.status,
+                "approver_name": "Assigned Approver",
+                "role": "Approver",
+                "action_date": None,
+                "remarks": "Awaiting approval decision",
+            })
     else:
         for lvl in levels:
-            # Find history rows for this level
+            # Keep only the latest meaningful action per level (ignore hold/unhold chatter)
             lvl_hist = [h for h in (req.history or []) if h.level == lvl.level]
-            
-            # Identify target role / user name from level definition
+
             role_name = lvl.approver_role.name if lvl.approver_role else None
             user_name = None
             if lvl.approver_user:
                 user_name = f"{lvl.approver_user.first_name or ''} {lvl.approver_user.last_name or ''}".strip() or lvl.approver_user.username
-            
+
             target_approver = user_name or role_name or "Assigned Approver"
-            
+
             if lvl_hist:
-                # Use latest history action for this level
                 latest_action = sorted(lvl_hist, key=lambda x: x.action_date or datetime.min)[-1]
-                action_status = latest_action.action
-                if action_status == "on_hold":
-                    action_status = "pending"
-                
-                # Use actor name as approver
+                # For current active level, reflect the live request status
+                action_status = req.status if lvl.level == req.current_level else latest_action.action
                 actor_name = user_map.get(latest_action.action_by, f"User {latest_action.action_by}")
                 steps.append({
                     "level": lvl.level,
@@ -782,21 +878,24 @@ async def get_pending_steps(
                     "remarks": latest_action.comments,
                 })
             else:
-                # No action yet
                 status = "pending"
+                remarks = None
                 if req.status in ("approved", "rejected", "cancelled"):
                     status = "skipped"
                 elif lvl.level < req.current_level:
                     status = "skipped"
+                elif lvl.level == req.current_level:
+                    status = "pending" if req.status == "pending" else "on_hold"
+                    remarks = "Awaiting approval decision"
                 
                 steps.append({
                     "level": lvl.level,
                     "title": f"Level {lvl.level} ({role_name or 'Approver'})",
                     "status": status,
-                    "approver_name": target_approver if status == "pending" else None,
+                    "approver_name": target_approver,
                     "role": role_name,
                     "action_date": None,
-                    "remarks": None,
+                    "remarks": remarks,
                 })
                 
     return steps
@@ -1057,6 +1156,95 @@ async def get_my_pending_approvals(
                     "my_action_remarks": h.comments,
                 }
 
+    # Batch-fetch indent-specific fields (emp_code, position_name, vehicle_code,
+    # vehicle_number, template_type, template_id) for all indent rows in this page.
+    indent_ids = [
+        r.document_id for r in page_items
+        if r.document_type == "indent" and r.document_id
+    ]
+    indent_extra: dict[int, dict] = {}
+    if indent_ids:
+        from app.models.indent import Indent
+        from app.models.settings_master import Employee, Position
+        from app.models.user import User as UserModel
+        ind_res = await db.execute(
+            select(
+                Indent.id,
+                Indent.vehicle_code,
+                Indent.vehicle_number,
+                Indent.template_type,
+                Indent.template_id,
+                Indent.raised_by,
+                Indent.position_id,
+            ).where(Indent.id.in_(indent_ids))
+        )
+        indent_rows = ind_res.all()
+
+        # Collect position_ids directly on Indent table for fallback lookup
+        indent_pos_ids = list({row.position_id for row in indent_rows if row.position_id})
+        indent_pos_map: dict[int, str] = {}
+        if indent_pos_ids:
+            p_res = await db.execute(select(Position.id, Position.name).where(Position.id.in_(indent_pos_ids)))
+            for pr in p_res.all():
+                indent_pos_map[pr.id] = pr.name or ""
+
+        # Collect raised_by user ids for position/emp_code lookup
+        raiser_user_ids = list({row.raised_by for row in indent_rows if row.raised_by})
+        raiser_emp_map: dict[int, dict] = {}  # user_id -> {emp_code, position_name}
+        if raiser_user_ids:
+            u_res = await db.execute(
+                select(UserModel.id, UserModel.employee_code, UserModel.employee_id, UserModel.username)
+                .where(UserModel.id.in_(raiser_user_ids))
+            )
+            user_emp_rows = u_res.all()
+            emp_ids = [row.employee_id for row in user_emp_rows if row.employee_id]
+            pos_map: dict[int, str] = {}  # employee_id -> position_name
+            emp_code_from_emp: dict[int, str] = {}
+            if emp_ids:
+                pos_res = await db.execute(
+                    select(Employee.id, Position.name, Employee.employee_code)
+                    .join(Position, Position.id == Employee.position_id, isouter=True)
+                    .where(Employee.id.in_(emp_ids))
+                )
+                for pr in pos_res.all():
+                    pos_map[pr.id] = pr.name or ""
+                    if pr.employee_code:
+                        emp_code_from_emp[pr.id] = pr.employee_code
+            for ue in user_emp_rows:
+                code = ue.employee_code or (emp_code_from_emp.get(ue.employee_id) if ue.employee_id else "") or ue.username
+                raiser_emp_map[ue.id] = {
+                    "emp_code": code or "",
+                    "position_name": pos_map.get(ue.employee_id, "") if ue.employee_id else "",
+                }
+
+        # Fetch template name if template_id exists
+        template_ids = list({row.template_id for row in indent_rows if row.template_id})
+        template_name_map: dict[int, str] = {}
+        if template_ids:
+            from app.models.project_templates import ProjectIndentTemplate
+            try:
+                tmpl_res = await db.execute(
+                    select(ProjectIndentTemplate.id, ProjectIndentTemplate.template_name)
+                    .where(ProjectIndentTemplate.id.in_(template_ids))
+                )
+                for tr in tmpl_res.all():
+                    template_name_map[tr.id] = tr.template_name or ""
+            except Exception:
+                pass
+
+        for row in indent_rows:
+            emp_info = raiser_emp_map.get(row.raised_by, {})
+            pos_name = emp_info.get("position_name", "") or (indent_pos_map.get(row.position_id, "") if row.position_id else "")
+            indent_extra[row.id] = {
+                "emp_code": emp_info.get("emp_code", ""),
+                "position_name": pos_name,
+                "vehicle_code": row.vehicle_code or "",
+                "vehicle_number": row.vehicle_number or "",
+                "template_type": row.template_type or "",
+                "template_id": row.template_id,
+                "template_name": template_name_map.get(row.template_id, "") if row.template_id else "",
+            }
+
     items = [{
         "id": r.id, "document_type": r.document_type, "document_id": r.document_id,
         "document_number": r.document_number, "current_level": r.current_level,
@@ -1065,6 +1253,8 @@ async def get_my_pending_approvals(
         "requested_by_name": user_map.get(r.requested_by, str(r.requested_by) if r.requested_by else "-"),
         "requested_at": r.requested_at,
         **my_action_map.get(r.id, {}),
+        # Indent-specific fields (empty strings for non-indent rows)
+        **(indent_extra.get(r.document_id, {}) if r.document_type == "indent" else {}),
     } for r in page_items]
 
     return build_paginated_response(items, total, page, page_size)

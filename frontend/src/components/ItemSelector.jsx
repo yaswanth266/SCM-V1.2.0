@@ -14,6 +14,7 @@ const ItemSelector = ({
   style,
   showCode = true,
   extraParams = {},
+  excludeIds = [],
 }) => {
   const [options, setOptions] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -51,12 +52,6 @@ const ItemSelector = ({
     }
   }, [value, apiUrl, showCode]);
 
-  // Filter-by-project/department on the indent form was considered and
-  // intentionally NOT built. In healthcare procurement, any department can
-  // legitimately order any item (e.g. Paracetamol is stocked by Pharmacy,
-  // Emergency, OPD, ICU). The real control is the approval workflow, not a
-  // frontend whitelist. Revisit only if users actually report ordering
-  // wrong items in practice.
   const fetchItems = useCallback(
     debounce(async (search) => {
       if (!search || search.length < 2) {
@@ -69,7 +64,11 @@ const ItemSelector = ({
         const response = await api.get(apiUrl, { params });
         const data = response.data;
         const items = data.items || data.data || data || [];
-        const mapped = items.map((item) => ({
+        const excludeSet = new Set((excludeIds || []).map(Number));
+        const filteredItems = items.filter(
+          (item) => !excludeSet.has(Number(item.id)) || Number(item.id) === Number(value)
+        );
+        const mapped = filteredItems.map((item) => ({
           label: showCode
             ? `[${item.item_code || item.code}] ${item.item_name || item.name}`
             : item.item_name || item.name,
@@ -85,7 +84,7 @@ const ItemSelector = ({
         setLoading(false);
       }
     }, 300),
-    [apiUrl, showCode, extraParams]
+    [apiUrl, showCode, extraParams, excludeIds, value]
   );
 
   const handleSearch = (search) => {
@@ -105,6 +104,11 @@ const ItemSelector = ({
     }
   };
 
+  const excludeSet = new Set((excludeIds || []).map(Number));
+  const filteredOptions = options.filter(
+    (opt) => !excludeSet.has(Number(opt.value)) || Number(opt.value) === Number(value)
+  );
+
   return (
     <Select
       showSearch
@@ -113,9 +117,9 @@ const ItemSelector = ({
       onSearch={handleSearch}
       placeholder={placeholder}
       filterOption={false}
-      options={options}
+      options={filteredOptions}
       notFoundContent={
-        loading ? <Spin size="small" /> : options.length === 0 ? 'Type to search items' : null
+        loading ? <Spin size="small" /> : filteredOptions.length === 0 ? 'Type to search items' : null
       }
       mode={mode}
       disabled={disabled}

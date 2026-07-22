@@ -15,7 +15,7 @@ from app.schemas.warehouse import (
     VehicleIssueCreate, VehicleIssueUpdate, VehicleIssueResponse,
 )
 from app.services.number_series import generate_number
-from app.services.stock_service import reserve_stock, release_reservation, _get_or_create_balance
+from app.services.stock_service import reserve_stock, release_reservation, _get_or_create_balance, post_vehicle_stock_ledger
 from app.utils.dependencies import get_current_user, require_key, require_permission
 from app.utils.helpers import paginate_params, build_paginated_response, apply_search_filter
 from app.api.v1.warehouse import validate_material_issue_items_flow, clean_serial_numbers
@@ -167,6 +167,8 @@ async def list_vehicle_issues(
     search: str = Query(None),
     status: str = Query(None),
     warehouse_id: int = Query(None),
+    employee_code: str = Query(None),
+    assigned_to_me: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -174,7 +176,9 @@ async def list_vehicle_issues(
     offset, limit = paginate_params(page, page_size)
     query = select(VehicleIssue).options(
         selectinload(VehicleIssue.warehouse),
-        selectinload(VehicleIssue.issued_to_user),
+        selectinload(VehicleIssue.issued_to_user).selectinload(User.employee),
+        selectinload(VehicleIssue.issued_by_user),
+        selectinload(VehicleIssue.indent).selectinload(Indent.raiser).selectinload(User.employee),
         selectinload(VehicleIssue.project),
         selectinload(VehicleIssue.items).selectinload(VehicleIssueItem.item),
         selectinload(VehicleIssue.items).selectinload(VehicleIssueItem.uom),
@@ -188,6 +192,44 @@ async def list_vehicle_issues(
         query = query.where(VehicleIssue.warehouse_id == warehouse_id)
         count_query = count_query.where(VehicleIssue.warehouse_id == warehouse_id)
 
+    if assigned_to_me:
+        from sqlalchemy import or_
+        from app.models.user import User as UserModel
+        from app.models.indent import Indent as IndentModel
+        from app.models.master import Employee as EmployeeModel
+        
+        my_filter = or_(
+            VehicleIssue.issued_to == current_user.id,
+            VehicleIssue.indent.has(IndentModel.raised_by == current_user.id),
+        )
+        curr_emp_code = current_user.employee_code or (current_user.employee.employee_code if current_user.employee else None)
+        if curr_emp_code:
+            emp_clean = curr_emp_code.strip()
+            my_filter = or_(
+                my_filter,
+                VehicleIssue.issued_to_user.has(UserModel.employee_code.ilike(f"%{emp_clean}%")),
+                VehicleIssue.issued_to_user.has(UserModel.employee.has(EmployeeModel.employee_code.ilike(f"%{emp_clean}%"))),
+                VehicleIssue.indent.has(IndentModel.raiser.has(UserModel.employee_code.ilike(f"%{emp_clean}%"))),
+                VehicleIssue.indent.has(IndentModel.raiser.has(UserModel.employee.has(EmployeeModel.employee_code.ilike(f"%{emp_clean}%"))))
+            )
+        query = query.where(my_filter)
+        count_query = count_query.where(my_filter)
+
+    if employee_code:
+        from sqlalchemy import or_
+        from app.models.user import User as UserModel
+        from app.models.indent import Indent as IndentModel
+        from app.models.master import Employee as EmployeeModel
+        emp_clean = employee_code.strip()
+        emp_filter = or_(
+            VehicleIssue.issued_to_user.has(UserModel.employee_code.ilike(f"%{emp_clean}%")),
+            VehicleIssue.issued_to_user.has(UserModel.employee.has(EmployeeModel.employee_code.ilike(f"%{emp_clean}%"))),
+            VehicleIssue.indent.has(IndentModel.raiser.has(UserModel.employee_code.ilike(f"%{emp_clean}%"))),
+            VehicleIssue.indent.has(IndentModel.raiser.has(UserModel.employee.has(EmployeeModel.employee_code.ilike(f"%{emp_clean}%"))))
+        )
+        query = query.where(emp_filter)
+        count_query = count_query.where(emp_filter)
+
     query = apply_search_filter(query, VehicleIssue, search, ["issue_number", "vehicle_code", "vehicle_number", "remarks"])
     count_query = apply_search_filter(count_query, VehicleIssue, search, ["issue_number", "vehicle_code", "vehicle_number", "remarks"])
 
@@ -197,6 +239,24 @@ async def list_vehicle_issues(
 
     data = []
     for vi in issues:
+        r_name = None
+        r_emp_code = None
+
+        if vi.issued_to_user:
+            r_name = f"{vi.issued_to_user.first_name} {vi.issued_to_user.last_name or ''}".strip()
+            r_emp_code = getattr(vi.issued_to_user, "employee_code", None)
+            if not r_emp_code and vi.issued_to_user.employee:
+                r_emp_code = vi.issued_to_user.employee.employee_code
+
+        if not r_name and vi.indent and vi.indent.raiser:
+            r = vi.indent.raiser
+            r_name = f"{r.first_name} {r.last_name or ''}".strip()
+            r_emp_code = getattr(r, "employee_code", None)
+            if not r_emp_code and r.employee:
+                r_emp_code = r.employee.employee_code
+
+        created_by_name = f"{vi.issued_by_user.first_name} {vi.issued_by_user.last_name or ''}".strip() if vi.issued_by_user else None
+
         row = {
             "id": vi.id,
             "issue_number": vi.issue_number,
@@ -209,6 +269,9 @@ async def list_vehicle_issues(
             "department": vi.department,
             "issued_to": vi.issued_to,
             "issued_to_name": f"{vi.issued_to_user.first_name} {vi.issued_to_user.last_name or ''}".strip() if vi.issued_to_user else None,
+            "raised_by_name": r_name,
+            "raised_by_emp_code": r_emp_code,
+            "created_by_name": created_by_name,
             "status": vi.status,
             "remarks": vi.remarks,
             "issued_by": vi.issued_by,
@@ -272,9 +335,45 @@ async def get_vehicle_issue(
     ) if vi.issued_to_user else None
 
     if vi.indent_id:
-        ind_res = await db.execute(select(Indent).where(Indent.id == vi.indent_id))
+        from app.models.master import Position as PositionModel
+        ind_res = await db.execute(
+            select(Indent)
+            .options(
+                selectinload(Indent.position),
+                selectinload(Indent.raiser).selectinload(User.employee)
+            )
+            .where(Indent.id == vi.indent_id)
+        )
         indent_row = ind_res.scalar_one_or_none()
-        response["indent_number"] = indent_row.indent_number if indent_row else None
+        if indent_row:
+            response["indent_number"] = indent_row.indent_number
+            if indent_row.raiser:
+                r = indent_row.raiser
+                response["raised_by_name"] = f"{r.first_name} {r.last_name or ''}".strip()
+                response["raised_by_emp_code"] = getattr(r, "employee_code", None) or (r.employee.employee_code if r.employee else None)
+            else:
+                response["raised_by_emp_code"] = getattr(indent_row, "raised_by_emp_code", None) or getattr(indent_row, "employee_code", None)
+                response["raised_by_name"] = getattr(indent_row, "raised_by_name", None) or getattr(indent_row, "created_by_name", None)
+            
+            if indent_row.position:
+                response["position_name"] = indent_row.position.name
+            if not response.get("department"):
+                response["department"] = indent_row.department
+
+    if vi.issued_to_user:
+        if not response.get("department"):
+            response["department"] = vi.issued_to_user.department
+        if not response.get("position_name") and getattr(vi.issued_to_user, "designation", None):
+            response["position_name"] = vi.issued_to_user.designation
+
+    if vi.issued_by:
+        usr_res = await db.execute(select(User).where(User.id == vi.issued_by))
+        usr = usr_res.scalar_one_or_none()
+        if usr:
+            issuer_name = f"{usr.first_name} {usr.last_name or ''}".strip()
+            response["issued_by_name"] = issuer_name
+            response["created_by_name"] = issuer_name
+            response["created_by_emp_code"] = getattr(usr, "employee_code", None)
 
     for i, item in enumerate(vi.items):
         response["items"][i]["item_name"] = item.item.name if item.item else None
@@ -458,6 +557,28 @@ async def issue_vehicle_material(
 
     vi.status = "issued"
     vi.issued_by = current_user.id
+
+    # Post stock ledger entries & update warehouse balance and vehicle stock balance
+    for item in vi.items:
+        if (item.qty or Decimal("0")) > 0:
+            vsb = await post_vehicle_stock_ledger(
+                db,
+                item_id=item.item_id,
+                warehouse_id=vi.warehouse_id,
+                vehicle_code=vi.vehicle_code,
+                vehicle_number=vi.vehicle_number,
+                qty=item.qty,
+                rate=item.rate,
+                bin_id=item.bin_id,
+                batch_id=item.batch_id,
+                reference_type="vehicle_issue",
+                reference_id=vi.id,
+                uom_id=item.uom_id,
+                created_by=current_user.id,
+            )
+            if item.serial_numbers and vsb:
+                existing_serials = vsb.serial_numbers or []
+                vsb.serial_numbers = list(set(existing_serials + (item.serial_numbers or [])))
 
     # Update indent issued qty if linked to an indent
     if vi.indent_id:

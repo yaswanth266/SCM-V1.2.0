@@ -16,7 +16,7 @@ import StatusTag from '../../components/StatusTag';
 import ItemSelector from '../../components/ItemSelector';
 import api from '../../config/api';
 import {
-  formatDate, formatCurrency, getErrorMessage, formatDateForAPI,
+  formatDate, formatDateTime, formatCurrency, getErrorMessage, formatDateForAPI,
   handleFormValidationFailed,
 } from '../../utils/helpers';
 import { DATE_FORMAT } from '../../utils/constants';
@@ -40,6 +40,11 @@ const IndentForm = () => {
 
   const [form] = Form.useForm();
   const user = useAuthStore((s) => s.user);
+
+  const empCode = user?.employee_code || user?.emp_code || user?.username || '-';
+  const empName = user?.full_name || [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.username || '-';
+  const userPosition = user?.position_name || user?.designation || user?.position || user?.active_role_code || user?.role || user?.department || '-';
+
   const isAdmin = user?.role === 'super_admin' || user?.role === 'admin' || user?.roles?.some(r => r.code === 'super_admin' || r.code === 'admin');
   const [loading, setLoading] = useState(!isNew);
   const [submitting, setSubmitting] = useState(false);
@@ -99,10 +104,6 @@ const IndentForm = () => {
         const w = whRes.value.data;
         const whList = (w.items || w.data || w || []).map((i) => ({ label: i.name || i.warehouse_name, value: i.id }));
         setWarehouses(whList);
-        // Auto-pick warehouse from the user's primary assignment or from
-        // the scoped list when there's only one. The backend now accepts
-        // user_id to scope results to the user's actual warehouse
-        // assignments, so multiple-system-warehouse users see only theirs.
         if (isNew) {
           if (whList.length === 1) {
             form.setFieldValue('warehouse_id', whList[0].value);
@@ -115,9 +116,6 @@ const IndentForm = () => {
         const p = projRes.value.data;
         const projList = (p.items || p.data || p || []).map((i) => ({ label: i.name || i.project_name, value: i.id }));
         setProjects(projList);
-        // Auto-pick project when the scoped list has exactly one, or from
-        // the user's assignment data. Backend scopes /masters/projects
-        // by user_id when provided.
         if (isNew) {
           if (projList.length === 1) {
             form.setFieldValue('project_id', projList[0].value);
@@ -202,7 +200,7 @@ const IndentForm = () => {
       setIndent(data);
       form.setFieldsValue({
         ...data,
-        indent_date: data.indent_date ? dayjs(data.indent_date) : null,
+        indent_date: data.indent_date ? dayjs(data.indent_date) : dayjs(),
         required_date: data.required_date ? dayjs(data.required_date) : null,
         source_bom_id: data.source_bom_id || null,
       });
@@ -219,7 +217,6 @@ const IndentForm = () => {
         remarks: item.remarks || '',
       }));
       setIndentItems(items.length > 0 ? items : [{ key: Date.now(), item_id: null, item_name: '', requested_qty: 1, uom_id: null, uom: '', remarks: '' }]);
-      // Load existing attachments so the user knows the doc requirement is met.
       try {
         const attRes = await api.get('/attachments', {
           params: { entity_type: 'indent', entity_id: id },
@@ -239,7 +236,6 @@ const IndentForm = () => {
     }
   };
 
-  // Upload all staged files for a given indent id. Returns true on success.
   const uploadPendingFiles = async (indentId) => {
     for (const fileWrapper of pendingFiles) {
       const file = fileWrapper.originFileObj || fileWrapper;
@@ -322,10 +318,6 @@ const IndentForm = () => {
   };
 
   const handleSubmit = async (submitForApproval = false) => {
-    // BUG-FE-IND-001 — guard against double-fire. The button's `loading`
-    // prop disables it visually, but a quick double-click can still queue
-    // two handlers before the first setSubmitting(true) propagates. Refuse
-    // re-entry while the previous submit is in-flight.
     if (submitting) return;
     try {
       const values = await form.validateFields();
@@ -344,7 +336,6 @@ const IndentForm = () => {
         }
         return;
       }
-      // Validate each item has required fields
       for (const item of validItems) {
         if (!item.requested_qty || item.requested_qty <= 0) {
           message.error('Each item must have a requested quantity greater than 0');
@@ -370,7 +361,9 @@ const IndentForm = () => {
         warehouse_id: values.warehouse_id,
         source_bom_id: values.source_bom_id || null,
         indent_type: values.indent_type || 'regular',
-        indent_date: formatDateForAPI(values.indent_date),
+        indent_date: values.indent_date && typeof values.indent_date.toISOString === 'function'
+          ? values.indent_date.toISOString()
+          : dayjs().toISOString(),
         required_date: formatDateForAPI(values.required_date),
         department: values.department || null,
         project_id: values.project_id || null,
@@ -394,15 +387,12 @@ const IndentForm = () => {
         await api.put(`/indent/indents/${id}`, payload);
       }
 
-      // Upload any newly-picked attachments now that we have an indent id.
       if (pendingFiles.length > 0 && targetId) {
         try {
           await uploadPendingFiles(targetId);
           setPendingFiles([]);
         } catch (err) {
           message.error(`Attachment upload failed: ${getErrorMessage(err)}`);
-          // Don't promote to "submitted" if upload failed — backend would 400
-          // anyway, and the user expects a single clear error.
           if (isNew) navigate(`/indent/indents/${targetId}`);
           else fetchIndent();
           return;
@@ -418,8 +408,6 @@ const IndentForm = () => {
               : 'Indent updated and submitted for approval'
           );
         } catch (err) {
-          // Surface the real reason (400 attachment, 429 cap, etc.) instead
-          // of swallowing it as "please submit manually".
           message.error(getErrorMessage(err));
         }
       } else {
@@ -477,7 +465,6 @@ const IndentForm = () => {
     }
   };
 
-  // Item row management
   const addItemRow = () => {
     setIndentItems((prev) => [
       ...prev,
@@ -499,7 +486,6 @@ const IndentForm = () => {
     return <div style={{ display: 'flex', justifyContent: 'center', padding: 100 }}><Spin size="large" /></div>;
   }
 
-  // Detail / View mode for existing indent
   if (!isNew && indent && !editMode) {
     const indentItemsList = indent.items || [];
     const statusIdx = INDENT_STATUS_FLOW.indexOf(indent.status);
@@ -524,7 +510,6 @@ const IndentForm = () => {
           </Space>
         </PageHeader>
 
-        {/* Status Flow */}
         <Card style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {INDENT_STATUS_FLOW.map((s, idx) => {
@@ -545,7 +530,10 @@ const IndentForm = () => {
         <Card>
           <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
             <Descriptions.Item label="Indent Number">{indent.indent_number || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Indent Date">{formatDate(indent.indent_date)}</Descriptions.Item>
+            <Descriptions.Item label="Emp Code">{indent.raised_by_emp_code || indent.employee_code || empCode}</Descriptions.Item>
+            <Descriptions.Item label="Emp Name">{indent.created_by_name || indent.requested_by_name || indent.raised_by_name || empName}</Descriptions.Item>
+            <Descriptions.Item label="Position">{indent.position_name || indent.raising_position || userPosition}</Descriptions.Item>
+            <Descriptions.Item label="Date & Timestamp">{formatDateTime(indent.indent_date || indent.created_at)}</Descriptions.Item>
             <Descriptions.Item label="Required Date">{formatDate(indent.required_date)}</Descriptions.Item>
             <Descriptions.Item label="Indent Type">
               {INDENT_TYPES.find((t) => t.value === indent.indent_type)?.label || indent.indent_type || '-'}
@@ -562,22 +550,6 @@ const IndentForm = () => {
             <Descriptions.Item label="Vehicle Number">{indent.vehicle_number || '-'}</Descriptions.Item>
             <Descriptions.Item label="Service Code">{indent.service_code || '-'}</Descriptions.Item>
             <Descriptions.Item label="Status"><StatusTag status={indent.status} record={indent} /></Descriptions.Item>
-            <Descriptions.Item label="Created By">{indent.created_by_name || indent.requested_by_name || indent.raised_by_name || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Raising Position">
-              {indent.position_name ? (
-                <span style={{
-                  backgroundColor: '#e6f7ff',
-                  color: '#0050b3',
-                  border: '1px solid #91d5ff',
-                  padding: '2px 8px',
-                  borderRadius: '4px',
-                  fontWeight: '600',
-                  fontSize: '12px'
-                }}>
-                  {indent.position_name} {indent.position_code ? `(${indent.position_code})` : ''}
-                </span>
-              ) : '-'}
-            </Descriptions.Item>
             <Descriptions.Item label="Remarks" span={3}>{indent.remarks || '-'}</Descriptions.Item>
           </Descriptions>
 
@@ -669,7 +641,6 @@ const IndentForm = () => {
           )}
         </Card>
 
-        {/* Rejection Comments Modal */}
         <Modal
           title="Reject Indent"
           open={rejectModalOpen}
@@ -698,7 +669,6 @@ const IndentForm = () => {
     );
   }
 
-  // Edit / Create mode
   const itemColumns = [
     { title: '#', width: 40, render: (_, __, idx) => idx + 1 },
     {
@@ -798,19 +768,8 @@ const IndentForm = () => {
 
       <Card>
         <Form form={form} layout="vertical" scrollToFirstError={true}>
-          {/* indent_type and indent_date are kept in form state as hidden fields
-              — defaulted to "regular" / today so the field user never has to
-              touch them. Urgent flag is exposed as a single inline checkbox. */}
           <Form.Item name="indent_type" hidden><Input /></Form.Item>
-          <Form.Item name="indent_date" hidden><DatePicker /></Form.Item>
           <Form.Item name="department" hidden><Input /></Form.Item>
-          {/* warehouse_id and project_id auto-fill from user_warehouses /
-              user_projects when the user has exactly one of each. Keep them
-              as hidden Form.Items in that case so validateFields() still
-              returns the value — without this, gating the picker out of the
-              JSX entirely caused the field to disappear from the validated
-              payload and the submit handler to error with "Warehouse is
-              required". */}
           {warehouses.length === 0 && (
             <Form.Item name="warehouse_id" hidden><Input /></Form.Item>
           )}
@@ -818,6 +777,37 @@ const IndentForm = () => {
             <Form.Item name="project_id" hidden><Input /></Form.Item>
           )}
           <Form.Item name="source_bom_id" hidden><Input /></Form.Item>
+
+          <Row gutter={16}>
+            <Col xs={24} sm={12} md={6}>
+              <Form.Item label="Emp Code">
+                <Input value={indent?.raised_by_emp_code || indent?.employee_code || empCode} disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Form.Item label="Emp Name">
+                <Input value={indent?.created_by_name || indent?.requested_by_name || indent?.raised_by_name || empName} disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Form.Item label="Position">
+                <Input value={indent?.position_name || indent?.raising_position || userPosition} disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Form.Item
+                name="indent_date"
+                label="Date & Timestamp"
+                rules={[{ required: true, message: 'Date & Timestamp is required' }]}
+              >
+                <DatePicker
+                  showTime={{ format: 'HH:mm:ss' }}
+                  format="DD/MM/YYYY HH:mm:ss"
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Row gutter={16}>
             {warehouses.length > 0 && (
@@ -880,7 +870,7 @@ const IndentForm = () => {
               </Form.Item>
             </Col>
             <Col xs={24} sm={12} md={8}>
-              <Form.Item name="vehicle_number" label="Vehicle Number">
+              <Form.Item name="vehicle_number" label="Vehicle Number" rules={[{ required: true, message: 'Vehicle number is required' }]}>
                 <Input placeholder="Auto-populated from code" disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
               </Form.Item>
             </Col>

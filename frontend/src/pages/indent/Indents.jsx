@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Button, Select, Space, Popconfirm, message, InputNumber,
-  Modal, Table, Typography,
+  Modal, Table, Typography, Tag,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, EyeOutlined,
@@ -187,14 +187,19 @@ const Indents = () => {
     { title: 'Department', dataIndex: 'department_name', key: 'department', width: 140, render: (v, r) => v || r.department || '-' },
     {
       title: 'Indent Type',
-      dataIndex: 'indent_type',
       key: 'indent_type',
       width: 120,
-      render: (v) => <StatusTag status={v} />,
+      render: (_, record) => {
+        const isTemplate = !!(record?.template_type || record?.template_name || record?.template_id);
+        return isTemplate
+          ? <Tag color="purple">Template</Tag>
+          : <Tag color="blue">Normal</Tag>;
+      },
     },
     { title: 'Raised By', dataIndex: 'raised_by_name', key: 'raised_by', width: 140, render: (v, r) => v || r.raised_by || '-' },
+    { title: 'Emp Code', key: 'emp_code', width: 110, render: (_, record) => record.raised_by_emp_code || record.emp_code || record.employee_code || '-' },
     {
-      title: 'Raising Position',
+      title: 'Position',
       dataIndex: 'position_name',
       key: 'position_name',
       width: 180,
@@ -216,6 +221,8 @@ const Indents = () => {
         );
       }
     },
+    { title: 'Vehicle Code', dataIndex: 'vehicle_code', key: 'vehicle_code', width: 120, render: (v) => v || '-' },
+    { title: 'Vehicle No', dataIndex: 'vehicle_number', key: 'vehicle_number', width: 120, render: (v) => v || '-' },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 150, render: (s, record) => <StatusTag status={s} record={record} /> },
     {
       title: 'Actions',

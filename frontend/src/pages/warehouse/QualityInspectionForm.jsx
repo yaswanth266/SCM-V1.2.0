@@ -5,7 +5,7 @@ import {
   Typography, Tooltip, Tag, Spin, Popconfirm, Alert, Badge,
 } from 'antd';
 import {
-  ArrowLeftOutlined, SaveOutlined, CheckOutlined,
+  ArrowLeftOutlined, CheckOutlined,
   CloseCircleOutlined, EditOutlined, ExperimentOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
@@ -114,6 +114,16 @@ const QualityInspectionForm = () => {
     }
   }, [id]);
 
+  // Sync form values when entering edit mode
+  useEffect(() => {
+    if (editMode && qi) {
+      form.setFieldsValue({
+        ...qi,
+        inspection_date: qi.inspection_date ? dayjs(qi.inspection_date) : null,
+      });
+    }
+  }, [editMode, qi, form]);
+
   // --- Fetch existing QI ---
   const fetchQI = async () => {
     setLoading(true);
@@ -122,10 +132,6 @@ const QualityInspectionForm = () => {
       const data = res.data;
       setQi(data);
       setOverallResult(data.overall_result || null);
-      form.setFieldsValue({
-        ...data,
-        inspection_date: data.inspection_date ? dayjs(data.inspection_date) : null,
-      });
       if (data.grn_id) {
         setSelectedGRN({
           grn_number: data.grn_number || '',
@@ -250,7 +256,7 @@ const QualityInspectionForm = () => {
   };
 
   // --- Submit ---
-  const handleSubmit = async (submitAction = 'draft') => {
+  const handleSubmit = async (submitAction = 'complete') => {
     try {
       const values = await form.validateFields();
       if (qiItems.length === 0) {
@@ -440,9 +446,18 @@ const QualityInspectionForm = () => {
               <Tag>{qi.inspection_type || '-'}</Tag>
             </Descriptions.Item>
             <Descriptions.Item label="Inspected By">{qi.inspected_by_name || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Created At">{formatDateTime(qi.created_at)}</Descriptions.Item>
-            <Descriptions.Item label="Completed At">{qi.completed_at ? formatDateTime(qi.completed_at) : '-'}</Descriptions.Item>
-            <Descriptions.Item label="Remarks" span={3}>{qi.remarks || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Created At">{qi.created_at ? formatDateTime(qi.created_at) : 'N/A'}</Descriptions.Item>
+            <Descriptions.Item label="Completed At">
+              {(() => {
+                if (qi.status !== 'completed' || !qi.completed_at) return 'N/A';
+                const cAt = dayjs(qi.created_at);
+                const compAt = dayjs(qi.completed_at);
+                // Sanitizer rule: Completed At can never precede Created At
+                const validCompleted = compAt.isValid() && compAt.isBefore(cAt) ? cAt : compAt;
+                return formatDateTime(validCompleted);
+              })()}
+            </Descriptions.Item>
+            <Descriptions.Item label="Remarks" span={3}>{qi.remarks || 'N/A'}</Descriptions.Item>
           </Descriptions>
         </Card>
 
@@ -463,7 +478,7 @@ const QualityInspectionForm = () => {
             columns={[
               { title: '#', width: 40, render: (_, __, idx) => idx + 1 },
               { title: 'Item Name', dataIndex: 'item_name', width: 200, ellipsis: true },
-              { title: 'Batch', dataIndex: 'batch_number', width: 90, render: (v) => v || '-' },
+              { title: 'Batch', dataIndex: 'batch_number', width: 90, render: (v) => v || 'N/A' },
               { title: 'Inspected', dataIndex: 'inspected_qty', width: 100, align: 'right', render: (v) => formatNumber(v) },
               {
                 title: 'Accepted', dataIndex: 'accepted_qty', width: 100, align: 'right',
@@ -485,8 +500,8 @@ const QualityInspectionForm = () => {
                   return <Tag style={{ color: '#fff', backgroundColor: color, borderColor: color }}>{label}</Tag>;
                 },
               },
-              { title: 'Rejection Reason', dataIndex: 'rejection_reason', width: 180, render: (v) => v || '-' },
-              { title: 'Remarks', dataIndex: 'remarks', width: 150, render: (v) => v || '-' },
+              { title: 'Rejection Reason', dataIndex: 'rejection_reason', width: 180, render: (v) => v || 'N/A' },
+              { title: 'Remarks', dataIndex: 'remarks', width: 150, render: (v) => v || 'N/A' },
             ]}
             summary={() => {
               const totalInspected = qiItemsList.reduce((s, i) => s + (i.inspected_qty || 0), 0);
@@ -628,7 +643,7 @@ const QualityInspectionForm = () => {
       </PageHeader>
 
       <Card>
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" initialValues={{ inspection_date: dayjs(), inspection_type: 'full' }}>
           <Row gutter={16}>
             <Col xs={24} sm={10}>
               <Form.Item name="grn_id" label="Select GRN" rules={[{ required: true, message: 'Please select a GRN' }]}>
@@ -758,12 +773,6 @@ const QualityInspectionForm = () => {
         <Divider />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
           <Button onClick={() => navigate('/warehouse/quality-inspection')}>Cancel</Button>
-          <Button icon={<SaveOutlined />} onClick={() => handleSubmit('draft')} loading={submitting}>
-            Save as Draft
-          </Button>
-          <Button onClick={() => handleSubmit('start')} loading={submitting}>
-            Start Inspection
-          </Button>
           <Button
             type="primary"
             icon={<CheckOutlined />}

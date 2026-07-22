@@ -14,7 +14,7 @@ import PageHeader from '../../components/PageHeader';
 import StatusTag from '../../components/StatusTag';
 import api from '../../config/api';
 import {
-  formatDate, getErrorMessage, formatDateForAPI,
+  formatDate, formatDateTime, getErrorMessage, formatDateForAPI,
   handleFormValidationFailed,
 } from '../../utils/helpers';
 import { DATE_FORMAT } from '../../utils/constants';
@@ -32,6 +32,11 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
 
   const [form] = Form.useForm();
   const user = useAuthStore((s) => s.user);
+
+  const empCode = user?.employee_code || user?.emp_code || user?.username || '-';
+  const empName = user?.full_name || [user?.first_name, user?.last_name].filter(Boolean).join(' ') || user?.username || '-';
+  const userPosition = user?.position_name || user?.designation || user?.position || user?.active_role_code || user?.role || user?.department || '-';
+
   const [loading, setLoading] = useState(!isNew);
   const [submitting, setSubmitting] = useState(false);
   const [indent, setIndent] = useState(null);
@@ -73,72 +78,39 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
 
       if (projRes.status === 'fulfilled') {
         const p = projRes.value.data;
-        const projList = (p.items || p.data || p || []).map((i) => ({ label: i.name || i.project_name, value: i.id }));
+        let items = p.items || p.data || p || [];
+        if (!Array.isArray(items)) items = [];
+        let projList = items.map((i) => ({ label: i.name || i.project_name, value: i.id }));
+        if (projList.length === 0 && user?.projects && Array.isArray(user.projects)) {
+          projList = user.projects.map((i) => ({ label: i.name || i.project_name, value: i.id }));
+        }
         setProjects(projList);
-        if (isNew && projList.length === 1) {
-          form.setFieldValue('project_id', projList[0].value);
-          fetchTemplatesForProject(projList[0].value);
+        if (isNew) {
+          const defaultProjId = user?.project_id || (projList.length > 0 ? projList[0].value : null);
+          if (defaultProjId) {
+            form.setFieldValue('project_id', defaultProjId);
+            fetchTemplatesForProject(defaultProjId);
+          }
+        }
+      } else if (user?.projects && Array.isArray(user.projects)) {
+        const projList = user.projects.map((i) => ({ label: i.name || i.project_name, value: i.id }));
+        setProjects(projList);
+        if (isNew) {
+          const defaultProjId = user?.project_id || (projList.length > 0 ? projList[0].value : null);
+          if (defaultProjId) {
+            form.setFieldValue('project_id', defaultProjId);
+            fetchTemplatesForProject(defaultProjId);
+          }
         }
       }
 
       if (vehRes.status === 'fulfilled') {
-        const v = vehRes.value.data || [];
-        setVehicles(v);
+        const v = vehRes.value.data;
+        const vList = Array.isArray(v) ? v : (v.items || v.data || []);
+        setVehicles(vList);
       }
     } catch { /* silent */ }
   }, [user, isNew, form]);
-
-  const fetchTemplatesForProject = async (projectId) => {
-    if (!projectId) {
-      setAvailableTemplates([]);
-      setSelectedTemplate(null);
-      setIndentItems([]);
-      form.setFieldValue('template_id', undefined);
-      return;
-    }
-    setLoading(true);
-    try {
-      const res = await api.get(`/masters/project-indent-templates/by-project/${projectId}`);
-      const templatesList = res.data || [];
-      setAvailableTemplates(templatesList);
-      if (templatesList.length === 0) {
-        message.warning('No templates configured for this project in Template Master!');
-        setSelectedTemplate(null);
-        setIndentItems([]);
-        form.setFieldValue('template_id', undefined);
-      } else if (templatesList.length === 1 && isNew) {
-        // Auto select single template
-        const t = templatesList[0];
-        form.setFieldValue('template_id', t.id);
-        handleTemplateSelect(t.id, templatesList);
-      }
-    } catch (err) {
-      message.error(getErrorMessage(err));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleTemplateSelect = (templateId, templateArray = availableTemplates) => {
-    const matched = templateArray.find((t) => t.id === templateId);
-    if (matched) {
-      setSelectedTemplate(matched);
-      setIndentItems((matched.items || []).map((item, idx) => ({
-        key: item.id || idx,
-        item_id: item.item_id,
-        item_code: item.item_code,
-        item_name: item.item_name || `[${item.item_code}] ${item.item_name || ''}`,
-        requested_qty: Number(item.quantity),
-        uom_id: item.uom_id,
-        uom: item.uom_name || '',
-        remarks: 'Fixed template item',
-      })));
-      message.success(`Loaded items for template '${matched.template_name}'`);
-    } else {
-      setSelectedTemplate(null);
-      setIndentItems([]);
-    }
-  };
 
   const fetchIndent = async () => {
     setLoading(true);
@@ -148,8 +120,7 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
       setIndent(data);
       form.setFieldsValue({
         ...data,
-        indent_date: data.indent_date ? dayjs(data.indent_date) : null,
-        required_date: data.required_date ? dayjs(data.required_date) : null,
+        indent_date: data.indent_date ? dayjs(data.indent_date) : dayjs(),
         template_id: data.template_id,
       });
 
@@ -184,10 +155,88 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
       form.setFieldsValue({
         indent_type: 'regular',
         indent_date: dayjs(),
-        required_date: dayjs().add(7, 'day'),
       });
     }
-  }, [id]);
+  }, [id, isNew, loadLookups]);
+
+  const fetchTemplatesForProject = async (projectId) => {
+    if (!projectId) {
+      setAvailableTemplates([]);
+      setSelectedTemplate(null);
+      setIndentItems([]);
+      form.setFieldValue('template_id', undefined);
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await api.get(`/masters/project-indent-templates/by-project/${projectId}`);
+      const templatesList = res.data || [];
+      setAvailableTemplates(templatesList);
+      if (templatesList.length === 0) {
+        message.warning('No templates configured for this project in Template Master!');
+        setSelectedTemplate(null);
+        setIndentItems([]);
+        form.setFieldValue('template_id', undefined);
+      } else if (templatesList.length === 1 && isNew) {
+        const t = templatesList[0];
+        form.setFieldValue('template_id', t.id);
+        handleTemplateSelect(t.id, templatesList);
+      }
+    } catch (err) {
+      message.error(getErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const checkDuplicateIndent = async (templateId, vehicleCode) => {
+    if (!templateId || !vehicleCode || !isNew) return;
+    try {
+      const res = await api.get('/indent/indents', {
+        params: {
+          template_type: 'dp_project',
+          template_id: templateId,
+          vehicle_code: vehicleCode,
+          page_size: 10,
+        },
+      });
+      const items = res.data?.items || res.data?.data || res.data || [];
+      const activeDuplicate = items.find((i) =>
+        Number(i.template_id) === Number(templateId) &&
+        String(i.vehicle_code) === String(vehicleCode) &&
+        ['draft', 'pending_approval', 'approved', 'partially_fulfilled'].includes(i.status)
+      );
+      if (activeDuplicate) {
+        message.error(
+          `An active template indent (${activeDuplicate.indent_number}) already exists for this Template and Vehicle (${vehicleCode}). Duplicate creation is blocked!`,
+          6
+        );
+      }
+    } catch { /* silent */ }
+  };
+
+  const handleTemplateSelect = (templateId, templateArray = availableTemplates) => {
+    const matched = templateArray.find((t) => t.id === templateId);
+    if (matched) {
+      setSelectedTemplate(matched);
+      setIndentItems((matched.items || []).map((item, idx) => ({
+        key: item.id || idx,
+        item_id: item.item_id,
+        item_code: item.item_code,
+        item_name: item.item_name || `[${item.item_code}] ${item.item_name || ''}`,
+        requested_qty: Number(item.quantity),
+        uom_id: item.uom_id,
+        uom: item.uom_name || '',
+        remarks: 'Fixed template item',
+      })));
+      message.success(`Loaded items for template '${matched.template_name}'`);
+      const vehCode = form.getFieldValue('vehicle_code');
+      if (vehCode) checkDuplicateIndent(templateId, vehCode);
+    } else {
+      setSelectedTemplate(null);
+      setIndentItems([]);
+    }
+  };
 
   const handleVehicleChange = (val) => {
     const matched = vehicles.find((v) => v.vehicle_code === val);
@@ -196,9 +245,11 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
     } else {
       form.setFieldsValue({ vehicle_number: '' });
     }
+    const tmplId = form.getFieldValue('template_id');
+    if (tmplId && val) checkDuplicateIndent(tmplId, val);
   };
 
-  const handleSubmit = async (submitForApproval = false) => {
+  const handleSubmit = async () => {
     if (submitting) return;
     try {
       const values = await form.validateFields();
@@ -211,13 +262,15 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
 
       setSubmitting(true);
       const payload = {
-        warehouse_id: values.warehouse_id,
+        warehouse_id: null,
         indent_type: 'regular',
         template_type: 'dp_project',
         template_id: values.template_id,
         template_name: matchedTmpl ? matchedTmpl.template_name : undefined,
-        indent_date: formatDateForAPI(values.indent_date),
-        required_date: formatDateForAPI(values.required_date),
+        indent_date: values.indent_date && typeof values.indent_date.toISOString === 'function'
+          ? values.indent_date.toISOString()
+          : dayjs().toISOString(),
+        required_date: null,
         project_id: values.project_id,
         vehicle_code: values.vehicle_code || null,
         vehicle_number: values.vehicle_number || null,
@@ -238,11 +291,9 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
         await api.put(`/indent/indents/${id}`, payload);
       }
 
-      if (submitForApproval && targetId) {
+      if (targetId) {
         await api.post(`/indent/indents/${targetId}/submit`);
-        message.success(isNew ? 'Indent created and submitted' : 'Indent updated and submitted');
-      } else {
-        message.success(isNew ? 'Indent saved as draft' : 'Indent updated successfully');
+        message.success(isNew ? 'Template Indent created and submitted for approval' : 'Template Indent updated and submitted for approval');
       }
 
       if (isNew) {
@@ -342,9 +393,10 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
         <Card style={{ borderRadius: 12 }}>
           <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
             <Descriptions.Item label="Indent Number">{indent.indent_number || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Indent Date">{formatDate(indent.indent_date)}</Descriptions.Item>
-            <Descriptions.Item label="Required Date">{formatDate(indent.required_date)}</Descriptions.Item>
-            <Descriptions.Item label="Warehouse">{indent.warehouse_name || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Emp Code">{indent.raised_by_emp_code || indent.employee_code || empCode}</Descriptions.Item>
+            <Descriptions.Item label="Emp Name">{indent.created_by_name || indent.raised_by_name || empName}</Descriptions.Item>
+            <Descriptions.Item label="Position">{indent.position_name || indent.raising_position || userPosition}</Descriptions.Item>
+            <Descriptions.Item label="Date & Timestamp">{formatDateTime(indent.indent_date || indent.created_at)}</Descriptions.Item>
             <Descriptions.Item label="Project">{indent.project_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="Template Name">
               {indent.template_name ? <Tag color="blue">{indent.template_name}</Tag> : '-'}
@@ -352,7 +404,6 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
             <Descriptions.Item label="Vehicle Code">{indent.vehicle_code || '-'}</Descriptions.Item>
             <Descriptions.Item label="Vehicle Number">{indent.vehicle_number || '-'}</Descriptions.Item>
             <Descriptions.Item label="Status"><StatusTag status={indent.status} /></Descriptions.Item>
-            <Descriptions.Item label="Created By">{indent.created_by_name || indent.raised_by_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="Remarks" span={3}>{indent.remarks || '-'}</Descriptions.Item>
           </Descriptions>
 
@@ -383,10 +434,7 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
         <Space>
           <Button onClick={() => navigate('/indent/template-indents')} icon={<ArrowLeftOutlined />}>Back</Button>
           {!isNew && <Button onClick={() => setEditMode(false)}>Cancel Edit</Button>}
-          <Button type="primary" icon={<SaveOutlined />} onClick={() => handleSubmit(false)} loading={submitting}>
-            Save Draft
-          </Button>
-          <Button type="primary" icon={<SendOutlined />} onClick={() => handleSubmit(true)} loading={submitting}>
+          <Button type="primary" icon={<SendOutlined />} onClick={handleSubmit} loading={submitting}>
             Submit for Approval
           </Button>
         </Space>
@@ -396,20 +444,50 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
         <Form form={form} layout="vertical">
           <Row gutter={16}>
             <Col xs={24} sm={12} md={6}>
+              <Form.Item label="Emp Code">
+                <Input value={indent?.raised_by_emp_code || indent?.employee_code || empCode} disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Form.Item label="Emp Name">
+                <Input value={indent?.created_by_name || indent?.raised_by_name || empName} disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Form.Item label="Position">
+                <Input value={indent?.position_name || indent?.raising_position || userPosition} disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
+              </Form.Item>
+            </Col>
+            <Col xs={24} sm={12} md={6}>
+              <Form.Item
+                name="indent_date"
+                label="Date & Timestamp"
+                rules={[{ required: true, message: 'Date & Timestamp is required' }]}
+              >
+                <DatePicker
+                  showTime={{ format: 'HH:mm:ss' }}
+                  format="DD/MM/YYYY HH:mm:ss"
+                  style={{ width: '100%' }}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Row gutter={16}>
+            <Col xs={24} sm={12} md={12}>
               <Form.Item name="project_id" label="Project" rules={[{ required: true, message: 'Project is required' }]}>
                 <Select
                   options={projects}
                   placeholder="Select project"
-                  allowClear
                   showSearch
                   optionFilterProp="label"
-                  disabled={!isNew}
+                  disabled={true}
                   onChange={(val) => fetchTemplatesForProject(val)}
                 />
               </Form.Item>
             </Col>
 
-            <Col xs={24} sm={12} md={6}>
+            <Col xs={24} sm={12} md={12}>
               <Form.Item name="template_id" label="Template Name" rules={[{ required: true, message: 'Template Name is required' }]}>
                 <Select
                   placeholder={availableTemplates.length > 0 ? "Select template name" : "Select project first"}
@@ -421,41 +499,11 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
                 />
               </Form.Item>
             </Col>
-
-            <Col xs={24} sm={12} md={6}>
-              <Form.Item name="warehouse_id" label="Warehouse" rules={[{ required: true, message: 'Warehouse is required' }]}>
-                  <Select options={warehouses} placeholder="Select warehouse" allowClear showSearch optionFilterProp="label" />
-              </Form.Item>
-            </Col>
-            
-            <Col xs={24} sm={12} md={6}>
-              <Form.Item
-                name="required_date"
-                label="Required Date"
-                rules={[
-                  { required: true, message: 'Required Date is mandatory' },
-                  {
-                    validator: (_, value) => {
-                      if (value && value.isBefore(dayjs(), 'day')) {
-                        return Promise.reject(new Error('Required Date must be a future date'));
-                      }
-                      return Promise.resolve();
-                    }
-                  }
-                ]}
-              >
-                <DatePicker
-                  style={{ width: '100%' }}
-                  format={DATE_FORMAT}
-                  disabledDate={(current) => current && current.isBefore(dayjs(), 'day')}
-                />
-              </Form.Item>
-            </Col>
           </Row>
 
           <Row gutter={16}>
-            <Col xs={24} sm={12} md={8}>
-              <Form.Item name="vehicle_code" label="Vehicle Code">
+            <Col xs={24} sm={12} md={12}>
+              <Form.Item name="vehicle_code" label="Vehicle Code" rules={[{ required: true, message: 'Vehicle code is required' }]}>
                 <Select
                   placeholder="Select vehicle code"
                   allowClear
@@ -466,8 +514,8 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
                 />
               </Form.Item>
             </Col>
-            <Col xs={24} sm={12} md={8}>
-              <Form.Item name="vehicle_number" label="Vehicle Number">
+            <Col xs={24} sm={12} md={12}>
+              <Form.Item name="vehicle_number" label="Vehicle Number" rules={[{ required: true, message: 'Vehicle number is required' }]}>
                 <Input placeholder="Auto-populated from code" disabled style={{ color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' }} />
               </Form.Item>
             </Col>

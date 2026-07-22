@@ -518,7 +518,7 @@ const AssetCodesTreeModal = ({
       open={open}
       onCancel={onCancel}
       width={800}
-      destroyOnClose
+      destroyOnHidden
       centered
       styles={{
         header: { background: '#ffffff', borderBottom: '1px solid #e2e8f0', padding: '16px 24px', borderRadius: '12px 12px 0 0' },

@@ -27,8 +27,6 @@ const MODULE_TABS = [
   { key: 'indent', label: 'Indent' },
   { key: 'material_request', label: 'Material Request' },
   { key: 'purchase_order', label: 'Purchase Order' },
-  { key: 'auto_reorder', label: 'Auto Reorder' },
-  { key: 'stock_transfer', label: 'Stock Transfer' },
 ];
 
 const PRIORITY_COLORS = {
@@ -95,13 +93,25 @@ const PendingApprovals = () => {
   // Load tab counts
   const loadTabCounts = useCallback(async () => {
     try {
-      const res = await api.get('/approvals/pending/counts');
+      const params = {};
+      if (activeModule !== 'all') {
+        params.document_type = activeModule;
+      }
+      if (activeStatus) {
+        params.status = activeStatus;
+      }
+      const res = await api.get('/approvals/pending/counts', { params });
       const data = res.data || {};
       setTabCounts(data);
+      if (data.status_counts?.on_hold != null) {
+        setHoldCount(data.status_counts.on_hold);
+      } else if (data.on_hold != null) {
+        setHoldCount(data.on_hold);
+      }
     } catch {
       // silent - counts are non-critical
     }
-  }, []);
+  }, [activeModule, activeStatus]);
 
   useEffect(() => {
     loadTabCounts();
@@ -298,6 +308,10 @@ const PendingApprovals = () => {
   // Hide Document Type column when the user only sees one type — it's
   // redundant and just eats horizontal space.
   const indentOnlyView = isIndentOnlyApprover || activeModule === 'indent';
+  const isTemplateIndent = (record) =>
+    record?.document_type === 'indent' &&
+    !!(record?.template_type || record?.template_name || record?.template_id);
+
   const columns = [
     !indentOnlyView && {
       title: 'Document Type',
@@ -328,6 +342,49 @@ const PendingApprovals = () => {
       ellipsis: true,
       render: (val, record) => record.requested_by_name || val || '-',
     },
+    // Emp Code — indent-specific field
+    (indentOnlyView || activeModule === 'all') && {
+      title: 'Emp Code',
+      key: 'emp_code',
+      width: 110,
+      ellipsis: true,
+      render: (_, record) => record.emp_code || record.employee_code || record.raised_by_emp_code || '-',
+    },
+    // Position — indent-specific field
+    (indentOnlyView || activeModule === 'all') && {
+      title: 'Position',
+      key: 'position',
+      width: 130,
+      ellipsis: true,
+      render: (_, record) => record.position_name || record.position || record.raising_position || '-',
+    },
+    // Indent Type — Template or Normal
+    (indentOnlyView || activeModule === 'all') && {
+      title: 'Indent Type',
+      key: 'indent_type',
+      width: 110,
+      render: (_, record) => {
+        if (record.document_type !== 'indent') return '-';
+        const isTemplate = !!(record.template_type || record.template_name || record.template_id);
+        return isTemplate
+          ? <Tag color="purple">Template</Tag>
+          : <Tag color="blue">Normal</Tag>;
+      },
+    },
+    // Vehicle Code
+    (indentOnlyView || activeModule === 'all') && {
+      title: 'Vehicle Code',
+      key: 'vehicle_code',
+      width: 110,
+      render: (_, record) => record.vehicle_code || '-',
+    },
+    // Vehicle Number
+    (indentOnlyView || activeModule === 'all') && {
+      title: 'Vehicle No',
+      key: 'vehicle_number',
+      width: 120,
+      render: (_, record) => record.vehicle_number || '-',
+    },
     {
       title: 'Requested At',
       dataIndex: 'requested_at',
@@ -342,40 +399,20 @@ const PendingApprovals = () => {
       width: 100,
       align: 'center',
       render: (_, record) => {
-        // History row: show the level I acted at, not the workflow's
-        // current pointer (which has moved past me).
         if (record.my_action) {
           return <Text>L{record.my_action_level || 1} / {record.total_levels || 1}</Text>;
         }
         return <Text>{record.current_level || 1} / {record.total_levels || 1}</Text>;
       },
     },
-    // Amount column makes no sense for indents (no monetary total). Hide it
-    // when the active view is indent-only; show for MR/PO/etc. where the
-    // backend may surface grand_total.
-    !indentOnlyView && {
-      title: 'Amount',
-      key: 'amount',
-      width: 140,
-      align: 'right',
-      sorter: true,
-      render: (_, record) => {
-        const val = record.amount ?? record.grand_total ?? null;
-        return val != null ? <Text strong>{formatCurrency(val)}</Text> : '-';
-      },
-    },
     {
-      // For indent rows the underlying field is `indent_type` (regular/urgent),
-      // not a true priority. Rename header in indent-only views to match.
-      title: indentOnlyView ? 'Type' : 'Priority',
+      title: indentOnlyView ? 'Priority' : 'Priority',
       dataIndex: 'priority',
       key: 'priority',
       width: 100,
       render: (val) => {
         const priority = (val || 'normal').toLowerCase();
-        return (
-          <StatusTag status={priority} />
-        );
+        return <StatusTag status={priority} />;
       },
     },
     {
@@ -384,9 +421,6 @@ const PendingApprovals = () => {
       key: 'status',
       width: 170,
       render: (s, record) => {
-        // History view: my_action is set. Render the meaningful stage
-        // instead of a generic tick — "Sent to L2", "Final approved",
-        // "Rejected by me".
         if (record.my_action === 'approved') {
           const myLevel = record.my_action_level || 1;
           const total = record.total_levels || 1;
@@ -418,10 +452,8 @@ const PendingApprovals = () => {
       width: 180,
       fixed: 'right',
       render: (_, record) => {
-        // History rows: only let the user view. Approve/Reject/Hold
-        // buttons are meaningless once they've already actioned the
-        // request.
         const isHistoryRow = !!record.my_action;
+        const isTemplate = isTemplateIndent(record);
         if (isHistoryRow) {
           return (
             <Tooltip title="View Details">
@@ -499,11 +531,8 @@ const PendingApprovals = () => {
     ? MODULE_TABS.filter((t) => t.key === 'indent')
     : MODULE_TABS;
   const tabItems = visibleModuleTabs.map((tab) => {
-    const count = tab.key === 'all'
-      ? Object.entries(tabCounts)
-          .filter(([k]) => k !== 'all')
-          .reduce((sum, [, c]) => sum + (c || 0), 0)
-      : tabCounts[tab.key] || 0;
+    const modCounts = tabCounts.module_counts || tabCounts;
+    const count = modCounts[tab.key] || 0;
     return {
       key: tab.key,
       label: (
@@ -513,7 +542,7 @@ const PendingApprovals = () => {
             <Badge
               count={count}
               size="small"
-              style={{ marginLeft: 8, backgroundColor: tab.key === 'all' ? '#eb2f96' : '#fa8c16' }}
+              style={{ marginLeft: 8, backgroundColor: tab.key === 'all' ? '#eb2f96' : '#1677ff' }}
             />
           )}
         </span>
@@ -574,7 +603,7 @@ const PendingApprovals = () => {
           <Card styles={{ body: { padding: 16 } }}>
             <Statistic
               title="Pending"
-              value={Object.entries(tabCounts).filter(([k]) => k !== 'all').reduce((s, [, v]) => s + (v || 0), 0)}
+              value={(tabCounts.status_counts?.pending ?? tabCounts.pending) || 0}
               valueStyle={{ color: '#fa8c16' }}
             />
           </Card>
@@ -583,7 +612,7 @@ const PendingApprovals = () => {
           <Card styles={{ body: { padding: 16 } }}>
             <Statistic
               title="On Hold"
-              value={holdCount}
+              value={(tabCounts.status_counts?.on_hold ?? tabCounts.on_hold) || 0}
               valueStyle={{ color: '#722ed1' }}
             />
           </Card>
@@ -594,7 +623,7 @@ const PendingApprovals = () => {
               <Card styles={{ body: { padding: 16 } }}>
                 <Statistic
                   title="Indents"
-                  value={tabCounts.indent || 0}
+                  value={(tabCounts.module_counts?.indent ?? tabCounts.indent) || 0}
                   valueStyle={{ color: '#1677ff' }}
                 />
               </Card>
@@ -603,7 +632,7 @@ const PendingApprovals = () => {
               <Card styles={{ body: { padding: 16 } }}>
                 <Statistic
                   title="POs / MRs"
-                  value={(tabCounts.purchase_order || 0) + (tabCounts.material_request || 0)}
+                  value={((tabCounts.module_counts?.purchase_order ?? tabCounts.purchase_order) || 0) + ((tabCounts.module_counts?.material_request ?? tabCounts.material_request) || 0)}
                   valueStyle={{ color: '#13c2c2' }}
                 />
               </Card>
@@ -622,14 +651,35 @@ const PendingApprovals = () => {
             setSelectedRows([]);
             setRefreshKey((k) => k + 1);
           }}
-          items={STATUS_TABS.map((t) => ({
-            key: t.key,
-            label: t.key === 'on_hold' ? (
-              <Badge count={holdCount} size="small" offset={[8, -2]}>
-                <span>{t.label}</span>
-              </Badge>
-            ) : t.label,
-          }))}
+          items={STATUS_TABS.map((t) => {
+            const statCounts = tabCounts.status_counts || tabCounts;
+            const count = statCounts[t.key] ?? 0;
+            return {
+              key: t.key,
+              label: (
+                <span>
+                  {t.label}
+                  {count > 0 && (
+                    <Badge
+                      count={count}
+                      size="small"
+                      style={{
+                        marginLeft: 8,
+                        backgroundColor:
+                          t.key === 'pending'
+                            ? '#fa8c16'
+                            : t.key === 'on_hold'
+                            ? '#722ed1'
+                            : t.key === 'approved'
+                            ? '#52c41a'
+                            : '#f5222d',
+                      }}
+                    />
+                  )}
+                </span>
+              ),
+            };
+          })}
         />
       </Card>
 
@@ -688,7 +738,8 @@ const PendingApprovals = () => {
           selectedRecord && !selectedRecord.my_action && (
             <Space>
               <Button
-                style={{ color: '#52c41a', borderColor: '#52c41a' }}
+                type="primary"
+                style={{ backgroundColor: '#52c41a', borderColor: '#52c41a' }}
                 icon={<CheckOutlined />}
                 onClick={() => openActionModal('approve', selectedRecord)}
               >
@@ -744,6 +795,33 @@ const PendingApprovals = () => {
                   <Descriptions.Item label="Requested At">
                     {formatDateTime(selectedRecord.requested_at)}
                   </Descriptions.Item>
+                  {selectedRecord.document_type === 'indent' && (
+                    <Descriptions.Item label="Emp Code">
+                      {selectedRecord.emp_code || selectedRecord.employee_code || selectedRecord.raised_by_emp_code || '-'}
+                    </Descriptions.Item>
+                  )}
+                  {selectedRecord.document_type === 'indent' && (
+                    <Descriptions.Item label="Position">
+                      {selectedRecord.position_name || selectedRecord.position || selectedRecord.raising_position || '-'}
+                    </Descriptions.Item>
+                  )}
+                  {selectedRecord.document_type === 'indent' && (
+                    <Descriptions.Item label="Indent Type">
+                      {isTemplateIndent(selectedRecord)
+                        ? <Tag color="purple">Template</Tag>
+                        : <Tag color="blue">Normal</Tag>}
+                    </Descriptions.Item>
+                  )}
+                  {selectedRecord.document_type === 'indent' && (
+                    <Descriptions.Item label="Vehicle Code">
+                      {selectedRecord.vehicle_code || '-'}
+                    </Descriptions.Item>
+                  )}
+                  {selectedRecord.document_type === 'indent' && (
+                    <Descriptions.Item label="Vehicle No">
+                      {selectedRecord.vehicle_number || '-'}
+                    </Descriptions.Item>
+                  )}
                   {selectedRecord.document_type !== 'indent' && (
                     <Descriptions.Item label="Amount">
                       {selectedRecord.amount != null ? formatCurrency(selectedRecord.amount) : '-'}
@@ -823,6 +901,10 @@ const PendingApprovals = () => {
                       render: (_, r) => {
                         if (selectedRecord?.document_type !== 'indent') {
                           return r.approved_qty ?? r.qty ?? '-';
+                        }
+                        // Template indents: show read-only qty — no override allowed
+                        if (isTemplateIndent(selectedRecord)) {
+                          return <Text>{r.approved_qty ?? r.qty ?? r.requested_qty ?? '-'}</Text>;
                         }
                         const requested = Number(r.qty ?? r.requested_qty ?? 0);
                         const current = qtyOverrides[r.id] != null

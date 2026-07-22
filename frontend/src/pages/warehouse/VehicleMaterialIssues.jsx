@@ -138,12 +138,12 @@ const VehicleMaterialIssues = () => {
       render: (v) => formatDate(v),
     },
     {
-      title: 'Issued To',
-      dataIndex: 'issued_to_name',
-      key: 'issued_to',
+      title: 'Emp Name',
+      dataIndex: 'raised_by_name',
+      key: 'emp_name',
       width: 150,
       ellipsis: true,
-      render: (v, r) => v || r.issued_to || '-',
+      render: (v, r) => v || r.created_by_name || r.issued_to_name || '-',
     },
     {
       title: 'Status',

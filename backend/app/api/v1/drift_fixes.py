@@ -647,7 +647,8 @@ async def stock_balance_breakdown(
                 
                 i = 1
                 generated_count = 0
-                while generated_count < qty_int and generated_count < 1000:
+                max_gen = min(qty_int, 50)
+                while generated_count < max_gen:
                     v_sn = f"V{i}"
                     if v_sn not in all_existing_sns:
                         v_code = generate_asset_code(v_sn, r.item.item_code)
@@ -733,7 +734,10 @@ async def stock_balance_breakdown(
         items.append(data)
         
     if should_commit:
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
     return {"items": items}
 
 

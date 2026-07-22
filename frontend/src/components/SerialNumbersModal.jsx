@@ -239,7 +239,7 @@ const SerialNumbersModal = ({
         open={open}
         onCancel={() => setOpen(false)}
         width={width || 640}
-        destroyOnClose
+        destroyOnHidden
         centered
         styles={{
           header: { background: '#ffffff', borderBottom: '1px solid #e2e8f0', padding: '16px 24px', borderRadius: '12px 12px 0 0' },

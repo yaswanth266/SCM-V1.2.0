@@ -1,5 +1,5 @@
 from pydantic import BaseModel, field_validator
-from typing import List, Optional
+from typing import List, Optional, Union
 from datetime import datetime, date
 from decimal import Decimal
 
@@ -25,11 +25,11 @@ class IndentCreate(BaseModel):
     # assignments when missing (single-assignment users skip the picker).
     # Handler raises 422 if still unresolved after auto-fill.
     warehouse_id: Optional[int] = None
-    indent_date: Optional[date] = None
-    required_date: Optional[date] = None
+    indent_date: Optional[Union[datetime, date]] = None
+    required_date: Optional[Union[datetime, date]] = None
     department: Optional[str] = None
     vehicle_code: str
-    vehicle_number: Optional[str] = None
+    vehicle_number: str
     service_code: Optional[str] = None
     template_type: Optional[str] = None
     template_id: Optional[int] = None
@@ -40,6 +40,13 @@ class IndentCreate(BaseModel):
     def val_vehicle_code(cls, v):
         if not v or not v.strip():
             raise ValueError("Vehicle code is required")
+        return v.strip()
+
+    @field_validator("vehicle_number")
+    @classmethod
+    def val_vehicle_number(cls, v):
+        if not v or not v.strip():
+            raise ValueError("Vehicle number is required")
         return v.strip()
 
     # BUG-IND-028 — `department_id` is a foreign key to the departments
@@ -69,8 +76,9 @@ class IndentCreate(BaseModel):
         # could submit indents dated years in the future to game reporting,
         # SLA windows, or rolling submission caps. Cap at today.
         if v is not None:
-            from datetime import date as _date
-            if v > _date.today():
+            from datetime import date as _date, datetime as _datetime
+            d = v.date() if isinstance(v, _datetime) else v
+            if d > _date.today():
                 raise ValueError("indent_date cannot be in the future")
         return v
 
@@ -83,15 +91,18 @@ class IndentCreate(BaseModel):
         # only ever used for new indents — and a past required_date on a
         # brand-new indent is always a UI bug.
         if v is not None:
-            from datetime import date as _date
-            if v < _date.today():
+            from datetime import date as _date, datetime as _datetime
+            d = v.date() if isinstance(v, _datetime) else v
+            if d < _date.today():
                 raise ValueError("required_date cannot be in the past")
             # BUG-IND-026 — required_date must not precede indent_date.
             # Asking for the goods before the indent itself is dated is a
             # UI bug.
             indent_date = info.data.get("indent_date") if info and getattr(info, "data", None) else None
-            if indent_date and v < indent_date:
-                raise ValueError("required_date cannot be earlier than indent_date")
+            if indent_date:
+                idate = indent_date.date() if isinstance(indent_date, _datetime) else indent_date
+                if d < idate:
+                    raise ValueError("required_date cannot be earlier than indent_date")
         return v
 
 class IndentUpdate(BaseModel):
@@ -102,7 +113,8 @@ class IndentUpdate(BaseModel):
     # draft -> approved without going through any workflow.
     warehouse_id: Optional[int] = None
     source_bom_id: Optional[int] = None
-    required_date: Optional[date] = None
+    indent_date: Optional[Union[datetime, date]] = None
+    required_date: Optional[Union[datetime, date]] = None
     indent_type: Optional[str] = None
     remarks: Optional[str] = None
     vehicle_code: Optional[str] = None
@@ -112,7 +124,6 @@ class IndentUpdate(BaseModel):
     template_id: Optional[int] = None
     template_name: Optional[str] = None
     # When provided, replaces all existing items on the indent. Only allowed
-
     # while the indent is still in draft status (handler enforces).
     items: Optional[List[IndentItemCreate]] = None
 
@@ -120,7 +131,7 @@ class IndentUpdate(BaseModel):
     @classmethod
     def val_vehicle_code(cls, v):
         if v is not None and not v.strip():
-            raise ValueError("Vehicle code cannot be empty")
+            return None
         return v.strip() if v is not None else None
 
 class IndentItemResponse(BaseModel):
@@ -158,6 +169,8 @@ class IndentResponse(BaseModel):
     indent_type: str
     status: str
     raised_by: int
+    raised_by_name: Optional[str] = None
+    raised_by_emp_code: Optional[str] = None
     approved_by: Optional[int] = None
     approved_date: Optional[datetime] = None
     remarks: Optional[str] = None
@@ -304,12 +317,21 @@ class VehicleStockBalanceResponse(BaseModel):
     item_id: int
     item_code: Optional[str] = None
     item_name: Optional[str] = None
+    item_type: Optional[str] = None
+    has_serial: Optional[bool] = None
+    uom_id: Optional[int] = None
     uom_name: Optional[str] = None
     batch_id: Optional[int] = None
     batch_number: Optional[str] = None
     qty: Decimal
+    total_qty: Optional[Decimal] = None
+    available_qty: Optional[Decimal] = None
+    valuation_rate: Optional[Decimal] = None
+    stock_value: Optional[Decimal] = None
     serial_numbers: Optional[List[str]] = None
-    last_updated: datetime
+    asset_codes: Optional[List[str]] = None
+    consumable_codes: Optional[List[str]] = None
+    last_updated: Optional[Union[datetime, str]] = None
 
     model_config = {"from_attributes": True}
 

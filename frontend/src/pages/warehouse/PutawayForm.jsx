@@ -698,33 +698,6 @@ const PutawayForm = () => {
       },
     },
     {
-      title: 'Suggested Bin', dataIndex: 'suggested_bin', width: 150,
-      render: (v) => v ? (
-        <Tag icon={<AimOutlined />} color="blue">{v}</Tag>
-      ) : (
-        <Text type="secondary">Not assigned</Text>
-      ),
-    },
-    {
-      title: 'Actual Bin', dataIndex: 'actual_bin', width: 200,
-      render: (val, record) => {
-        if (record.scan_confirmed || record.status === 'done') {
-          return <Tag icon={<EnvironmentOutlined />} color="green">{val || record.suggested_bin || '-'}</Tag>;
-        }
-        return (
-          <Input
-            size="small"
-            prefix={<EnvironmentOutlined />}
-            placeholder="Enter bin..."
-            value={record.actual_bin || ''}
-            disabled={record.status === 'done' || record.status === 'skipped'}
-            onChange={(e) => updatePutawayItemBin(record.key, e.target.value)}
-            style={{ width: '100%', textAlign: 'left' }}
-          />
-        );
-      },
-    },
-    {
       title: 'Status', dataIndex: 'status', width: 110,
       render: (v) => {
         const cfg = ITEM_STATUSES[v] || ITEM_STATUSES.pending;
@@ -734,12 +707,6 @@ const PutawayForm = () => {
           </Tag>
         );
       },
-    },
-    {
-      title: 'Scanned At', dataIndex: 'scanned_at', width: 140,
-      render: (v) => v ? (
-        <Text style={{ fontSize: 12 }}>{formatDateTime(v)}</Text>
-      ) : '-',
     },
     {
       title: 'Serial Numbers',
@@ -777,14 +744,10 @@ const PutawayForm = () => {
         }
         return (
           <Space size="small">
-            <Tooltip title={record.actual_bin_id ? 'Mark as placed in the selected bin' : 'Pick a bin first'}>
+            <Tooltip title="Confirm putaway of this item">
               <Popconfirm
                 title="Confirm putaway of this item?"
                 onConfirm={async () => {
-                  if (!record.actual_bin_id) {
-                    message.warning('Pick a bin in "Actual Bin" before confirming.');
-                    return;
-                  }
                   if (record.has_serial) {
                     const needed = parseInt(record.qty || 0, 10);
                     const filled = (record.serial_numbers || []).filter(s => s && s.trim()).length;
@@ -795,7 +758,7 @@ const PutawayForm = () => {
                   }
                   try {
                     await api.put(`/warehouse/putaways/${id}/items/${record.id}/confirm`, {
-                      actual_bin_id: record.actual_bin_id,
+                      actual_bin_id: record.actual_bin_id || record.suggested_bin_id || null,
                       scanned_at: new Date().toISOString(),
                       serial_numbers: record.serial_numbers || [],
                     });
@@ -809,13 +772,11 @@ const PutawayForm = () => {
                     message.error(getErrorMessage(err));
                   }
                 }}
-                disabled={!record.actual_bin_id}
               >
                 <Button
                   type="primary"
                   size="small"
                   icon={<CheckOutlined />}
-                  disabled={!record.actual_bin_id}
                 >
                   Confirm
                 </Button>
@@ -858,11 +819,6 @@ const PutawayForm = () => {
                 onClick={handleStartPutaway}
               >
                 Start Putaway
-              </Button>
-            )}
-            {((putaway.status === 'draft' || putaway.status === 'pending') || putaway.status === 'in_progress') && (
-              <Button onClick={handleSaveBinAssignments} loading={submitting}>
-                Save Bin Assignments
               </Button>
             )}
             <Button
@@ -1132,18 +1088,6 @@ const PutawayForm = () => {
           style={{ width: '100%' }}
           onChange={(v) => updateItem(record.key, 'rack_id', v)}
           disabled={!record.line_id}
-        />
-      ),
-    },
-    {
-      title: 'Bin',
-      width: 150,
-      render: (_, record) => (
-        <Input
-          value={record.suggested_bin_id || ''}
-          placeholder="Enter bin..."
-          style={{ width: '100%' }}
-          onChange={(e) => updateItem(record.key, 'suggested_bin_id', e.target.value)}
         />
       ),
     },

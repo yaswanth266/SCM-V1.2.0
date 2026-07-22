@@ -46,12 +46,24 @@ const MaterialAcknowledgementForm = ({ isViewOnly = false }) => {
     if (isViewOnly && id) {
       loadDetailRecord();
     } else {
-      fetchPendingIssues();
-      if (user?.employee_code) {
-        form.setFieldsValue({ employee_code: user.employee_code });
-      }
+      const initForm = async () => {
+        let empCode = user?.employee_code || user?.employee?.employee_code || '';
+        if (!empCode) {
+          try {
+            const meRes = await api.get('/auth/me');
+            empCode = meRes.data?.employee_code || meRes.data?.employee?.employee_code || '';
+          } catch {
+            // silent
+          }
+        }
+        if (empCode) {
+          form.setFieldsValue({ employee_code: empCode });
+        }
+        fetchPendingIssues(empCode);
+      };
+      initForm();
     }
-  }, [id, isViewOnly]);
+  }, [id, isViewOnly, user]);
 
   const loadDetailRecord = async () => {
     setLoading(true);
@@ -66,15 +78,26 @@ const MaterialAcknowledgementForm = ({ isViewOnly = false }) => {
     }
   };
 
-  const fetchPendingIssues = async () => {
+  const fetchPendingIssues = async (empCodeFilter = '') => {
     try {
-      const res = await api.get('/warehouse/vehicle-issues', { params: { page_size: 100, status: 'issued' } });
+      const params = { page_size: 100, status: 'issued' };
+      if (empCodeFilter) {
+        params.employee_code = empCodeFilter;
+      } else {
+        params.assigned_to_me = true;
+      }
+      const res = await api.get('/warehouse/vehicle-issues', { params });
       const data = res.data?.items || res.data || [];
-      setPendingIssues(data.map((i) => ({
-        label: `${i.issue_number} - Vehicle ${i.vehicle_code} (${i.vehicle_number})`,
-        value: i.id,
-        record: i,
-      })));
+      setPendingIssues(data.map((i) => {
+        const empName = i.raised_by_name || i.issued_to_name || '';
+        const empCode = i.raised_by_emp_code || i.employee_code || '';
+        const empTag = empName ? ` · ${empName}${empCode ? ` (${empCode})` : ''}` : (empCode ? ` · (${empCode})` : '');
+        return {
+          label: `${i.issue_number} - Vehicle ${i.vehicle_code} (${i.vehicle_number})${empTag}`,
+          value: i.id,
+          record: i,
+        };
+      }));
     } catch {
       // silent
     }
@@ -92,6 +115,11 @@ const MaterialAcknowledgementForm = ({ isViewOnly = false }) => {
       const res = await api.get(`/warehouse/vehicle-issues/${issueId}`);
       const data = res.data;
       setIssueDetail(data);
+
+      const empCode = data.raised_by_emp_code || data.created_by_emp_code || data.employee_code;
+      if (empCode && !form.getFieldValue('employee_code')) {
+        form.setFieldsValue({ employee_code: empCode });
+      }
 
       const items = (data.items || []).map((item) => {
         const approved = Number(item.qty || 0);
@@ -442,8 +470,9 @@ const MaterialAcknowledgementForm = ({ isViewOnly = false }) => {
 
       <Card bordered={false} style={{ borderRadius: 12, boxShadow: '0 4px 20px rgba(0, 0, 0, 0.05)', marginBottom: 24 }}>
         <Form form={form} layout="vertical">
+          <Form.Item name="employee_code" hidden />
           <Row gutter={24}>
-            <Col xs={24} md={16}>
+            <Col span={24}>
               <Form.Item label={<Text strong>Select Vehicle Issue</Text>} required>
                 <Select
                   placeholder="Select pending vehicle issue..."
@@ -458,20 +487,6 @@ const MaterialAcknowledgementForm = ({ isViewOnly = false }) => {
                 />
               </Form.Item>
             </Col>
-            <Col xs={24} md={8}>
-              <Form.Item
-                name="employee_code"
-                label={<Text strong>Employee Code</Text>}
-                rules={[{ required: true, message: 'Employee code is required' }]}
-              >
-                <Input
-                  placeholder="e.g. EMP-0042"
-                  prefix={<IdcardOutlined style={{ color: '#94a3b8' }} />}
-                  style={{ fontWeight: 600, height: 40 }}
-                  size="large"
-                />
-              </Form.Item>
-            </Col>
           </Row>
         </Form>
 
@@ -481,9 +496,32 @@ const MaterialAcknowledgementForm = ({ isViewOnly = false }) => {
               <Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }}>
                 <Descriptions.Item label={<Text type="secondary">Issue #</Text>}><Text strong>{issueDetail.issue_number}</Text></Descriptions.Item>
                 <Descriptions.Item label={<Text type="secondary">Source Warehouse</Text>}><Text strong>{issueDetail.warehouse_name || '-'}</Text></Descriptions.Item>
-                <Descriptions.Item label={<Text type="secondary">Vehicle Code</Text>}><Text strong>{issueDetail.vehicle_code}</Text></Descriptions.Item>
-                <Descriptions.Item label={<Text type="secondary">Vehicle Number</Text>}><Text strong>{issueDetail.vehicle_number}</Text></Descriptions.Item>
-                <Descriptions.Item label={<Text type="secondary">Issue Date</Text>}><Text strong>{formatDate(issueDetail.issue_date)}</Text></Descriptions.Item>
+                <Descriptions.Item label={<Text type="secondary">Vehicle Code</Text>}><Text strong>{issueDetail.vehicle_code || '-'}</Text></Descriptions.Item>
+                <Descriptions.Item label={<Text type="secondary">Vehicle Number</Text>}><Text strong>{issueDetail.vehicle_number || '-'}</Text></Descriptions.Item>
+                
+                <Descriptions.Item label={<Text type="secondary">Employee Code</Text>}>
+                  <Text strong>{form.getFieldValue('employee_code') || user?.employee_code || issueDetail.raised_by_emp_code || '-'}</Text>
+                </Descriptions.Item>
+
+                <Descriptions.Item label={<Text type="secondary">Project</Text>}><Text strong>{issueDetail.project_name || '-'}</Text></Descriptions.Item>
+
+                {(issueDetail.raised_by_name || issueDetail.issued_to_name) && (
+                  <Descriptions.Item label={<Text type="secondary">Emp Name</Text>}><Text strong>{issueDetail.raised_by_name || issueDetail.issued_to_name}</Text></Descriptions.Item>
+                )}
+
+                {issueDetail.position_name && (
+                  <Descriptions.Item label={<Text type="secondary">Position</Text>}><Text strong>{issueDetail.position_name}</Text></Descriptions.Item>
+                )}
+
+                {issueDetail.department && (
+                  <Descriptions.Item label={<Text type="secondary">Department</Text>}><Text strong>{issueDetail.department}</Text></Descriptions.Item>
+                )}
+
+                {(issueDetail.issued_by_name || issueDetail.created_by_name) && (
+                  <Descriptions.Item label={<Text type="secondary">Issued By</Text>}><Text strong>{issueDetail.issued_by_name || issueDetail.created_by_name}</Text></Descriptions.Item>
+                )}
+
+                <Descriptions.Item label={<Text type="secondary">Issue Date</Text>}><Text strong>{formatDateTime(issueDetail.issue_date)}</Text></Descriptions.Item>
               </Descriptions>
             </Card>
 
@@ -493,6 +531,7 @@ const MaterialAcknowledgementForm = ({ isViewOnly = false }) => {
               rowKey="id"
               size="middle"
               pagination={false}
+              scroll={{ x: 'max-content' }}
               columns={[
                 { title: '#', width: 50, render: (_, __, idx) => idx + 1 },
                 { title: 'Item Code', dataIndex: 'item_code', key: 'code', render: (text) => <Text style={{ fontFamily: 'monospace', fontWeight: 500 }}>{text}</Text> },

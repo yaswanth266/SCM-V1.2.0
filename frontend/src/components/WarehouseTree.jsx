@@ -140,7 +140,6 @@ const WarehouseTree = ({
       multiple={multiple}
       showSearch
       treeNodeFilterProp="title"
-      dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
     />
   );
 };

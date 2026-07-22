@@ -140,6 +140,7 @@ class GRNItemResponse(BaseModel):
     rate: Decimal
     amount: Decimal
     qi_status: str
+    remarks: Optional[str] = None
     item_type: Optional[str] = None
     requires_quality_inspection: bool = False
     serial_numbers: List[str] = []
@@ -162,8 +163,11 @@ class GRNResponse(BaseModel):
     total_qty: Decimal
     accepted_qty: Decimal
     rejected_qty: Decimal
+    total_amount: Optional[Decimal] = None
     supplier_invoice: Optional[str] = None
     supplier_invoice_date: Optional[datetime] = None
+    vehicle_number: Optional[str] = None
+    lr_number: Optional[str] = None
     remarks: Optional[str] = None
     received_by: Optional[int] = None
     received_by_name: Optional[str] = None
@@ -223,6 +227,8 @@ class QIResponse(BaseModel):
     inspected_by: Optional[int] = None
     inspected_by_name: Optional[str] = None
     remarks: Optional[str] = None
+    status: Optional[str] = "draft"
+    completed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     items: List[QIItemResponse] = []
     model_config = {"from_attributes": True}
@@ -244,7 +250,7 @@ class PutawayCreate(BaseModel):
     items: List[PutawayItemCreate]
 
 class PutawayItemUpdate(BaseModel):
-    actual_bin_id: Union[int, str]
+    actual_bin_id: Optional[Union[int, str]] = None
     status: str = "done"
     serial_numbers: Optional[List[str]] = None
 
@@ -976,7 +982,7 @@ class VehicleIssueCreate(BaseModel):
     warehouse_id: int
     vehicle_code: str
     vehicle_number: str
-    issue_date: date
+    issue_date: Union[datetime, date]
     department: Optional[str] = None
     issued_to: Optional[int] = None
     remarks: Optional[str] = None
@@ -996,10 +1002,11 @@ class VehicleIssueCreate(BaseModel):
     @field_validator("issue_date")
     @classmethod
     def val_issue_date(cls, v):
-        from datetime import timedelta
-        if v is not None and v > (date.today() + timedelta(days=1)):
+        from datetime import timedelta, date, datetime
+        chk_date = v.date() if isinstance(v, datetime) else v
+        if chk_date is not None and chk_date > (date.today() + timedelta(days=1)):
             raise ValueError("Issue date cannot be more than 1 day in the future")
-        if v is not None and v < (date.today() - timedelta(days=90)):
+        if chk_date is not None and chk_date < (date.today() - timedelta(days=90)):
             raise ValueError("Issue date cannot be more than 90 days in the past")
         return v
 
@@ -1009,7 +1016,7 @@ class VehicleIssueUpdate(BaseModel):
     warehouse_id: Optional[int] = None
     vehicle_code: Optional[str] = None
     vehicle_number: Optional[str] = None
-    issue_date: Optional[date] = None
+    issue_date: Optional[Union[datetime, date]] = None
     department: Optional[str] = None
     issued_to: Optional[int] = None
     remarks: Optional[str] = None
@@ -1022,10 +1029,13 @@ class VehicleIssueUpdate(BaseModel):
     @field_validator("issue_date")
     @classmethod
     def val_issue_date(cls, v):
-        from datetime import timedelta
-        if v is not None and v > (date.today() + timedelta(days=1)):
+        from datetime import timedelta, date, datetime
+        if v is None:
+            return v
+        chk_date = v.date() if isinstance(v, datetime) else v
+        if chk_date is not None and chk_date > (date.today() + timedelta(days=1)):
             raise ValueError("Issue date cannot be more than 1 day in the future")
-        if v is not None and v < (date.today() - timedelta(days=90)):
+        if chk_date is not None and chk_date < (date.today() - timedelta(days=90)):
             raise ValueError("Issue date cannot be more than 90 days in the past")
         return v
 
@@ -1067,6 +1077,12 @@ class VehicleIssueResponse(BaseModel):
     department: Optional[str] = None
     issued_to: Optional[int] = None
     issued_to_name: Optional[str] = None
+    raised_by_name: Optional[str] = None
+    raised_by_emp_code: Optional[str] = None
+    position_name: Optional[str] = None
+    issued_by_name: Optional[str] = None
+    created_by_name: Optional[str] = None
+    created_by_emp_code: Optional[str] = None
     status: str
     remarks: Optional[str] = None
     issued_by: Optional[int] = None

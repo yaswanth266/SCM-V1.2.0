@@ -73,11 +73,9 @@ const TemplateIndentList = ({ title = "Template Indents" }) => {
       width: 180,
       render: (v) => <Tag color="purple" style={{ fontWeight: 600 }}>{v || '-'}</Tag>,
     },
-    { title: 'Warehouse', dataIndex: 'warehouse_name', key: 'warehouse', width: 160, render: (v, r) => v || r.warehouse || '-' },
     { title: 'Vehicle Code', dataIndex: 'vehicle_code', key: 'vehicle_code', width: 120, render: (v) => v || '-' },
     { title: 'Vehicle Number', dataIndex: 'vehicle_number', key: 'vehicle_number', width: 140, render: (v) => v || '-' },
-    { title: 'Indent Date', dataIndex: 'indent_date', key: 'indent_date', width: 120, sorter: true, render: (v) => formatDate(v) },
-    { title: 'Required Date', dataIndex: 'required_date', key: 'required_date', width: 120, sorter: true, render: (v) => formatDate(v) },
+    { title: 'Indent Date', dataIndex: 'indent_date', key: 'indent_date', width: 140, sorter: true, render: (v) => formatDate(v) },
     { title: 'Raised By', dataIndex: 'raised_by_name', key: 'raised_by', width: 140, render: (v, r) => v || r.raised_by || '-' },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 150, render: (s) => <StatusTag status={s} /> },
     {

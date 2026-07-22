@@ -233,8 +233,13 @@ async def create_or_update_project_indent_template(
             )
 
     # ─── ITEM UNIQUENESS VALIDATION PER PROJECT ──────────────────────────────
-    # Check if any item in payload already exists in ANOTHER template for this project
     new_item_ids = [it.item_id for it in payload.items]
+    if len(new_item_ids) != len(set(new_item_ids)):
+        raise HTTPException(
+            status_code=400,
+            detail="Duplicate items are not allowed in the template."
+        )
+
     if new_item_ids:
         # Fetch all template items belonging to this project (excluding current template if updating)
         conflict_query = (
@@ -256,9 +261,11 @@ async def create_or_update_project_indent_template(
             conflicting_row = conflicts[0]
             conf_item = conflicting_row[2]
             conf_template = conflicting_row[1]
+            code_str = getattr(conf_item, 'item_code', None) or getattr(conf_item, 'code', '')
+            item_str = f"[{code_str}] {conf_item.name}" if code_str else conf_item.name
             raise HTTPException(
                 status_code=400,
-                detail=f"Item '{conf_item.item_code} - {conf_item.name}' is already assigned to template '{conf_template.template_name}' for this project. Items cannot be duplicated across templates of the same project."
+                detail=f"Item '{item_str}' is already assigned to template '{conf_template.template_name}' for this project. Items cannot be duplicated across templates of the same project."
             )
 
     if not template:

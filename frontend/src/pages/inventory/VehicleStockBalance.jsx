@@ -143,15 +143,17 @@ const VehicleStockBalance = () => {
     },
     {
       title: 'Serial / Asset Codes',
-      dataIndex: 'serial_numbers',
       key: 'serial_numbers',
-      width: 200,
-      render: (serials) => {
-        if (!serials || serials.length === 0) return '-';
+      width: 220,
+      render: (_, r) => {
+        const codes = r.asset_codes && r.asset_codes.length > 0
+          ? r.asset_codes
+          : (r.consumable_codes && r.consumable_codes.length > 0 ? r.consumable_codes : r.serial_numbers);
+        if (!codes || codes.length === 0) return '-';
         return (
-          <Tooltip title={serials.join(', ')}>
-            <div style={{ maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {serials.map((s) => <Tag key={s} color="blue">{s}</Tag>)}
+          <Tooltip title={codes.join(', ')}>
+            <div style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {codes.map((s) => <Tag key={s} color={r.asset_codes?.length ? 'cyan' : (r.consumable_codes?.length ? 'purple' : 'blue')}>{s}</Tag>)}
             </div>
           </Tooltip>
         );

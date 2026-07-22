@@ -1077,6 +1077,18 @@ async def list_org_projects(
     return build_paginated_response([_project_dict(row) for row in rows], total, page, page_size)
 
 
+@router.get("/projects")
+async def list_projects_alias(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(200, ge=1, le=1000),
+    search: Optional[str] = Query(None),
+    user_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return await list_org_projects(page=page, page_size=page_size, search=search, db=db, current_user=current_user)
+
+
 @router.post("/org-projects", status_code=201)
 async def create_org_project(
     payload: ProjectMasterCreate,
