@@ -29,7 +29,6 @@ const VehicleStockLedger = () => {
   // Filters
   const [filterItem, setFilterItem] = useState(undefined);
   const [filterVehicle, setFilterVehicle] = useState(undefined);
-  const [filterTransType, setFilterTransType] = useState('');
   const [filterDateRange, setFilterDateRange] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -60,14 +59,13 @@ const VehicleStockLedger = () => {
       const qp = { ...params };
       if (filterItem) qp.item_id = filterItem;
       if (filterVehicle) qp.vehicle_code = filterVehicle;
-      if (filterTransType) qp.transaction_type = filterTransType;
       if (filterDateRange && filterDateRange[0]) {
         qp.date_from = formatDateForAPI(filterDateRange[0]);
         qp.date_to = formatDateForAPI(filterDateRange[1]);
       }
       return await api.get('/inventory/vehicle-stock-ledger', { params: qp });
     },
-    [filterItem, filterVehicle, filterTransType, filterDateRange]
+    [filterItem, filterVehicle, filterDateRange]
   );
 
   // Apply filters
@@ -81,7 +79,6 @@ const VehicleStockLedger = () => {
       const qp = { page_size: 10000 };
       if (filterItem) qp.item_id = filterItem;
       if (filterVehicle) qp.vehicle_code = filterVehicle;
-      if (filterTransType) qp.transaction_type = filterTransType;
       if (filterDateRange && filterDateRange[0]) {
         qp.date_from = formatDateForAPI(filterDateRange[0]);
         qp.date_to = formatDateForAPI(filterDateRange[1]);
@@ -101,10 +98,6 @@ const VehicleStockLedger = () => {
         'Qty In': r.qty_in || 0,
         'Qty Out': r.qty_out || 0,
         'Balance Qty': r.balance_qty || 0,
-        'Rate': r.rate || 0,
-        'Value In': r.value_in || 0,
-        'Value Out': r.value_out || 0,
-        'Balance Value': r.balance_value || 0,
         'Created By': r.created_by_name || '',
       }));
       downloadExcel(exportData, 'Vehicle_Stock_Ledger');
@@ -222,38 +215,6 @@ const VehicleStockLedger = () => {
       render: (val) => <Text strong>{formatNumber(val || 0)}</Text>,
     },
     {
-      title: 'Rate',
-      dataIndex: 'rate',
-      width: 110,
-      align: 'right',
-      render: (val) => formatCurrency(val),
-    },
-    {
-      title: 'Value In',
-      dataIndex: 'value_in',
-      width: 120,
-      align: 'right',
-      render: (val) => (
-        val > 0 ? <Text style={{ color: '#52c41a' }}>{formatCurrency(val)}</Text> : <Text type="secondary">-</Text>
-      ),
-    },
-    {
-      title: 'Value Out',
-      dataIndex: 'value_out',
-      width: 120,
-      align: 'right',
-      render: (val) => (
-        val > 0 ? <Text style={{ color: '#f5222d' }}>{formatCurrency(val)}</Text> : <Text type="secondary">-</Text>
-      ),
-    },
-    {
-      title: 'Balance Value',
-      dataIndex: 'balance_value',
-      width: 130,
-      align: 'right',
-      render: (val) => <Text strong>{formatCurrency(val)}</Text>,
-    },
-    {
       title: 'Created By',
       dataIndex: 'created_by_name',
       width: 120,
@@ -264,7 +225,6 @@ const VehicleStockLedger = () => {
   const handleResetFilters = () => {
     setFilterItem(undefined);
     setFilterVehicle(undefined);
-    setFilterTransType('');
     setFilterDateRange(null);
   };
 
@@ -316,7 +276,7 @@ const VehicleStockLedger = () => {
             <FilterOutlined style={{ color: '#4f46e5', fontSize: '16px' }} />
             <span style={{ fontWeight: 700, fontSize: '14px', color: '#0f172a' }}></span>
           </Space>
-          {(filterItem || filterVehicle || filterTransType || filterDateRange) && (
+          {(filterItem || filterVehicle || filterDateRange) && (
             <Button
               type="text"
               size="small"
@@ -329,7 +289,7 @@ const VehicleStockLedger = () => {
         </div>
 
         <Row gutter={[16, 12]}>
-          <Col xs={24} sm={12} md={6}>
+          <Col xs={24} sm={12} md={8}>
             <span style={labelStyle}>Item</span>
             <ItemSelector
               value={filterItem}
@@ -338,7 +298,7 @@ const VehicleStockLedger = () => {
               style={{ width: '100%' }}
             />
           </Col>
-          <Col xs={24} sm={12} md={6}>
+          <Col xs={24} sm={12} md={8}>
             <span style={labelStyle}>Vehicle Code</span>
             <Select
               placeholder="All vehicles"
@@ -351,17 +311,7 @@ const VehicleStockLedger = () => {
               optionFilterProp="label"
             />
           </Col>
-          <Col xs={24} sm={12} md={6}>
-            <span style={labelStyle}>Transaction Type</span>
-            <Select
-              placeholder="All types"
-              options={TRANSACTION_TYPES}
-              value={filterTransType}
-              onChange={(val) => setFilterTransType(val)}
-              style={{ width: '100%' }}
-            />
-          </Col>
-          <Col xs={24} sm={12} md={6}>
+          <Col xs={24} sm={12} md={8}>
             <span style={labelStyle}>Posting Date Period</span>
             <RangePicker
               value={filterDateRange}
@@ -373,7 +323,7 @@ const VehicleStockLedger = () => {
         </Row>
 
         {/* Active tags bar */}
-        {(filterItem || filterVehicle || filterTransType || filterDateRange) && (
+        {(filterItem || filterVehicle || filterDateRange) && (
           <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px dashed #e2e8f0', display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
             <span style={{ fontSize: '10px', color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' }}>Active Filters:</span>
             {filterItem && (
@@ -384,11 +334,6 @@ const VehicleStockLedger = () => {
             {filterVehicle && (
               <Tag closable onClose={() => setFilterVehicle(undefined)} color="blue" style={{ borderRadius: '4px', fontWeight: 500 }}>
                 Vehicle: {vehicles.find(v => v.value === filterVehicle)?.label || filterVehicle}
-              </Tag>
-            )}
-            {filterTransType && (
-              <Tag closable onClose={() => setFilterTransType('')} color="blue" style={{ borderRadius: '4px', fontWeight: 500 }}>
-                Type: {getTransTypeLabel(filterTransType)}
               </Tag>
             )}
             {filterDateRange && filterDateRange[0] && (
@@ -408,7 +353,6 @@ const VehicleStockLedger = () => {
           extraParams={{
             item_id: filterItem,
             vehicle_code: filterVehicle,
-            transaction_type: filterTransType,
             date_from: filterDateRange?.[0] ? formatDateForAPI(filterDateRange[0]) : undefined,
             date_to: filterDateRange?.[1] ? formatDateForAPI(filterDateRange[1]) : undefined,
           }}
@@ -417,7 +361,7 @@ const VehicleStockLedger = () => {
           searchPlaceholder="Search by item code, item name, vehicle, reference..."
           exportFileName="Vehicle_Stock_Ledger"
           showExport={false}
-          scroll={{ x: 2200 }}
+          scroll={{ x: 1500 }}
         />
       </Card>
     </div>

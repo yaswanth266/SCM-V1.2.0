@@ -180,7 +180,7 @@ async def get_project_indent_template_by_id(
 async def create_or_update_project_indent_template(
     payload: ProjectIndentTemplateCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("inventory-masters", "create", "inventory-masters")),
+    current_user: User = Depends(require_permission(["inventory-masters-project-templates", "inventory-masters"], "create", "inventory-masters")),
 ):
     if not payload.template_name or not payload.template_name.strip():
         raise HTTPException(status_code=400, detail="Template Name is required")
@@ -350,7 +350,7 @@ async def create_or_update_project_indent_template(
 async def delete_project_indent_template(
     id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_permission("inventory-masters", "delete", "inventory-masters")),
+    current_user: User = Depends(require_permission(["inventory-masters-project-templates", "inventory-masters"], "delete", "inventory-masters")),
 ):
     q = select(ProjectIndentTemplate).where(ProjectIndentTemplate.id == id)
     res = await db.execute(q)

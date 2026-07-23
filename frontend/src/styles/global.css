@@ -2686,7 +2686,12 @@ body.bavya-uat .ant-checkbox-wrapper:hover .ant-checkbox:not(.ant-checkbox-check
   .erp-header,
   .no-print,
   .ant-btn,
-  .data-table-toolbar {
+  .data-table-toolbar,
+  .ant-table-pagination,
+  .ant-pagination,
+  .ant-select-selector,
+  .ant-input-affix-wrapper,
+  .ant-input {
     display: none !important;
   }
 
@@ -2696,16 +2701,77 @@ body.bavya-uat .ant-checkbox-wrapper:hover .ant-checkbox:not(.ant-checkbox-check
     min-height: auto;
   }
 
+  /* Hide the separate header table container during print */
+  .ant-table-header {
+    display: none !important;
+  }
+
+  /* Make the hidden alignment header in the body table visible and styled correctly */
+  .ant-table-body thead {
+    display: table-header-group !important;
+    visibility: visible !important;
+  }
+
+  .ant-table-body thead tr {
+    visibility: visible !important;
+    height: auto !important;
+  }
+
+  .ant-table-body thead th {
+    visibility: visible !important;
+    height: auto !important;
+    background: #f8fafc !important;
+    color: #0f172a !important;
+    font-weight: 600 !important;
+    padding: 10px 12px !important;
+    border-bottom: 2px solid #cbd5e1 !important;
+  }
+
+  /* Reset layout constraints and sticky styles for clean multi-page printouts */
+  .ant-table-thead > tr > th,
+  .ant-table-tbody > tr > td,
+  .ant-table-cell,
+  .ant-table-thead,
+  .ant-table-tbody,
+  .ant-table-row {
+    position: static !important;
+    left: auto !important;
+    right: auto !important;
+    transform: none !important;
+  }
+
   .ant-table-wrapper {
-    page-break-inside: auto;
+    page-break-inside: auto !important;
   }
 
   .ant-table-row {
-    page-break-inside: avoid;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .ant-table {
+    overflow: visible !important;
+  }
+
+  .ant-table-container {
+    overflow: visible !important;
+  }
+
+  .ant-table-content,
+  .ant-table-body {
+    overflow: visible !important;
+    max-height: none !important;
   }
 
   body {
     background: #ffffff;
+    color: #000000;
+  }
+
+  /* Keep colors visible in prints */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }
 

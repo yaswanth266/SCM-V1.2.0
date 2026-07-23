@@ -68,14 +68,6 @@ const MaterialAcknowledgementList = () => {
       render: (v) => formatDateTime(v),
     },
     {
-      title: 'Total Received Qty',
-      dataIndex: 'total_received_qty',
-      key: 'recv_qty',
-      width: 150,
-      align: 'right',
-      render: (v) => formatNumber(v),
-    },
-    {
       title: 'Actions',
       key: 'actions',
       width: 80,

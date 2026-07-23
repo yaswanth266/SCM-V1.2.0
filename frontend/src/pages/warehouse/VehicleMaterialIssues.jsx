@@ -5,21 +5,20 @@ import {
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined,
-  SendOutlined
+  SendOutlined, PrinterOutlined
 } from '@ant-design/icons';
 import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
 import StatusTag from '../../components/StatusTag';
 import api from '../../config/api';
 import {
-  formatDate, getErrorMessage, exportGlobalToExcel, printGlobalToPDF
+  formatDate, getErrorMessage, exportGlobalToExcel, printGlobalToPDF,
+  printVehicleIssueToPDF
 } from '../../utils/helpers';
 
 const VI_STATUSES = [
-  { label: 'Draft', value: 'draft' },
   { label: 'Issued', value: 'issued' },
   { label: 'Acknowledged', value: 'acknowledged' },
-  { label: 'Cancelled', value: 'cancelled' },
 ];
 
 const VehicleMaterialIssues = () => {
@@ -29,20 +28,18 @@ const VehicleMaterialIssues = () => {
 
   // Filters
   const [filterStatus, setFilterStatus] = useState(undefined);
-  const [filterWarehouse, setFilterWarehouse] = useState(undefined);
-  const [filterDepartment, setFilterDepartment] = useState(undefined);
+  const [filterVehicle, setFilterVehicle] = useState(undefined);
 
-  const [warehouses, setWarehouses] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
 
   // --- Lookups ---
   const loadLookups = useCallback(async () => {
     try {
-      const whRes = await api.get('/masters/warehouses', { params: { page_size: 200, exclude_virtual: true } });
-      const w = whRes.data;
-      setWarehouses(
-        (w.items || w.data || w || []).map((i) => ({
-          label: i.name || i.warehouse_name,
-          value: i.id,
+      const res = await api.get('/masters/vehicles', { params: { is_active: true, limit: 100 } });
+      setVehicles(
+        (res.data || []).map((v) => ({
+          label: `${v.vehicle_code} (${v.vehicle_number})`,
+          value: v.vehicle_code,
         }))
       );
     } catch (err) {
@@ -59,12 +56,27 @@ const VehicleMaterialIssues = () => {
     async (params) => {
       const qp = { ...params };
       if (filterStatus) qp.status = filterStatus;
-      if (filterWarehouse) qp.warehouse_id = filterWarehouse;
-      if (filterDepartment) qp.department = filterDepartment;
+      if (filterVehicle) qp.vehicle_code = filterVehicle;
       return await api.get('/warehouse/vehicle-issues', { params: qp });
     },
-    [filterStatus, filterWarehouse, filterDepartment]
+    [filterStatus, filterVehicle]
   );
+
+  const [printingId, setPrintingId] = useState(null);
+
+  const handlePrintClick = async (id) => {
+    setPrintingId(id);
+    try {
+      message.loading({ content: 'Loading details for print...', key: 'printVI' });
+      const res = await api.get(`/warehouse/vehicle-issues/${id}`);
+      printVehicleIssueToPDF(res.data);
+      message.success({ content: 'Print report opened', key: 'printVI' });
+    } catch (err) {
+      message.error({ content: `Failed to load details: ${getErrorMessage(err)}`, key: 'printVI' });
+    } finally {
+      setPrintingId(null);
+    }
+  };
 
   // --- Actions ---
   const handleIssue = async (id) => {
@@ -162,6 +174,9 @@ const VehicleMaterialIssues = () => {
           <Tooltip title="View Detail">
             <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/warehouse/vehicle-material-issues/${record.id}`)} />
           </Tooltip>
+          <Tooltip title="Print Issue">
+            <Button type="link" size="small" icon={<PrinterOutlined />} loading={printingId === record.id} onClick={() => handlePrintClick(record.id)} />
+          </Tooltip>
           {record.status === 'draft' && (
             <>
               <Tooltip title="Edit">
@@ -197,23 +212,14 @@ const VehicleMaterialIssues = () => {
         options={VI_STATUSES}
       />
       <Select
-        placeholder="Warehouse"
+        placeholder="Select Vehicle"
         allowClear
         showSearch
         optionFilterProp="label"
-        style={{ width: 160 }}
-        value={filterWarehouse}
-        onChange={(v) => { setFilterWarehouse(v); setRefreshKey((k) => k + 1); }}
-        options={warehouses}
-        onOpenChange={(open) => { if (open && warehouses.length === 0) loadLookups(); }}
-      />
-      <Input
-        placeholder="Department"
-        allowClear
-        style={{ width: 150 }}
-        value={filterDepartment}
-        onChange={(e) => { setFilterDepartment(e.target.value || undefined); }}
-        onPressEnter={() => setRefreshKey((k) => k + 1)}
+        style={{ width: 180 }}
+        value={filterVehicle}
+        onChange={(v) => { setFilterVehicle(v); setRefreshKey((k) => k + 1); }}
+        options={vehicles}
       />
     </Space>
   );

@@ -172,7 +172,7 @@ const WarehouseDashboard = () => {
       {/* Recent Activity / Quick Actions Row */}
       {(() => {
         const canViewGRN = hasKey('warehouse-grn');
-        const showOperations = hasKey('warehouse-grn') || hasKey('warehouse-quality-inspections') || hasKey('warehouse-material-issues') || hasKey('warehouse-notifications');
+        const showOperations = hasKey('warehouse-grn') || hasKey('warehouse-quality-inspections') || hasKey('warehouse-material-issues') || hasKey('warehouse-vehicle-material-issues') || hasKey('warehouse-notifications');
         
         if (!canViewGRN && !showOperations) return null;
         
@@ -269,6 +269,16 @@ const WarehouseDashboard = () => {
                         style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
                       >
                         Issue Raw Materials
+                      </Button>
+                    )}
+                    {hasKey('warehouse-vehicle-material-issues') && (
+                      <Button 
+                        icon={<PlusOutlined />} 
+                        onClick={() => navigate('/warehouse/vehicle-material-issues/new')}
+                        block
+                        style={{ height: '45px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '15px', borderRadius: '6px' }}
+                      >
+                        Issue Vehicle Materials
                       </Button>
                     )}
                     {hasKey('warehouse-notifications') && (

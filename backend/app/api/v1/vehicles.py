@@ -23,6 +23,7 @@ async def list_vehicles(
     query = select(Vehicle)
     if is_active is not None:
         query = query.where(Vehicle.is_active == is_active)
+
     if search:
         search_pattern = f"%{search}%"
         query = query.where(

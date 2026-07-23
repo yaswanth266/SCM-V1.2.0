@@ -768,45 +768,46 @@ async def post_vehicle_stock_ledger(
         )
         vi_id = res_vi.scalar()
 
-    # 1. Update Warehouse Stock Balance and Post to StockLedger (Warehouse Out)
-    ledger_row = await post_stock_ledger(
-        db,
-        item_id=item_id,
-        warehouse_id=warehouse_id,
-        transaction_type="material_issue",
-        qty_out=qty,
-        rate=rate,
-        bin_id=bin_id,
-        batch_id=batch_id,
-        reference_type="vehicle_issue",
-        reference_id=vi_id or reference_id,
-        uom_id=uom_id,
-        created_by=created_by,
-    )
-    
-    # Create Warehouse Out entry in VehicleStockLedger
-    wh_ledger = VehicleStockLedger(
-        vehicle_code=vehicle_code,
-        vehicle_number=vehicle_number,
-        warehouse_id=warehouse_id,
-        item_id=item_id,
-        batch_id=batch_id,
-        transaction_type="warehouse_out",
-        reference_type=reference_type,
-        reference_id=reference_id,
-        qty_in=Decimal("0"),
-        qty_out=qty,
-        balance_qty=ledger_row.balance_qty,
-        uom_id=uom_id,
-        rate=ledger_row.rate,
-        value_in=Decimal("0"),
-        value_out=ledger_row.value_out,
-        balance_value=ledger_row.balance_value,
-        posting_date=date.today(),
-        posting_time=datetime.now(timezone.utc).time(),
-        created_by=created_by
-    )
-    db.add(wh_ledger)
+    # 1. Update Warehouse Stock Balance and Post to StockLedger (Warehouse Out) if not already deducted during issue
+    if reference_type != "material_acknowledgement":
+        ledger_row = await post_stock_ledger(
+            db,
+            item_id=item_id,
+            warehouse_id=warehouse_id,
+            transaction_type="material_issue",
+            qty_out=qty,
+            rate=rate,
+            bin_id=bin_id,
+            batch_id=batch_id,
+            reference_type="vehicle_issue",
+            reference_id=vi_id or reference_id,
+            uom_id=uom_id,
+            created_by=created_by,
+        )
+        
+        # Create Warehouse Out entry in VehicleStockLedger
+        wh_ledger = VehicleStockLedger(
+            vehicle_code=vehicle_code,
+            vehicle_number=vehicle_number,
+            warehouse_id=warehouse_id,
+            item_id=item_id,
+            batch_id=batch_id,
+            transaction_type="warehouse_out",
+            reference_type=reference_type,
+            reference_id=reference_id,
+            qty_in=Decimal("0"),
+            qty_out=qty,
+            balance_qty=ledger_row.balance_qty,
+            uom_id=uom_id,
+            rate=ledger_row.rate,
+            value_in=Decimal("0"),
+            value_out=ledger_row.value_out,
+            balance_value=ledger_row.balance_value,
+            posting_date=date.today(),
+            posting_time=datetime.now(timezone.utc).time(),
+            created_by=created_by
+        )
+        db.add(wh_ledger)
     
     # 2. Get/Update Vehicle Stock Balance (Vehicle In)
     vsb_stmt = select(VehicleStockBalance).where(

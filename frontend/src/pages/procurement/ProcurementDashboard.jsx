@@ -23,8 +23,6 @@ import {
   PieChart,
   Pie,
   Cell,
-  BarChart,
-  Bar,
 } from 'recharts';
 import api from '../../config/api';
 import { formatCurrency, formatNumber } from '../../utils/helpers';
@@ -82,16 +80,6 @@ const ProcurementDashboard = () => {
         { name: 'Cancelled/Rejected', value: 12 },
       ];
 
-  // Vendor On-Time In-Full (OTIF) scores
-  const otifData = procSummary.vendor_otif && procSummary.vendor_otif.length > 0
-    ? procSummary.vendor_otif
-    : [
-        { name: 'Acme Corp', otif: 94 },
-        { name: 'Global Bio', otif: 88 },
-        { name: 'HealthCare Log', otif: 96 },
-        { name: 'Apex Lab', otif: 82 },
-        { name: 'Zenith Surgical', otif: 91 },
-      ];
 
   const getStatusTag = (status) => {
     const map = {
@@ -261,39 +249,13 @@ const ProcurementDashboard = () => {
         </Col>
       </Row>
 
-      {/* Vendor OTIF and Recent POs */}
+      {/* Recent POs */}
       <Row gutter={[16, 16]}>
-        {/* Vendor OTIF Bar Chart */}
-        <Col xs={24} lg={12}>
-          <Card
-            title="Vendor On-Time In-Full (OTIF) Compliance"
-            style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
-          >
-            <div style={{ height: '300px' }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={otifData} margin={{ top: 20, right: 20, left: -10, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis dataKey="name" stroke="#6C757D" tickLine={false} />
-                  <YAxis unit="%" domain={[0, 100]} stroke="#6C757D" tickLine={false} />
-                  <Tooltip formatter={(v) => `${v}%`} />
-                  <Legend />
-                  <Bar dataKey="otif" name="OTIF Level (%)" fill="#D80048" radius={[4, 4, 0, 0]}>
-                    {otifData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </Card>
-        </Col>
-
-        {/* Recent POs list */}
-        <Col xs={24} lg={12}>
+        <Col xs={24}>
           <Card
             title="Recent Purchase Orders"
             extra={<Button type="link" onClick={() => navigate('/procurement/purchase-orders')}>View All</Button>}
-            style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', height: '100%' }}
+            style={{ borderRadius: '8px', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}
           >
             {recentPOs.length > 0 ? (
               <List

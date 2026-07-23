@@ -264,7 +264,7 @@ async def get_user_role_codes(db: AsyncSession, user_id: int) -> List[str]:
     return normalized_codes
 
 
-def require_permission(module: str, action: str, resource: str):
+def require_permission(module, action: str, resource: str):
     """Dependency to check if user has a specific permission."""
     async def check_permission(
         current_user: User = Depends(get_current_user),
@@ -282,6 +282,26 @@ def require_permission(module: str, action: str, resource: str):
         if action in ("edit", "update"):
             action_keys.update(("edit", "update"))
             
+        modules = [module] if isinstance(module, str) else list(module)
+        expanded_modules = set(modules)
+        for m in modules:
+            if m == "warehouse-vehicle-material-issues":
+                expanded_modules.add("warehouse-material-issues")
+            elif m == "warehouse-material-issues":
+                expanded_modules.add("warehouse-vehicle-material-issues")
+            elif m == "indent-material-acknowledgement":
+                expanded_modules.add("indent-acknowledgement")
+            elif m == "indent-acknowledgement":
+                expanded_modules.add("indent-material-acknowledgement")
+            elif m == "inventory-masters-project-templates":
+                expanded_modules.add("inventory-masters")
+            elif m == "inventory-masters":
+                expanded_modules.add("inventory-masters-project-templates")
+            elif m == "inventory-stock-balance":
+                expanded_modules.add("inventory-vehicle-stock-balance")
+            elif m == "inventory-stock-ledger":
+                expanded_modules.add("inventory-vehicle-stock-ledger")
+
         resource_key = (resource or "").replace("_", "-")
         resource_keys = {resource_key}
         if resource_key.endswith("s"):
@@ -293,28 +313,29 @@ def require_permission(module: str, action: str, resource: str):
         elif resource_key.endswith("ies"):
             resource_keys.add(resource_key[:-3] + "y")
             
-        for act in action_keys:
-            allowed.add(f"{module}.{act}.{resource}")
-            for r_key in resource_keys:
-                allowed.add(f"{module}.{act}.{r_key}")
-                allowed.add(f"{module}-{r_key}.{act}.{module}-{r_key}")
-                allowed.add(f"{module}-masters-{r_key}.{act}.{module}-masters-{r_key}")
-                allowed.add(f"{module}-transactions-{r_key}.{act}.{module}-transactions-{r_key}")
-                allowed.add(f"{module}-reports-{r_key}.{act}.{module}-reports-{r_key}")
-                allowed.add(f"{module}-notifications-{r_key}.{act}.{module}-notifications-{r_key}")
-                allowed.add(f"{module}-dashboard-{r_key}.{act}.{module}-dashboard-{r_key}")
-                
-                # Support nested sub-modules under other modules (e.g. procurement-masters-vendors)
-                if module == "masters":
-                    for system_module in ("procurement", "warehouse", "inventory", "logistics", "outbound", "indent", "consumption", "approvals", "accounts", "assets", "settings"):
-                        allowed.add(f"{system_module}-masters-{r_key}.{act}.{system_module}-masters-{r_key}")
-                
-            if module.startswith("warehouse-") or module == "warehouse":
-                allowed.add(f"warehouse-transactions.{act}.warehouse-transactions")
-            if module.startswith("inventory-") or module == "inventory":
-                allowed.add(f"inventory-transactions.{act}.inventory-transactions")
-            if module.startswith("indent-") or module == "indent":
-                allowed.add(f"indent-transactions.{act}.indent-transactions")
+        for mod in expanded_modules:
+            for act in action_keys:
+                allowed.add(f"{mod}.{act}.{resource}")
+                for r_key in resource_keys:
+                    allowed.add(f"{mod}.{act}.{r_key}")
+                    allowed.add(f"{mod}-{r_key}.{act}.{mod}-{r_key}")
+                    allowed.add(f"{mod}-masters-{r_key}.{act}.{mod}-masters-{r_key}")
+                    allowed.add(f"{mod}-transactions-{r_key}.{act}.{mod}-transactions-{r_key}")
+                    allowed.add(f"{mod}-reports-{r_key}.{act}.{mod}-reports-{r_key}")
+                    allowed.add(f"{mod}-notifications-{r_key}.{act}.{mod}-notifications-{r_key}")
+                    allowed.add(f"{mod}-dashboard-{r_key}.{act}.{mod}-dashboard-{r_key}")
+                    
+                    # Support nested sub-modules under other modules (e.g. procurement-masters-vendors)
+                    if mod == "masters":
+                        for system_module in ("procurement", "warehouse", "inventory", "logistics", "outbound", "indent", "consumption", "approvals", "accounts", "assets", "settings"):
+                            allowed.add(f"{system_module}-masters-{r_key}.{act}.{system_module}-masters-{r_key}")
+                    
+                if mod.startswith("warehouse-") or mod == "warehouse":
+                    allowed.add(f"warehouse-transactions.{act}.warehouse-transactions")
+                if mod.startswith("inventory-") or mod == "inventory":
+                    allowed.add(f"inventory-transactions.{act}.inventory-transactions")
+                if mod.startswith("indent-") or mod == "indent":
+                    allowed.add(f"indent-transactions.{act}.indent-transactions")
 
         if not (allowed & permissions):
             raise HTTPException(
@@ -875,6 +896,93 @@ async def get_user_warehouse_scope_ids(
         return [row[0] for row in result.all()]
 
     return all_scoped
+
+
+async def get_user_vehicle_scope(
+    db: AsyncSession,
+    user: User,
+) -> tuple[Optional[set[str]], Optional[set[int]]]:
+    """Return (allowed_vehicle_codes, allowed_user_ids) for vehicle stock balance and ledger.
+
+    If the user has administrative/managerial access, returns (None, None) indicating unrestricted access.
+
+    For position-based users:
+    - If the user's position has ONLY ONE person assigned (user-specific):
+      Filters to vehicles and stock ledgers created/acknowledged by THIS USER.
+    - If the user's position has MORE THAN ONE person assigned (position-specific):
+      Filters to vehicles and stock ledgers created/acknowledged by ANY USER in that position.
+    """
+    from app.models.user import User as DBUser
+    from app.models.settings_master import Employee, Position
+    from app.models.issue import MaterialAcknowledgement, VehicleIssue
+    from sqlalchemy import select, or_
+
+    # Super admin, admin, and managerial roles get unrestricted access
+    role_codes = set(await get_user_role_codes(db, user.id))
+    if {"super_admin", "admin", "warehouse_manager"} & role_codes:
+        return None, None
+
+    # Resolve position_id for the current user via Employee
+    emp_res = await db.execute(
+        select(Employee.position_id, Employee.id, Employee.employee_code)
+        .outerjoin(DBUser, DBUser.employee_id == Employee.id)
+        .where(or_(DBUser.id == user.id, Employee.employee_code == user.employee_code))
+    )
+    emp_row = emp_res.first()
+
+    position_id = emp_row[0] if emp_row else None
+
+    target_user_ids = {user.id}
+    target_emp_codes = {user.employee_code} if user.employee_code else set()
+    if emp_row and emp_row[2]:
+        target_emp_codes.add(emp_row[2])
+
+    if position_id is not None:
+        # Find all employees/users holding this position_id
+        pos_emp_res = await db.execute(
+            select(DBUser.id, Employee.employee_code)
+            .outerjoin(Employee, DBUser.employee_id == Employee.id)
+            .where(or_(Employee.position_id == position_id, DBUser.id == user.id))
+        )
+        pos_users = pos_emp_res.all()
+
+        # If position has MORE THAN 1 user -> position specific
+        if len(pos_users) > 1:
+            for uid, ecode in pos_users:
+                if uid:
+                    target_user_ids.add(uid)
+                if ecode:
+                    target_emp_codes.add(ecode)
+
+    # Gather vehicle codes linked to target_user_ids / target_emp_codes
+    # 1. From MaterialAcknowledgement (joining VehicleIssue for vehicle_code)
+    ack_res = await db.execute(
+        select(VehicleIssue.vehicle_code)
+        .join(MaterialAcknowledgement, MaterialAcknowledgement.vehicle_issue_id == VehicleIssue.id)
+        .where(
+            or_(
+                MaterialAcknowledgement.acknowledged_by.in_(list(target_user_ids)),
+                MaterialAcknowledgement.employee_code.in_(list(target_emp_codes))
+            )
+        )
+    )
+    allowed_vehicles = {r[0] for r in ack_res.all() if r[0]}
+
+    # 2. From VehicleIssue directly
+    vi_res = await db.execute(
+        select(VehicleIssue.vehicle_code)
+        .where(
+            or_(
+                VehicleIssue.issued_by.in_(list(target_user_ids)),
+                VehicleIssue.issued_to.in_(list(target_user_ids))
+            )
+        )
+    )
+    for r in vi_res.all():
+        if r[0]:
+            allowed_vehicles.add(r[0])
+
+    return allowed_vehicles, target_user_ids
 
 
 # =============================================================

@@ -6,6 +6,7 @@ import { DownloadOutlined, QrcodeOutlined, BarcodeOutlined } from '@ant-design/i
 
 const BarcodeDisplay = ({
   value,
+  qrValue,
   type = 'CODE128',
   width = 2,
   height = 80,
@@ -213,7 +214,7 @@ const BarcodeDisplay = ({
         {codeMode === 'QR' ? (
           <div style={{ padding: '6px', background: '#ffffff', borderRadius: '4px', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
             <QRCodeSVG
-              value={value}
+              value={qrValue || value}
               size={qrSize}
               level="M"
               includeMargin={false}

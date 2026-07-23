@@ -2,12 +2,12 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   Button, Form, Input, InputNumber, Select, Space, DatePicker,
-  Popconfirm, Row, Col, Table, Card, Descriptions, Divider, Typography, Tag, Badge, App, Spin, Tooltip, Image
+  Popconfirm, Row, Col, Table, Card, Descriptions, Divider, Typography, Tag, Badge, App, Spin, Tooltip, Image, Popover
 } from 'antd';
 import {
   ArrowLeftOutlined, PlusOutlined, EditOutlined, DeleteOutlined,
   CheckOutlined, MinusCircleOutlined, SaveOutlined,
-  SendOutlined, BarcodeOutlined, QrcodeOutlined,
+  SendOutlined, BarcodeOutlined, QrcodeOutlined, EyeOutlined
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import PageHeader from '../../components/PageHeader';
@@ -772,10 +772,10 @@ const VehicleMaterialIssueForm = () => {
 
       if (isNew) {
         await api.post('/warehouse/vehicle-issues', payload);
-        message.success('Vehicle issue created successfully');
+        message.success('Vehicle material issue created and issued successfully');
       } else {
         await api.put(`/warehouse/vehicle-issues/${id}`, payload);
-        message.success('Vehicle issue updated successfully');
+        message.success('Vehicle material issue updated successfully');
         setEditMode(false);
         fetchRecord();
       }
@@ -1116,9 +1116,9 @@ const VehicleMaterialIssueForm = () => {
       }
     },
     {
-      title: 'Photos',
+      title: 'Acknowledgement Photos',
       key: 'photos',
-      width: 120,
+      width: 130,
       render: (_, record) => {
         if (!associatedAck || !associatedAck.items) return '-';
         const ackItem = associatedAck.items.find(i => i.item_id === record.item_id);
@@ -1127,14 +1127,30 @@ const VehicleMaterialIssueForm = () => {
           <Image.PreviewGroup>
             <Space wrap size={4}>
               {ackItem.photos.map((url, i) => (
-                <div key={i} style={{ border: '1px solid #e2e8f0', borderRadius: 4, padding: 1, background: '#fff' }}>
-                  <Image
-                    src={url}
-                    width={40}
-                    height={40}
-                    style={{ objectFit: 'cover', borderRadius: 3, cursor: 'zoom-in' }}
-                  />
-                </div>
+                <Popover
+                   key={url || i}
+                   trigger="hover"
+                   placement="top"
+                   overlayStyle={{ zIndex: 1050 }}
+                   content={
+                     <div style={{ padding: 4, textAlign: 'center', maxWidth: 220 }}>
+                       <div style={{ borderRadius: 6, overflow: 'hidden', border: '1px solid #e2e8f0', background: '#f8fafc', marginBottom: 4 }}>
+                         <img src={url} alt={`Acknowledgement Photo #${i + 1}`} style={{ width: '100%', maxHeight: 180, objectFit: 'contain', display: 'block' }} />
+                       </div>
+                       <Text strong style={{ fontSize: 12, color: '#334155' }}>Acknowledgement Photo #${i + 1}</Text>
+                     </div>
+                   }
+                >
+                  <div style={{ display: 'inline-block', cursor: 'pointer', margin: '2px' }}>
+                    <Image
+                      src={url}
+                      width={36}
+                      height={36}
+                      style={{ objectFit: 'cover', borderRadius: 6, border: '1.5px solid #cbd5e1', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}
+                      preview={{ mask: <EyeOutlined style={{ fontSize: 12 }} /> }}
+                    />
+                  </div>
+                </Popover>
               ))}
             </Space>
           </Image.PreviewGroup>
@@ -1530,23 +1546,6 @@ const VehicleMaterialIssueForm = () => {
               >
                 Print PDF
               </Button>
-              {recordData.status === 'draft' && (
-                <>
-                  <Button icon={<EditOutlined />} onClick={() => setEditMode(true)} type="primary">
-                    Edit
-                  </Button>
-                  <Popconfirm title="Issue this material? Stock will be reserved." onConfirm={handleIssue}>
-                    <Button type="default" icon={<SendOutlined />} style={{ color: '#eb2f96' }}>Issue</Button>
-                  </Popconfirm>
-                </>
-              )}
-              {recordData.status === 'issued' && (
-                <Popconfirm title="Are you sure you want to cancel this issue? Reservations will be released." onConfirm={handleCancel}>
-                  <Button type="primary" danger>
-                    Cancel Issue
-                  </Button>
-                </Popconfirm>
-              )}
               <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(backPath)}>
                 Back
               </Button>
@@ -1557,19 +1556,33 @@ const VehicleMaterialIssueForm = () => {
             <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
               <Descriptions.Item label="Issue Number">{recordData.issue_number}</Descriptions.Item>
               <Descriptions.Item label="Status"><StatusTag status={recordData.status} /></Descriptions.Item>
-              <Descriptions.Item label="Issue Date">{formatDate(recordData.issue_date)}</Descriptions.Item>
               <Descriptions.Item label="Source Warehouse">{recordData.warehouse_name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Project">{recordData.project_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Department">{recordData.department || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Indent Reference">{recordData.indent_number || recordData.indent_id || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Emp Code">{recordData.raised_by_emp_code || indentDetails?.empCode || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Emp Name">{recordData.raised_by_name || indentDetails?.empName || recordData.issued_to_name || '-'}</Descriptions.Item>
-              <Descriptions.Item label="Position">{recordData.position_name || indentDetails?.position || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Issue Date">{formatDate(recordData.issue_date)}</Descriptions.Item>
               <Descriptions.Item label="Vehicle Code">{recordData.vehicle_code || '-'}</Descriptions.Item>
               <Descriptions.Item label="Vehicle Number">{recordData.vehicle_number || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Indent Reference">{recordData.indent_number || recordData.indent_id || '-'}</Descriptions.Item>
               <Descriptions.Item label="Remarks" span={3}>{recordData.remarks || '-'}</Descriptions.Item>
-              
-              {associatedAck && associatedAck.photos && associatedAck.photos.length > 0 && (
-                <Descriptions.Item label="Acknowledgement Photos" span={3}>
+            </Descriptions>
+
+            <Divider orientation="left" style={{ margin: '16px 0 8px 0', fontSize: '14px', fontWeight: 'bold' }}>Recipient Details</Divider>
+            <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
+              <Descriptions.Item label="Emp Name">{recordData.raised_by_name || indentDetails?.empName || recordData.issued_to_name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Position">{recordData.position_name || indentDetails?.position || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Emp Code">{recordData.raised_by_emp_code || indentDetails?.empCode || '-'}</Descriptions.Item>
+            </Descriptions>
+
+            <Divider orientation="left" style={{ margin: '16px 0 8px 0', fontSize: '14px', fontWeight: 'bold' }}>Issuer Details</Divider>
+            <Descriptions bordered size="small" column={{ xs: 1, sm: 2, md: 3 }}>
+              <Descriptions.Item label="Issued By">{recordData.issued_by_name || recordData.created_by_name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Emp Code">{recordData.created_by_emp_code || '-'}</Descriptions.Item>
+            </Descriptions>
+
+            {associatedAck && associatedAck.photos && associatedAck.photos.length > 0 && (
+              <>
+                <Divider orientation="left" style={{ margin: '16px 0 8px 0', fontSize: '14px', fontWeight: 'bold' }}>Acknowledgement Photos</Divider>
+                <div style={{ padding: '8px' }}>
                   <Space wrap size={12}>
                     <Image.PreviewGroup>
                       {associatedAck.photos.map((url, i) => (
@@ -1584,9 +1597,9 @@ const VehicleMaterialIssueForm = () => {
                       ))}
                     </Image.PreviewGroup>
                   </Space>
-                </Descriptions.Item>
-              )}
-            </Descriptions>
+                </div>
+              </>
+            )}
           </Card>
 
           <Card title="Material Issue Items">
@@ -1781,8 +1794,8 @@ const VehicleMaterialIssueForm = () => {
                 Cancel
               </Button>
               {editMode && (
-                <Button type="primary" icon={<SaveOutlined />} onClick={handleSave} loading={submitting}>
-                  {isTemplateIndent ? 'Submit / Save Issue' : (isNew ? 'Save Issue' : 'Update Issue')}
+                <Button type="primary" icon={<SendOutlined />} onClick={handleSave} loading={submitting}>
+                  {isNew ? 'Create & Issue Material' : 'Update & Issue Material'}
                 </Button>
               )}
             </Space>

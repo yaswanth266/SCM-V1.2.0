@@ -505,9 +505,9 @@ const App = () => {
             <Route path="/warehouse/material-issues" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssues /></KeyRoute>} />
             <Route path="/warehouse/material-issues/new" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssueForm /></KeyRoute>} />
             <Route path="/warehouse/material-issues/:id" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssueForm /></KeyRoute>} />
-            <Route path="/warehouse/vehicle-material-issues" element={<KeyRoute requiredKey="warehouse-material-issues"><VehicleMaterialIssues /></KeyRoute>} />
-            <Route path="/warehouse/vehicle-material-issues/new" element={<KeyRoute requiredKey="warehouse-material-issues"><VehicleMaterialIssueForm /></KeyRoute>} />
-            <Route path="/warehouse/vehicle-material-issues/:id" element={<KeyRoute requiredKey="warehouse-material-issues"><VehicleMaterialIssueForm /></KeyRoute>} />
+            <Route path="/warehouse/vehicle-material-issues" element={<KeyRoute requiredKey={["warehouse-vehicle-material-issues", "warehouse-material-issues"]}><VehicleMaterialIssues /></KeyRoute>} />
+            <Route path="/warehouse/vehicle-material-issues/new" element={<KeyRoute requiredKey={["warehouse-vehicle-material-issues", "warehouse-material-issues"]}><VehicleMaterialIssueForm /></KeyRoute>} />
+            <Route path="/warehouse/vehicle-material-issues/:id" element={<KeyRoute requiredKey={["warehouse-vehicle-material-issues", "warehouse-material-issues"]}><VehicleMaterialIssueForm /></KeyRoute>} />
             <Route path="/warehouse/material-issues/template" element={<KeyRoute requiredKey="warehouse-material-issues"><TemplateMaterialIssueList title="Template Material Issues" /></KeyRoute>} />
             <Route path="/warehouse/material-issues/template/new" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssueForm title="Create Template Material Issue" /></KeyRoute>} />
             <Route path="/warehouse/material-issues/template/:id" element={<KeyRoute requiredKey="warehouse-material-issues"><MaterialIssueForm title="Template Material Issue" /></KeyRoute>} />
@@ -586,19 +586,19 @@ const App = () => {
             <Route path="/inventory/masters/boms" element={<KeyRoute requiredKey="inventory-masters-boms"><BOMs /></KeyRoute>} />
             <Route path="/inventory/masters/boms/new" element={<KeyRoute requiredKey="inventory-masters-boms"><BOMForm /></KeyRoute>} />
             <Route path="/inventory/masters/boms/:id/edit" element={<KeyRoute requiredKey="inventory-masters-boms"><BOMForm /></KeyRoute>} />
-            <Route path="/inventory/masters/project-templates" element={<KeyRoute requiredKey="inventory-masters-project-templates"><ProjectIndentTemplateList title="Template Master for DP Project" /></KeyRoute>} />
-            <Route path="/inventory/masters/project-templates/new" element={<KeyRoute requiredKey="inventory-masters-project-templates"><ProjectIndentTemplateForm title="Template Master for DP Project" /></KeyRoute>} />
-            <Route path="/inventory/masters/project-templates/edit/:id" element={<KeyRoute requiredKey="inventory-masters-project-templates"><ProjectIndentTemplateForm title="Template Master for DP Project" /></KeyRoute>} />
+            <Route path="/inventory/masters/project-templates" element={<KeyRoute requiredKey={["inventory-masters-project-templates", "inventory-masters"]}><ProjectIndentTemplateList title="Template Master for DP Project" /></KeyRoute>} />
+            <Route path="/inventory/masters/project-templates/new" element={<KeyRoute requiredKey={["inventory-masters-project-templates", "inventory-masters"]}><ProjectIndentTemplateForm title="Template Master for DP Project" /></KeyRoute>} />
+            <Route path="/inventory/masters/project-templates/edit/:id" element={<KeyRoute requiredKey={["inventory-masters-project-templates", "inventory-masters"]}><ProjectIndentTemplateForm title="Template Master for DP Project" /></KeyRoute>} />
             <Route path="/inventory/masters/vehicles" element={<KeyRoute requiredKey="inventory-masters-vehicles"><Vehicles /></KeyRoute>} />
             <Route path="/inventory/masters/price-lists" element={<KeyRoute requiredKey="inventory-masters-price-lists"><PriceLists /></KeyRoute>} />
 
             <Route path="/inventory/masters/price-lists/new" element={<KeyRoute requiredKey="inventory-masters-price-lists"><PriceListForm /></KeyRoute>} />
             <Route path="/inventory/masters/price-lists/:id/edit" element={<KeyRoute requiredKey="inventory-masters-price-lists"><PriceListForm /></KeyRoute>} />
             <Route path="/inventory/stock" element={<Navigate to="/inventory/stock-balance" replace />} />
-            <Route path="/inventory/stock-balance" element={<KeyRoute requiredKey="inventory-stock-balance"><StockBalance /></KeyRoute>} />
-            <Route path="/inventory/vehicle-stock-balance" element={<KeyRoute requiredKey="inventory-stock-balance"><VehicleStockBalance /></KeyRoute>} />
-            <Route path="/inventory/stock-ledger" element={<KeyRoute requiredKey="inventory-stock-ledger"><StockLedger /></KeyRoute>} />
-            <Route path="/inventory/vehicle-stock-ledger" element={<KeyRoute requiredKey="inventory-stock-ledger"><VehicleStockLedger /></KeyRoute>} />
+            <Route path="/inventory/stock-balance" element={<KeyRoute requiredKey={["inventory-vehicle-stock-balance", "inventory-stock-balance"]}><StockBalance /></KeyRoute>} />
+            <Route path="/inventory/vehicle-stock-balance" element={<KeyRoute requiredKey={["inventory-vehicle-stock-balance", "inventory-stock-balance"]}><VehicleStockBalance /></KeyRoute>} />
+            <Route path="/inventory/stock-ledger" element={<KeyRoute requiredKey={["inventory-vehicle-stock-ledger", "inventory-stock-ledger"]}><StockLedger /></KeyRoute>} />
+            <Route path="/inventory/vehicle-stock-ledger" element={<KeyRoute requiredKey={["inventory-vehicle-stock-ledger", "inventory-stock-ledger"]}><VehicleStockLedger /></KeyRoute>} />
             <Route path="/inventory/stock-transfer" element={<KeyRoute requiredKey="inventory-stock-transfer"><StockTransfer /></KeyRoute>} />
             <Route path="/inventory/stock-transfer/new" element={<KeyRoute requiredKey="inventory-stock-transfer"><StockTransferForm /></KeyRoute>} />
             <Route path="/inventory/stock-transfer/:id" element={<KeyRoute requiredKey="inventory-stock-transfer"><StockTransferForm /></KeyRoute>} />
@@ -621,11 +621,11 @@ const App = () => {
             <Route path="/indent/template-indents/new" element={<KeyRoute requiredKey="indent-template-indents"><TemplateIndentForm title="Create Template Indent" /></KeyRoute>} />
             <Route path="/indent/template-indents/:id" element={<KeyRoute requiredKey="indent-template-indents"><TemplateIndentForm title="Template Indent" /></KeyRoute>} />
 
-            <Route path="/indent/acknowledgement" element={<KeyRoute requiredKey="indent-acknowledgement"><IndentAcknowledgement /></KeyRoute>} />
-            <Route path="/indent/acknowledgement/new" element={<KeyRoute requiredKey="indent-acknowledgement"><AcknowledgementForm /></KeyRoute>} />
-            <Route path="/indent/material-acknowledgement" element={<KeyRoute requiredKey="indent-acknowledgement"><MaterialAcknowledgementList /></KeyRoute>} />
-            <Route path="/indent/material-acknowledgement/new" element={<KeyRoute requiredKey="indent-acknowledgement"><MaterialAcknowledgementForm /></KeyRoute>} />
-            <Route path="/indent/material-acknowledgement/:id" element={<KeyRoute requiredKey="indent-acknowledgement"><MaterialAcknowledgementForm isViewOnly={true} /></KeyRoute>} />
+            <Route path="/indent/acknowledgement" element={<KeyRoute requiredKey={["indent-material-acknowledgement", "indent-acknowledgement"]}><IndentAcknowledgement /></KeyRoute>} />
+            <Route path="/indent/acknowledgement/new" element={<KeyRoute requiredKey={["indent-material-acknowledgement", "indent-acknowledgement"]}><AcknowledgementForm /></KeyRoute>} />
+            <Route path="/indent/material-acknowledgement" element={<KeyRoute requiredKey={["indent-material-acknowledgement", "indent-acknowledgement"]}><MaterialAcknowledgementList /></KeyRoute>} />
+            <Route path="/indent/material-acknowledgement/new" element={<KeyRoute requiredKey={["indent-material-acknowledgement", "indent-acknowledgement"]}><MaterialAcknowledgementForm /></KeyRoute>} />
+            <Route path="/indent/material-acknowledgement/:id" element={<KeyRoute requiredKey={["indent-material-acknowledgement", "indent-acknowledgement"]}><MaterialAcknowledgementForm isViewOnly={true} /></KeyRoute>} />
             <Route path="/indent/reports" element={<KeyRoute requiredKey="indent-reports"><IndentReports /></KeyRoute>} />
             <Route path="/indent/notifications" element={<KeyRoute requiredKey="indent-notifications"><IndentNotifications /></KeyRoute>} />
 

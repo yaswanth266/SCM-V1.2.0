@@ -8,7 +8,7 @@ import {
   InboxOutlined,
 } from '@ant-design/icons';
 import { useReactToPrint } from 'react-to-print';
-import { downloadExcel, debounce } from '../utils/helpers';
+import { downloadExcel, debounce, formatDate } from '../utils/helpers';
 
 const DataTable = ({
   columns,
@@ -184,12 +184,54 @@ const DataTable = ({
     }
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     if (onExport) {
       onExport(filteredData);
       return;
     }
-    const exportData = data.map((row) => {
+
+    let exportRawData = data;
+
+    // If server-side pagination (fetchFunction) is enabled, fetch all records matching current filters
+    if (fetchFunction) {
+      setLoading(true);
+      try {
+        const queryParams = {
+          page: 1,
+          page_size: 100000, // Enforce fetching all matching records
+          search: searchText,
+          ...(sorter.field && {
+            sort_by: sorter.field,
+            sort_order: sorter.order === 'ascend' ? 'asc' : 'desc',
+          }),
+          ...filters,
+          ...extraParamsRef.current,
+        };
+
+        Object.keys(queryParams).forEach((key) => {
+          if (
+            queryParams[key] === undefined ||
+            queryParams[key] === null ||
+            queryParams[key] === ''
+          ) {
+            delete queryParams[key];
+          }
+        });
+
+        const response = await fetchFunction(queryParams);
+        const responseData = response.data || response;
+        const items = responseData.items || responseData.data || responseData;
+        if (Array.isArray(items)) {
+          exportRawData = items;
+        }
+      } catch (error) {
+        console.error('Error fetching all data for export:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    const exportData = exportRawData.map((row) => {
       const exportRow = {};
       columns.forEach((col) => {
         if (col.dataIndex && col.title) {
@@ -208,7 +250,16 @@ const DataTable = ({
           }
           const title =
             typeof col.title === 'string' ? col.title : key;
-          exportRow[title] = value;
+
+          // If the key suggests a date, format it nicely using the formatDate utility
+          const lowerKey = key.toLowerCase();
+          if ((lowerKey.includes('date') || lowerKey.includes('time') || lowerKey.includes('at')) && value) {
+            try {
+              value = formatDate(value);
+            } catch {}
+          }
+
+          exportRow[title] = value !== null && value !== undefined ? value : '-';
         }
       });
       return exportRow;
@@ -216,12 +267,150 @@ const DataTable = ({
     downloadExcel(exportData, exportFileName);
   };
 
-  const onPrintClick = () => {
+  const onPrintClick = async () => {
     if (onPrint) {
       onPrint(filteredData);
       return;
     }
-    handlePrint();
+
+    let printRawData = data;
+
+    // If server-side pagination (fetchFunction) is enabled, fetch all records matching current filters
+    if (fetchFunction) {
+      setLoading(true);
+      try {
+        const queryParams = {
+          page: 1,
+          page_size: 100000, // Enforce fetching all matching records
+          search: searchText,
+          ...(sorter.field && {
+            sort_by: sorter.field,
+            sort_order: sorter.order === 'ascend' ? 'asc' : 'desc',
+          }),
+          ...filters,
+          ...extraParamsRef.current,
+        };
+
+        Object.keys(queryParams).forEach((key) => {
+          if (
+            queryParams[key] === undefined ||
+            queryParams[key] === null ||
+            queryParams[key] === ''
+          ) {
+            delete queryParams[key];
+          }
+        });
+
+        const response = await fetchFunction(queryParams);
+        const responseData = response.data || response;
+        const items = responseData.items || responseData.data || responseData;
+        if (Array.isArray(items)) {
+          printRawData = items;
+        }
+      } catch (error) {
+        console.error('Error fetching all data for print:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    const printWindow = window.open('', '_blank');
+    
+    // Build columns headers
+    let headersHTML = '<tr>';
+    columns.forEach((col) => {
+      if (col.title && col.key !== 'actions') {
+        headersHTML += `<th>${typeof col.title === 'string' ? col.title : col.key || ''}</th>`;
+      }
+    });
+    headersHTML += '</tr>';
+
+    // Build rows
+    let rowsHTML = '';
+    printRawData.forEach((row, rIdx) => {
+      rowsHTML += '<tr>';
+      columns.forEach((col) => {
+        if (col.title && col.key !== 'actions') {
+          let value = row;
+          if (col.dataIndex) {
+            if (typeof col.dataIndex === 'string') {
+              value = row[col.dataIndex];
+            } else if (Array.isArray(col.dataIndex)) {
+              value = col.dataIndex.reduce((o, k) => (o ? o[k] : undefined), row);
+            }
+          }
+
+          let displayVal = value !== null && value !== undefined ? String(value) : '-';
+
+          // Call custom render if it exists and returns a simple type
+          if (col.render) {
+            try {
+              const rendered = col.render(value, row, rIdx);
+              if (typeof rendered === 'string' || typeof rendered === 'number') {
+                displayVal = String(rendered);
+              } else if (React.isValidElement(rendered)) {
+                // If it's a Tag or element with text children
+                if (rendered.props && rendered.props.children !== undefined) {
+                  if (typeof rendered.props.children === 'string') {
+                    displayVal = rendered.props.children;
+                  } else if (Array.isArray(rendered.props.children)) {
+                    displayVal = rendered.props.children.filter(c => typeof c === 'string').join(' ');
+                  }
+                }
+              }
+            } catch {}
+          }
+
+          const lowerKey = String(col.dataIndex || col.key || '').toLowerCase();
+          if ((lowerKey.includes('date') || lowerKey.includes('time') || lowerKey.includes('at')) && value) {
+            try {
+              displayVal = formatDate(value);
+            } catch {}
+          }
+
+          rowsHTML += `<td>${displayVal}</td>`;
+        }
+      });
+      rowsHTML += '</tr>';
+    });
+
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>${exportFileName.replace(/_/g, ' ')}</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; padding: 25px; color: #1e293b; }
+            .report-header { text-align: center; color: #1e3a8a; font-size: 20px; font-weight: bold; margin-bottom: 20px; text-transform: uppercase; border-bottom: 3px solid #1e3a8a; padding-bottom: 12px; }
+            .print-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+            .print-table th { background-color: #f8fafc; color: #0f172a; padding: 10px 12px; border: 1px solid #cbd5e1; text-align: left; font-weight: bold; font-size: 11px; text-transform: uppercase; }
+            .print-table td { padding: 9px 12px; border: 1px solid #cbd5e1; font-size: 11px; color: #334155; }
+            .print-table tr:nth-child(even) { background-color: #f8fafc; }
+            .no-print-btn { background-color: #1e3a8a; color: white; padding: 10px 20px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-bottom: 20px; font-size: 12px; }
+            .no-print-btn:hover { background-color: #1d4ed8; }
+            @media print {
+              .no-print-btn { display: none; }
+              body { padding: 10px; }
+            }
+          </style>
+        </head>
+        <body>
+          <button class="no-print-btn" onclick="window.print()">Print / Save as PDF</button>
+          <div class="report-header">${exportFileName.replace(/_/g, ' ')}</div>
+          <table class="print-table">
+            <thead>
+              ${headersHTML}
+            </thead>
+            <tbody>
+              ${rowsHTML}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    setTimeout(() => {
+      printWindow.focus();
+    }, 300);
   };
 
   const handleRefresh = () => {

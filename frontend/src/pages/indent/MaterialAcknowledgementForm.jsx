@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Button, Select, Space, Card, Row, Col, message, Descriptions, Divider,
   Form, Input, InputNumber, Table, Typography, Tag, Spin, Empty, Tooltip,
-  Upload, Modal, Image, List, Checkbox, Progress
+  Upload, Modal, Image, List, Checkbox, Progress, Popover, Badge
 } from 'antd';
 import {
   ArrowLeftOutlined, CheckCircleOutlined, IdcardOutlined, CameraOutlined,
@@ -18,6 +18,86 @@ import useAuthStore from '../../store/authStore';
 const { Text, Title } = Typography;
 const { TextArea } = Input;
 const { Dragger } = Upload;
+
+const PhotoHoverPreview = ({ url, index, onDelete, isReadOnly = false }) => {
+  const popoverContent = (
+    <div style={{ padding: '6px', textAlign: 'center', maxWidth: 220 }}>
+      <div style={{ borderRadius: 6, overflow: 'hidden', border: '1px solid #e2e8f0', background: '#f8fafc', marginBottom: 6 }}>
+        <img
+          src={url}
+          alt={`Acknowledgement Photo #${index + 1}`}
+          style={{ width: '100%', maxHeight: 180, objectFit: 'contain', display: 'block' }}
+        />
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <Text strong style={{ fontSize: 12, color: '#334155' }}>
+          Acknowledgement Photo #${index + 1}
+        </Text>
+        {!isReadOnly && onDelete && (
+          <Button
+            type="text"
+            danger
+            size="small"
+            icon={<DeleteOutlined style={{ fontSize: 12 }} />}
+            onClick={() => onDelete(url)}
+            style={{ height: 22, padding: '0 6px', fontSize: 11 }}
+          >
+            Remove
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <Popover
+      content={popoverContent}
+      title={null}
+      trigger="hover"
+      placement="top"
+      overlayStyle={{ zIndex: 1050 }}
+    >
+      <div style={{ position: 'relative', display: 'inline-block', cursor: 'pointer', margin: '2px' }}>
+        <Image
+          src={url}
+          width={36}
+          height={36}
+          style={{ objectFit: 'cover', borderRadius: 6, border: '1.5px solid #cbd5e1', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}
+          preview={{
+            mask: <EyeOutlined style={{ fontSize: 12 }} />,
+          }}
+        />
+        {!isReadOnly && onDelete && (
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(url);
+            }}
+            title="Delete photo"
+            style={{
+              position: 'absolute',
+              top: -5,
+              right: -5,
+              width: 16,
+              height: 16,
+              borderRadius: '50%',
+              background: '#ff4d4f',
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+              zIndex: 3,
+            }}
+          >
+            <DeleteOutlined style={{ fontSize: 9 }} />
+          </div>
+        )}
+      </div>
+    </Popover>
+  );
+};
 
 const MaterialAcknowledgementForm = ({ isViewOnly = false }) => {
   const navigate = useNavigate();
@@ -378,7 +458,7 @@ const MaterialAcknowledgementForm = ({ isViewOnly = false }) => {
               { title: '#', width: 50, render: (_, __, idx) => idx + 1 },
               { title: 'Item Code', dataIndex: 'item_code', key: 'code', render: (text) => <Text style={{ fontFamily: 'monospace', fontWeight: 500 }}>{text}</Text> },
               { title: 'Item Name', dataIndex: 'item_name', key: 'name', render: (text) => <Text style={{ fontWeight: 500 }}>{text}</Text> },
-              { title: 'UOM', dataIndex: 'uom', key: 'uom', render: (v) => v || '-' },
+              { title: 'UOM', dataIndex: 'uom', key: 'uom', render: (v, r) => r.uom_name || r.uom || v || '-' },
               {
                 title: 'Received Qty',
                 dataIndex: 'received_qty',
@@ -405,7 +485,7 @@ const MaterialAcknowledgementForm = ({ isViewOnly = false }) => {
                 }
               },
               {
-                title: 'Photos',
+                title: 'Acknowledgement Photos',
                 dataIndex: 'photos',
                 key: 'photos',
                 render: (photos) => {
@@ -414,14 +494,12 @@ const MaterialAcknowledgementForm = ({ isViewOnly = false }) => {
                     <Image.PreviewGroup>
                       <Space wrap size={4}>
                         {photos.map((url, i) => (
-                          <div key={i} style={{ border: '1px solid #e2e8f0', borderRadius: 4, padding: 1, background: '#fff' }}>
-                            <Image
-                              src={url}
-                              width={40}
-                              height={40}
-                              style={{ objectFit: 'cover', borderRadius: 3, cursor: 'zoom-in' }}
-                            />
-                          </div>
+                          <PhotoHoverPreview
+                            key={url || i}
+                            url={url}
+                            index={i}
+                            isReadOnly={true}
+                          />
                         ))}
                       </Space>
                     </Image.PreviewGroup>
@@ -600,62 +678,37 @@ const MaterialAcknowledgementForm = ({ isViewOnly = false }) => {
                   },
                 },
                 {
-                  title: 'Upload Photos',
+                  title: 'Upload Acknowledgement Photos',
                   dataIndex: 'photos',
-                  width: 200,
+                  width: 220,
                   render: (val, record, idx) => {
-                    const fileList = (record.photos || []).map((url, i) => ({
-                      uid: `item-${idx}-${i}`,
-                      name: `photo-${i}.jpg`,
-                      status: 'done',
-                      url,
-                    }));
-                    
+                    const photos = record.photos || [];
                     return (
-                      <Space wrap size={4}>
+                      <Space direction="vertical" size={6} style={{ width: '100%' }}>
                         <Upload
                           customRequest={(options) => handleUploadPhoto({ ...options, isItemWise: true, itemIndex: idx })}
                           showUploadList={false}
                           accept="image/*"
                         >
                           <Button size="small" icon={<CameraOutlined />} type="dashed">
-                            Add Photo
+                            Add Photo {photos.length > 0 ? `(${photos.length})` : ''}
                           </Button>
                         </Upload>
-                        <Image.PreviewGroup>
-                          <Space wrap size={2}>
-                            {(record.photos || []).map((url, i) => (
-                              <div key={url} style={{ position: 'relative', display: 'inline-block' }}>
-                                <Image
-                                  src={url}
-                                  width={32}
-                                  height={32}
-                                  style={{ objectFit: 'cover', borderRadius: 4, border: '1px solid #e2e8f0' }}
+                        {photos.length > 0 && (
+                          <Image.PreviewGroup>
+                            <Space wrap size={4}>
+                              {photos.map((url, i) => (
+                                <PhotoHoverPreview
+                                  key={url || i}
+                                  url={url}
+                                  index={i}
+                                  onDelete={(photoUrl) => handleRemoveItemPhoto(idx, photoUrl)}
+                                  isReadOnly={false}
                                 />
-                                <Button
-                                  type="primary"
-                                  danger
-                                  shape="circle"
-                                  icon={<DeleteOutlined style={{ fontSize: 8 }} />}
-                                  size="small"
-                                  onClick={() => handleRemoveItemPhoto(idx, url)}
-                                  style={{
-                                    position: 'absolute',
-                                    top: -4,
-                                    right: -4,
-                                    width: 14,
-                                    height: 14,
-                                    minWidth: 14,
-                                    padding: 0,
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center'
-                                  }}
-                                />
-                              </div>
-                            ))}
-                          </Space>
-                        </Image.PreviewGroup>
+                              ))}
+                            </Space>
+                          </Image.PreviewGroup>
+                        )}
                       </Space>
                     );
                   }

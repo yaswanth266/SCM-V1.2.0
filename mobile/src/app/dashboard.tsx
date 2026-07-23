@@ -263,12 +263,12 @@ export default function Dashboard() {
   const displayRoleName = activePositionObj?.name || activeRoleObj?.name || user?.role || 'Viewer';
 
   const showIndents = allowedKeys.length > 0
-    ? (allowedKeys.includes('indent') || allowedKeys.includes('indent-indents'))
-    : (isSuperAdminOrAdmin || activeRole === 'field_staff' || activeRole === 'lab_technician' || activeRole === 'store_keeper' || activeRole === 'storekeeper' || activeRole === 'viewer');
+    ? (allowedKeys.includes('indent') || allowedKeys.includes('indent-indents') || allowedKeys.includes('indent-template-indents'))
+    : (isSuperAdminOrAdmin || activeRole === 'field_staff' || activeRole === 'lab_technician' || activeRole === 'store_keeper' || activeRole === 'storekeeper' || activeRole === 'store_supervisor' || activeRole === 'viewer');
 
   const showAcknowledgment = allowedKeys.length > 0
-    ? (allowedKeys.includes('indent-acknowledgement') || allowedKeys.includes('indent'))
-    : (isSuperAdminOrAdmin || activeRole === 'field_staff' || activeRole === 'lab_technician' || activeRole === 'viewer');
+    ? (allowedKeys.includes('indent-acknowledgement') || allowedKeys.includes('indent-material-acknowledgement') || allowedKeys.includes('indent'))
+    : (isSuperAdminOrAdmin || activeRole === 'field_staff' || activeRole === 'lab_technician' || activeRole === 'store_keeper' || activeRole === 'storekeeper' || activeRole === 'store_supervisor' || activeRole === 'viewer');
 
   const showApprovals = allowedKeys.length > 0
     ? (allowedKeys.includes('approvals') || allowedKeys.includes('approvals-pending'))
@@ -279,8 +279,8 @@ export default function Dashboard() {
     : isSuperAdminOrAdmin;
 
   const showMaterialIssues = allowedKeys.length > 0
-    ? (allowedKeys.includes('warehouse-material-issues') || allowedKeys.includes('warehouse'))
-    : (isSuperAdminOrAdmin || activeRole === 'store_keeper' || activeRole === 'storekeeper' || activeRole === 'warehouse_manager' || activeRole === 'field_staff');
+    ? (allowedKeys.includes('warehouse-material-issues') || allowedKeys.includes('warehouse-vehicle-material-issues') || allowedKeys.includes('warehouse'))
+    : (isSuperAdminOrAdmin || activeRole === 'store_keeper' || activeRole === 'storekeeper' || activeRole === 'store_supervisor' || activeRole === 'warehouse_manager' || activeRole === 'field_staff');
 
   return (
     <View style={styles.homeContainer}>
@@ -358,26 +358,9 @@ export default function Dashboard() {
         </LinearGradient>
 
         {/* ── Dashboard Module Cards ── */}
-        {(showIndents || showAcknowledgment || showApprovals) && (
+        {(showIndents || showAcknowledgment || showApprovals || showMaterialIssues || showLogistics) && (
           <View style={styles.dashboardSection}>
             <Text style={styles.sectionTitle}>Quick Access</Text>
-
-            {showIndents && (
-              <TouchableOpacity
-                style={styles.moduleCard}
-                activeOpacity={0.7}
-                onPress={() => router.push('/indents')}
-              >
-                <View style={[styles.moduleIconContainer, { backgroundColor: '#F0E8F8' }]}>
-                  <Feather name="file-text" size={20} color="#481890" />
-                </View>
-                <View style={styles.moduleTextContainer}>
-                  <Text style={styles.moduleTitle}>Indents</Text>
-                  <Text style={styles.moduleDesc}>Create and track material indents for your location.</Text>
-                </View>
-                <Feather name="chevron-right" size={18} color="#94A3B8" />
-              </TouchableOpacity>
-            )}
 
             {/* Template Indents */}
             {showIndents && (
@@ -398,51 +381,34 @@ export default function Dashboard() {
             )}
 
             {showMaterialIssues && (
-              <>
-                <TouchableOpacity
-                  style={styles.moduleCard}
-                  activeOpacity={0.7}
-                  onPress={() => router.push('/material-issues')}
-                >
-                  <View style={[styles.moduleIconContainer, { backgroundColor: '#FEE2E2' }]}>
-                    <Feather name="package" size={20} color="#DC2626" />
-                  </View>
-                  <View style={styles.moduleTextContainer}>
-                    <Text style={styles.moduleTitle}>Material Issues</Text>
-                    <Text style={styles.moduleDesc}>Raise and issue standard inventory materials.</Text>
-                  </View>
-                  <Feather name="chevron-right" size={18} color="#94A3B8" />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.moduleCard}
-                  activeOpacity={0.7}
-                  onPress={() => router.push('/vehicle-issues')}
-                >
-                  <View style={[styles.moduleIconContainer, { backgroundColor: '#FEF3C7' }]}>
-                    <Feather name="truck" size={20} color="#D97706" />
-                  </View>
-                  <View style={styles.moduleTextContainer}>
-                    <Text style={styles.moduleTitle}>Vehicle Issues</Text>
-                    <Text style={styles.moduleDesc}>Dispatch materials assigned to vehicle inventory.</Text>
-                  </View>
-                  <Feather name="chevron-right" size={18} color="#94A3B8" />
-                </TouchableOpacity>
-              </>
-            )}
-
-             {showAcknowledgment && (
               <TouchableOpacity
                 style={styles.moduleCard}
                 activeOpacity={0.7}
-                onPress={() => router.push('/acknowledgement-selector')}
+                onPress={() => router.push('/vehicle-issues')}
+              >
+                <View style={[styles.moduleIconContainer, { backgroundColor: '#FEF3C7' }]}>
+                  <Feather name="truck" size={20} color="#D97706" />
+                </View>
+                <View style={styles.moduleTextContainer}>
+                  <Text style={styles.moduleTitle}>Vehicle Issues</Text>
+                  <Text style={styles.moduleDesc}>Dispatch materials assigned to vehicle inventory.</Text>
+                </View>
+                <Feather name="chevron-right" size={18} color="#94A3B8" />
+              </TouchableOpacity>
+            )}
+
+            {showAcknowledgment && (
+              <TouchableOpacity
+                style={styles.moduleCard}
+                activeOpacity={0.7}
+                onPress={() => router.push('/material-acknowledgement')}
               >
                 <View style={[styles.moduleIconContainer, { backgroundColor: '#E6F7F0' }]}>
                   <Feather name="check-square" size={20} color="#10B981" />
                 </View>
                 <View style={styles.moduleTextContainer}>
                   <Text style={styles.moduleTitle}>Acknowledgement</Text>
-                  <Text style={styles.moduleDesc}>Acknowledge received materials and confirm quantities.</Text>
+                  <Text style={styles.moduleDesc}>Acknowledge vehicle issue materials and update stock balances.</Text>
                 </View>
                 <Feather name="chevron-right" size={18} color="#94A3B8" />
               </TouchableOpacity>

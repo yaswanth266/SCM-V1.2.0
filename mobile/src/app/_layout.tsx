@@ -1,8 +1,13 @@
-﻿import { Slot, router } from 'expo-router';
+import { Slot, router } from 'expo-router';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { LogBox } from 'react-native';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect } from 'react';
+
+LogBox.ignoreLogs([
+  "[expo-image-picker] 'ImagePicker.MediaTypeOptions' have been deprecated",
+]);
 
 export default function Layout() {
   useEffect(() => {

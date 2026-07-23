@@ -83,15 +83,6 @@ const Acknowledgement = () => {
         const count = v || (r.items ? r.items.length : 0);
         return count ? <Badge count={count} showZero color="#6366f1" /> : '-';
       },
-    },
-    {
-      title: 'Total Received Qty',
-      dataIndex: 'total_received_qty',
-      key: 'recv_qty',
-      width: 150,
-      align: 'right',
-      render: (v) => formatNumber(v),
-    },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 120, render: (s) => <StatusTag status={s || 'received'} /> },
     {
       title: 'Actions',
@@ -186,7 +177,7 @@ const Acknowledgement = () => {
               { title: '#', width: 40, render: (_, __, idx) => idx + 1 },
               { title: 'Item Code', dataIndex: 'item_code', key: 'code', width: 120, render: (v, r) => v || r.item?.item_code || '-' },
               { title: 'Item Name', dataIndex: 'item_name', key: 'name', width: 200, render: (v, r) => v || r.item?.item_name || '-' },
-              { title: 'UOM', dataIndex: 'uom', key: 'uom', width: 80, render: (v) => v || '-' },
+              { title: 'UOM', dataIndex: 'uom', key: 'uom', width: 80, render: (v, r) => r.uom_name || r.uom || v || '-' },
               { title: 'Approved Qty', dataIndex: 'approved_qty', key: 'aq', width: 120, align: 'right', render: (v) => formatNumber(v) },
               {
                 title: 'Received Qty',

@@ -191,8 +191,7 @@ insertion_failures = []
 async def _fetch_page(client, url, headers, page, label):
     import time
     start_time = time.time()
-    max_attempts = 5
-    for attempt in range(max_attempts):
+    for attempt in range(3):
         t0 = time.time()
         status_code = None
         error_msg = None
@@ -213,15 +212,11 @@ async def _fetch_page(client, url, headers, page, label):
                 "response_time": duration,
                 "records": len(items)
             })
-            return items, payload
+            return items
         except Exception as e:
             error_msg = str(e)
             duration = time.time() - t0
-            # If positions endpoint returns 500, immediately fail fast to trigger extraction fallback without wasting time on retries
-            if label == "positions" and (status_code == 500 or "500" in error_msg):
-                print(f"  Positions API returned HTTP 500. Bypassing retries and pivoting to employee payload extraction.")
-                raise RuntimeError(f"Positions API 500 Internal Server Error: {e}")
-            if attempt == max_attempts - 1:
+            if attempt == 2:
                 page_request_log.append({
                     "label": label,
                     "page": page,
@@ -232,23 +227,55 @@ async def _fetch_page(client, url, headers, page, label):
                     "records": 0,
                     "error": error_msg
                 })
-                print(f"  Error fetching {label} page {page} (attempt {attempt+1}/{max_attempts}): {e}")
-                raise RuntimeError(f"Failed to fetch {label} page {page} after {max_attempts} attempts: {e}")
-            print(f"  Retry {attempt+1}/{max_attempts} for {label} page {page} after error: {e}")
-            await asyncio.sleep(2.0 * (attempt + 1))
+                print(f"  Error fetching {label} page {page} (attempt {attempt+1}): {e}")
+                raise RuntimeError(f"Failed to fetch {label} page {page} after {attempt+1} attempts: {e}")
+            await asyncio.sleep(0.5 * (attempt + 1))
 
 
 async def _fetch_all_paginated(client, headers, base_url, label):
     import time
     import math
-    PAGE_SIZE = 100
     print(f"  Fetching page 1 for {label}...")
-    url = f"{base_url}?page_size={PAGE_SIZE}&limit={PAGE_SIZE}&per_page={PAGE_SIZE}&page=1"
+    url = f"{base_url}?page_size=200&page=1"
+    t0 = time.time()
+    status_code = None
+    try:
+        r = await client.get(url, headers=headers)
+        t1 = time.time()
+        status_code = r.status_code
+        r.raise_for_status()
+        payload = r.json()
+    except Exception as e:
+        duration = time.time() - t0
+        page_request_log.append({
+            "label": label,
+            "page": 1,
+            "url": url,
+            "status_code": status_code or "ERROR",
+            "retries": 0,
+            "response_time": duration,
+            "records": 0,
+            "error": str(e)
+        })
+        print(f"  Error fetching {label} page 1: {e}")
+        raise RuntimeError(f"Failed to fetch {label} page 1: {e}")
+
+    first_page_items = payload.get("results") or payload.get("items") or []
+    duration = t1 - t0
+    page_request_log.append({
+        "label": label,
+        "page": 1,
+        "url": url,
+        "status_code": status_code,
+        "retries": 0,
+        "response_time": duration,
+        "records": len(first_page_items)
+    })
     
-    first_page_items, payload = await _fetch_page(client, url, headers, 1, label)
     count = payload.get("count") or len(first_page_items)
     
-    page_size = len(first_page_items) if first_page_items else PAGE_SIZE
+    # Django REST Framework default page size (usually 10 or 20)
+    page_size = len(first_page_items) if first_page_items else 10
     if page_size == 0:
         return [], 0
         
@@ -259,16 +286,16 @@ async def _fetch_all_paginated(client, headers, base_url, label):
     if total_pages <= 1:
         return all_rows, count
 
-    # Fetch other pages in smaller batches of 2 with delays to prevent overloading the HRMS API server
-    batch_size = 2
+    # Fetch other pages concurrently in batches of 5 to avoid overloading the server
+    batch_size = 5
     tasks = []
     for page in range(2, total_pages + 1):
-        url = f"{base_url}?page_size={PAGE_SIZE}&limit={PAGE_SIZE}&per_page={PAGE_SIZE}&page={page}"
+        url = f"{base_url}?page_size=200&page={page}"
         tasks.append((page, url))
 
     for i in range(0, len(tasks), batch_size):
         if i > 0:
-            await asyncio.sleep(0.5)  # Delay between batches to give upstream server breathing room
+            await asyncio.sleep(0.2)  # Delay between batches to give upstream server breathing room
         batch = tasks[i:i + batch_size]
         print(f"  Fetching {label} pages {batch[0][0]} to {batch[-1][0]} concurrently...")
         futures = [
@@ -276,7 +303,7 @@ async def _fetch_all_paginated(client, headers, base_url, label):
             for page, url in batch
         ]
         results = await asyncio.gather(*futures)
-        for items, _ in results:
+        for items in results:
             all_rows.extend(items)
 
     return all_rows, count
@@ -333,9 +360,7 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
             if isinstance(loc, list):
                 loc = loc[0] if loc else {}
             pos_list = row.get("positions_details") or []
-            if not pos_list:
-                pos_list = [{}]
-
+            
             # Extract parent reporting details
             rep = row.get("reporting_to_details") or {}
             reporting_to_list = []
@@ -359,59 +384,15 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
                         "employee_name": rep.get("name")
                     })
 
-            for p_idx, p in enumerate(pos_list):
-                # Extract parent reporting details for this specific position
-                p_rep = p.get("reporting_to_details") or p.get("reporting_to") or reporting_to_list
-                cur_rep_list = []
-                if isinstance(p_rep, list):
-                    for item in p_rep:
-                        if isinstance(item, dict):
-                            cur_rep_list.append({
-                                "id": item.get("position_id") or item.get("id"),
-                                "position_name": item.get("position_name") or item.get("name"),
-                                "code": item.get("position_code") or item.get("code"),
-                                "employee_id": item.get("employee_id") or item.get("id"),
-                                "employee_name": item.get("employee_name") or item.get("name")
-                            })
-                elif isinstance(p_rep, dict):
-                    cur_rep_list.append({
-                        "id": p_rep.get("position_id") or p_rep.get("id"),
-                        "position_name": p_rep.get("position_name") or p_rep.get("name"),
-                        "code": p_rep.get("position_code") or p_rep.get("code"),
-                        "employee_id": p_rep.get("employee_id") or p_rep.get("id"),
-                        "employee_name": p_rep.get("employee_name") or p_rep.get("name")
-                    })
-
-                # Generate a code if not present
+            positions_data_list = []
+            for p in pos_list:
                 pos_code = p.get("code") or p.get("position_code")
+                if not pos_code and p.get("name"):
+                    pos_code = normalize_position_key(p.get("name"))
                 if not pos_code:
-                    if p.get("id"):
-                        base_key = normalize_position_key(p.get("name")) if p.get("name") else "POS"
-                        pos_code = f"{base_key}-{p.get('id')}"
-                    elif p.get("name"):
-                        pos_code = normalize_position_key(p.get("name"))
-                    else:
-                        pos_code = f"POS-{row.get('id') or 'UNKNOWN'}"
-                if p_idx > 0 and not pos_code.endswith(f"-P{p_idx+1}"):
-                    pos_code = f"{pos_code}-P{p_idx+1}"
+                    pos_code = f"POS-{p.get('id') or 'UNKNOWN'}"
 
-                office_data = {
-                    "id": loc.get("office_id") or p.get("office_id"),
-                    "name": loc.get("office_name") or p.get("office_name") or f"Office-{loc.get('office_id') or p.get('office_id') or 'UNKNOWN'}",
-                    "level": loc.get("office_level_name") or loc.get("level") or "FACILITATE",
-                    "geo_location": {
-                        "country": loc.get("country") or "India",
-                        "state": loc.get("state") or "ANDHRA PRADESH",
-                        "district": loc.get("district"),
-                        "mandal": loc.get("mandal"),
-                        "cluster": loc.get("cluster"),
-                        "cluster_type": loc.get("cluster_type"),
-                        "specific_location": loc.get("specific_location"),
-                        "address": loc.get("address")
-                    }
-                }
-
-                pos_data = {
+                positions_data_list.append({
                     "id": p.get("id"),
                     "name": p.get("name") or "Unknown Position",
                     "code": pos_code,
@@ -427,39 +408,62 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
                     "role_type_id": p.get("role_type_id"),
                     "status": p.get("status") or "active",
                     "start_date": p.get("start_date"),
-                    "reporting_to": cur_rep_list if cur_rep_list else reporting_to_list
-                }
+                    "reporting_to": reporting_to_list,
+                    "office_id": p.get("office_id"),
+                    "office_name": p.get("office_name"),
+                    "project_id": p.get("project_id"),
+                    "project_name": p.get("project_name")
+                })
 
-                proj_name = row.get("project_name") or p.get("project_name") or "AP-104-MMUS"
-                proj_code = row.get("project_code") or p.get("project_code") or (proj_name.replace(" ", "-") if proj_name else "AP-104-MMUS")
-
-                project_data = {
-                    "id": row.get("project_id") or p.get("project_id") or 4,
-                    "name": proj_name,
-                    "code": proj_code
+            primary_p = positions_data_list[0] if positions_data_list else {}
+            
+            office_data = {
+                "id": loc.get("office_id") or primary_p.get("office_id"),
+                "name": loc.get("office_name") or primary_p.get("office_name") or f"Office-{loc.get('office_id') or primary_p.get('office_id') or 'UNKNOWN'}",
+                "level": loc.get("office_level_name") or loc.get("level") or "FACILITATE",
+                "geo_location": {
+                    "country": loc.get("country") or "India",
+                    "state": loc.get("state") or "ANDHRA PRADESH",
+                    "district": loc.get("district"),
+                    "mandal": loc.get("mandal"),
+                    "cluster": loc.get("cluster"),
+                    "cluster_type": loc.get("cluster_type"),
+                    "specific_location": loc.get("specific_location"),
+                    "address": loc.get("address")
                 }
-
-                normalized_row = {
-                    "employee": {
-                        "id": row.get("id"),
-                        "name": row.get("name"),
-                        "employee_code": row.get("employee_code"),
-                        "photo": row.get("photo"),
-                        "status": row.get("status") or "Active",
-                        "dob": row.get("dob"),
-                        "gender": row.get("gender"),
-                        "pan_number": row.get("pan_number"),
-                        "aadhaar_number": row.get("aadhaar_number"),
-                        "email": row.get("email"),
-                        "phone": row.get("phone")
-                    },
-                    "position": pos_data,
-                    "project": project_data,
-                    "office": office_data,
-                    "bank_details": row.get("bank_details"),
-                    "hire_date": row.get("hire_date")
-                }
-                normalized_employee_rows.append(normalized_row)
+            }
+            
+            proj_name = row.get("project_name") or primary_p.get("project_name") or "AP-104-MMUS"
+            proj_code = row.get("project_code") or primary_p.get("project_code") or (proj_name.replace(" ", "-") if proj_name else "AP-104-MMUS")
+            
+            project_data = {
+                "id": row.get("project_id") or primary_p.get("project_id") or 4,
+                "name": proj_name,
+                "code": proj_code
+            }
+            
+            normalized_row = {
+                "employee": {
+                    "id": row.get("id"),
+                    "name": row.get("name"),
+                    "employee_code": row.get("employee_code"),
+                    "photo": row.get("photo"),
+                    "status": row.get("status") or "Active",
+                    "dob": row.get("dob"),
+                    "gender": row.get("gender"),
+                    "pan_number": row.get("pan_number"),
+                    "aadhaar_number": row.get("aadhaar_number"),
+                    "email": row.get("email"),
+                    "phone": row.get("phone")
+                },
+                "position": primary_p,
+                "positions": positions_data_list,
+                "project": project_data,
+                "office": office_data,
+                "bank_details": row.get("bank_details"),
+                "hire_date": row.get("hire_date")
+            }
+            normalized_employee_rows.append(normalized_row)
         else:
             normalized_employee_rows.append(row)
             
@@ -563,102 +567,100 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
 
     record_count = 0
     for row in employee_rows:
-        pos = row.get("position") or {}
-        code = (_text(pos, "code") or "").upper()
-        name = _text(pos, "name")
-        if not code or not name or code in position_map:
-            continue
+        emp = row.get("employee") or {}
+        emp_id = _int(emp.get("id")) or _int(row.get("id"))
+        positions_to_process = row.get("positions") or ([row.get("position")] if row.get("position") else [])
+        for pos in positions_to_process:
+            if not pos:
+                continue
+            code = (_text(pos, "code") or "").upper()
+            name = _text(pos, "name")
+            if not code or not name or code in position_map:
+                continue
 
-        project_code = (_text(row.get("project") or {}, "code") or "").upper()
-        office_name = (_text(row.get("office") or {}, "name") or "").lower().strip()
-        project_id = project_map.get(project_code)
-        office_id = office_map.get(office_name)
+            project_code = (_text(row.get("project") or {}, "code") or "").upper()
+            office_name = (_text(row.get("office") or {}, "name") or "").lower().strip()
+            project_id = project_map.get(project_code)
+            office_id = office_map.get(office_name)
 
-        # Collect parent relationship to resolve later
-        reporting_to = pos.get("reporting_to_details") or pos.get("reporting_to") or []
-        if isinstance(reporting_to, list):
-            for rt in reporting_to:
-                if isinstance(rt, dict):
-                    import re
-                    parent_name = rt.get("position_name") or rt.get("name") or ""
-                    parent_code = rt.get("code") or rt.get("position_code")
-                    if not parent_code and parent_name:
-                        parent_code = re.sub(r"[^a-zA-Z0-9]+", "-", parent_name).strip("-").upper()
-                    else:
-                        parent_code = (parent_code or "").upper()
-                    
-                    if parent_code or parent_name:
+            # Collect parent relationship to resolve later
+            reporting_to = pos.get("reporting_to_details") or pos.get("reporting_to") or []
+            if isinstance(reporting_to, list):
+                for rt in reporting_to:
+                    if isinstance(rt, dict):
+                        import re
+                        parent_name = rt.get("position_name") or rt.get("name") or ""
+                        parent_code = rt.get("code") or rt.get("position_code")
+                        if not parent_code and parent_name:
+                            parent_code = re.sub(r"[^a-zA-Z0-9]+", "-", parent_name).strip("-").upper()
+                        else:
+                            parent_code = (parent_code or "").upper()
+                        
+                        if parent_code or parent_name:
+                            parent_relations.append({
+                                "child_code": code,
+                                "parent_code": parent_code,
+                                "parent_name": parent_name,
+                                "parent_details": rt
+                            })
+                    elif isinstance(rt, (int, float)):
                         parent_relations.append({
                             "child_code": code,
-                            "parent_code": parent_code,
-                            "parent_name": parent_name,
-                            "parent_details": rt
+                            "parent_code": None,
+                            "parent_name": None,
+                            "parent_details": {"id": int(rt)}
                         })
-                elif isinstance(rt, (int, float)):
-                    parent_relations.append({
-                        "child_code": code,
-                        "parent_code": None,
-                        "parent_name": None,
-                        "parent_details": {"id": int(rt)}
-                    })
 
-        role_details = pos.get("role_details") or {}
-        role_code = _text(pos, "role_code") or role_details.get("code")
-        role_name = _text(pos, "role_name") or _text(pos, "role") or role_details.get("name")
-        local_role_id = None
-        if role_code:
-            local_role_id = role_code_to_id.get(role_code.lower())
-        if not local_role_id and role_name:
-            local_role_id = role_name_to_id.get(role_name.lower())
+            role_details = pos.get("role_details") or {}
+            role_code = _text(pos, "role_code") or role_details.get("code")
+            role_name = _text(pos, "role_name") or _text(pos, "role") or role_details.get("name")
+            local_role_id = None
+            if role_code:
+                local_role_id = role_code_to_id.get(role_code.lower())
+            if not local_role_id and role_name:
+                local_role_id = role_name_to_id.get(role_name.lower())
 
-        try:
-            pos_id = _int(pos.get("id")) or _int(row.get("position_id")) or _int(pos.get("position_id"))
-            r = await db.execute(
-                text("""INSERT INTO positions
-                    (id, name, code, role_name, role_id, level_name, level_rank,
-                     department, section, job_name, job_family_name, job_family_id,
-                     role_type_id, status, start_date, project_id, office_id,
-                     created_at, updated_at)
-                    VALUES (:id, :name, :code, :role_name, :role_id, :level_name, :level_rank,
-                            :department, :section, :job_name, :job_family_name, :job_family_id,
-                            :role_type_id, :status, :start_date, :project_id, :office_id,
-                            NOW(), NOW())
-                    ON DUPLICATE KEY UPDATE
-                        name=VALUES(name), code=VALUES(code), role_name=VALUES(role_name),
-                        role_id=VALUES(role_id), level_name=VALUES(level_name), level_rank=VALUES(level_rank),
-                        department=VALUES(department), section=VALUES(section), job_name=VALUES(job_name),
-                        job_family_name=VALUES(job_family_name), job_family_id=VALUES(job_family_id),
-                        role_type_id=VALUES(role_type_id), status=VALUES(status), start_date=VALUES(start_date),
-                        project_id=VALUES(project_id), office_id=VALUES(office_id), updated_at=NOW()"""),
-                {"id": pos_id, "name": name, "code": code,
-                 "role_name": _text(pos, "role_name") or _text(role_details, "name"),
-                 "role_id": local_role_id,
-                 "level_name": _text(pos, "level_name") or _text(pos, "level"),
-                 "level_rank": _int(pos.get("level_rank")),
-                 "department": _text(pos, "department") or _text(row, "department"),
-                 "section": _text(pos, "section"),
-                 "job_name": _text(pos, "job_name") or _text(role_details, "job_name"),
-                 "job_family_name": _text(pos, "job_family_name"),
-                 "job_family_id": _int(pos.get("job_family_id")),
-                 "role_type_id": _int(pos.get("role_type_id")),
-                 "status": _text(pos, "status") or "active",
-                 "start_date": _date(pos.get("start_date")),
-                 "project_id": project_id, "office_id": office_id}
-            )
-            position_map[code] = pos_id or r.lastrowid
-            stats["positions"] += 1
-        except Exception as e:
-            err_msg = str(e)
-            print(f"  WARN: Could not create position {code}: {err_msg}")
-            insertion_failures.append({
-                "type": "position",
-                "code": code,
-                "error": err_msg
-            })
-        
-        record_count += 1
-        if record_count % 100 == 0:
-            await db.commit()
+            try:
+                pos_id = _int(pos.get("id")) or _int(row.get("position_id")) or _int(pos.get("position_id"))
+                r = await db.execute(
+                    text("""INSERT INTO positions
+                        (id, name, code, role_name, role_id, level_name, level_rank,
+                         department, section, job_name, job_family_name, job_family_id,
+                         role_type_id, status, start_date, project_id, office_id,
+                         created_at, updated_at)
+                        VALUES (:id, :name, :code, :role_name, :role_id, :level_name, :level_rank,
+                                :department, :section, :job_name, :job_family_name, :job_family_id,
+                                :role_type_id, :status, :start_date, :project_id, :office_id,
+                                NOW(), NOW())"""),
+                    {"id": pos_id, "name": name, "code": code,
+                     "role_name": _text(pos, "role_name") or _text(role_details, "name"),
+                     "role_id": local_role_id,
+                     "level_name": _text(pos, "level_name") or _text(pos, "level"),
+                     "level_rank": _int(pos.get("level_rank")),
+                     "department": _text(pos, "department") or _text(row, "department"),
+                     "section": _text(pos, "section"),
+                     "job_name": _text(pos, "job_name") or _text(role_details, "job_name"),
+                     "job_family_name": _text(pos, "job_family_name"),
+                     "job_family_id": _int(pos.get("job_family_id")),
+                     "role_type_id": _int(pos.get("role_type_id")),
+                     "status": _text(pos, "status") or "active",
+                     "start_date": _date(pos.get("start_date")),
+                     "project_id": project_id, "office_id": office_id}
+                )
+                position_map[code] = pos_id or r.lastrowid
+                stats["positions"] += 1
+            except Exception as e:
+                err_msg = str(e)
+                print(f"  WARN: Could not create position {code}: {err_msg}")
+                insertion_failures.append({
+                    "type": "position",
+                    "code": code,
+                    "error": err_msg
+                })
+            
+            record_count += 1
+            if record_count % 100 == 0:
+                await db.commit()
 
     # Positions from positions API for missed ones
     # Build project name map for positions API lookup
@@ -900,7 +902,7 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
 
                 if position_id and emp_id:
                     await db.execute(
-                        text("UPDATE positions SET employee_id = :eid WHERE id = :pid"),
+                        text("UPDATE positions SET employee_id = :eid WHERE id = :pid AND employee_id IS NULL"),
                         {"pid": position_id, "eid": emp_id}
                     )
             except Exception as e:
@@ -917,19 +919,15 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
                 await db.execute(
                     text("""UPDATE employees SET name=:name, photo=:photo, status=:status,
                             dob=:dob, gender=:gender, pan_number=:pan, aadhaar_number=:aadhaar,
-                            email=:email, phone=:phone, updated_at=NOW()
+                            email=:email, phone=:phone, position_id=:pos_id, updated_at=NOW()
                             WHERE id=:id"""),
                     {"id": emp_id, "name": name, "photo": _text(emp, "photo"),
                      "status": _text(emp, "status") or "Active",
                      "dob": _date(emp.get("dob")), "gender": _text(emp, "gender"),
                      "pan": _text(emp, "pan_number"), "aadhaar": _text(emp, "aadhaar_number"),
-                     "email": _text(emp, "email"), "phone": _text(emp, "phone")}
+                     "email": _text(emp, "email"), "phone": _text(emp, "phone"),
+                     "pos_id": position_id}
                 )
-                if position_id and emp_id:
-                    await db.execute(
-                        text("UPDATE positions SET employee_id = :eid WHERE id = :pid"),
-                        {"pid": position_id, "eid": emp_id}
-                    )
             except Exception as e:
                 err_msg = str(e)
                 print(f"  WARN: Could not update employee {code}: {err_msg}")
@@ -939,10 +937,25 @@ async def sync_all(db, employee_rows, position_rows, org_id, emp_expected=0, pos
                     "error": err_msg
                 })
         
-        record_count += 1
-        if record_count % 100 == 0:
-            await db.commit()
+    await db.commit()
 
+    # Link positions to employees using multi-position data from employee_rows
+    for row in employee_rows:
+        emp = row.get("employee") or {}
+        emp_id = _int(emp.get("id")) or _int(row.get("id"))
+        positions_to_process = row.get("positions") or ([row.get("position")] if row.get("position") else [])
+        for pos in positions_to_process:
+            if not pos:
+                continue
+            pos_id = _int(pos.get("id")) or _int(row.get("position_id")) or _int(pos.get("position_id"))
+            if pos_id and emp_id:
+                try:
+                    await db.execute(
+                        text("UPDATE positions SET employee_id = :eid WHERE id = :pid"),
+                        {"pid": pos_id, "eid": emp_id}
+                    )
+                except Exception:
+                    pass
     await db.commit()
 
     # Deterministically update employees.position_id for all employees based on highest level (lowest level_rank) and code
@@ -1222,15 +1235,7 @@ async def main():
 
         async with AsyncSessionLocal() as db:
             org_res = await db.execute(text("SELECT id FROM organizations LIMIT 1"))
-            org_id = org_res.scalar()
-            if not org_id:
-                await db.execute(text("""
-                    INSERT INTO organizations (id, name, code, is_active, created_at, updated_at)
-                    VALUES (1, 'BHSPL', 'BHSPL', 1, NOW(), NOW())
-                    ON DUPLICATE KEY UPDATE name=VALUES(name)
-                """))
-                await db.commit()
-                org_id = 1
+            org_id = org_res.scalar() or 1
             await sync_all(db, employee_rows, position_rows, org_id=org_id, emp_expected=emp_count, pos_expected=pos_count)
 
     print("\nDone!")

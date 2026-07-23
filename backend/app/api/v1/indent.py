@@ -142,27 +142,23 @@ async def list_indents(
     # double-issue against it.
     if available_for_issue:
         query = query.where(
-            Indent.status.in_(["draft", "pending_approval", "approved", "partially_fulfilled"])
+            Indent.status.in_(["approved", "partially_fulfilled"])
         )
         count_query = count_query.where(
-            Indent.status.in_(["draft", "pending_approval", "approved", "partially_fulfilled"])
+            Indent.status.in_(["approved", "partially_fulfilled"])
         )
+        # Exclude indents that already have an active VehicleIssue (not cancelled)
+        from app.models.issue import VehicleIssue
+        existing_vi_indents = select(VehicleIssue.indent_id).where(
+            VehicleIssue.indent_id.is_not(None),
+            VehicleIssue.status != "cancelled"
+        )
+        query = query.where(Indent.id.not_in(existing_vi_indents))
+        count_query = count_query.where(Indent.id.not_in(existing_vi_indents))
+
         # Subquery: indent_ids where AT LEAST ONE line still has quantity that
         # can be issued now.
-        #
-        # Normal issue path:
-        #   approved/requested - issued > 0
-        #
-        # Partial acknowledgement path:
-        #   if the raiser acknowledged only part of what was issued, the
-        #   shortage should become issuable again. We only unlock this when
-        #   acked > 0 so a fully-issued indent that is merely awaiting its
-        #   first acknowledgement cannot be accidentally issued twice.
-        from sqlalchemy import case as _sa_case
-        approved_target = _sa_case(
-            (and_(IndentItem.approved_qty.is_not(None), IndentItem.approved_qty > 0), IndentItem.approved_qty),
-            else_=func.coalesce(IndentItem.requested_qty, 0),
-        )
+        approved_target = func.coalesce(IndentItem.approved_qty, IndentItem.requested_qty, 0)
         issued_remaining = approved_target - func.coalesce(IndentItem.issued_qty, 0)
         acked_qty = func.coalesce(
             select(func.sum(IndentAcknowledgementItem.received_qty))
@@ -839,18 +835,22 @@ async def create_indent(
         template_name = tmpl_res.scalar_one_or_none()
 
     # Prevent raising/creating duplicate active template indents for the same template and vehicle
-    if payload.template_id and payload.vehicle_code:
+    # Prevent raising/creating duplicate active template indents for the same vehicle
+    if payload.vehicle_code and (payload.template_id or payload.template_type == "dp_project"):
         dup_query = select(Indent).where(
-            Indent.template_id == payload.template_id,
             Indent.vehicle_code == payload.vehicle_code,
-            Indent.status.in_(["draft", "pending_approval", "approved", "partially_fulfilled"])
+            Indent.status.notin_(["cancelled", "rejected"])
         )
+        if payload.template_id:
+            dup_query = dup_query.where(Indent.template_id == payload.template_id)
+        else:
+            dup_query = dup_query.where(Indent.template_type == "dp_project")
         dup_res = await db.execute(dup_query)
         dup_indent = dup_res.scalars().first()
         if dup_indent:
             raise HTTPException(
                 status_code=400,
-                detail=f"An active template indent ({dup_indent.indent_number}) already exists for this Template and Vehicle ({payload.vehicle_code}). Duplicate creation is not allowed."
+                detail=f"An indent ({dup_indent.indent_number}) is already raised against vehicle {payload.vehicle_code}. Please select another vehicle."
             )
 
     indent = Indent(
@@ -990,19 +990,23 @@ async def update_indent(
 
     target_tmpl_id = payload_data.get("template_id", indent.template_id)
     target_veh_code = payload_data.get("vehicle_code", indent.vehicle_code)
-    if target_tmpl_id and target_veh_code:
+    target_tmpl_type = payload_data.get("template_type", indent.template_type)
+    if target_veh_code and (target_tmpl_id or target_tmpl_type == "dp_project"):
         dup_query = select(Indent).where(
             Indent.id != indent.id,
-            Indent.template_id == target_tmpl_id,
             Indent.vehicle_code == target_veh_code,
-            Indent.status.in_(["draft", "pending_approval", "approved", "partially_fulfilled"])
+            Indent.status.notin_(["cancelled", "rejected"])
         )
+        if target_tmpl_id:
+            dup_query = dup_query.where(Indent.template_id == target_tmpl_id)
+        else:
+            dup_query = dup_query.where(Indent.template_type == "dp_project")
         dup_res = await db.execute(dup_query)
         dup_indent = dup_res.scalars().first()
         if dup_indent:
             raise HTTPException(
                 status_code=400,
-                detail=f"An active template indent ({dup_indent.indent_number}) already exists for this Template and Vehicle ({target_veh_code}). Duplicate modification is not allowed."
+                detail=f"An indent ({dup_indent.indent_number}) is already raised against vehicle {target_veh_code}. Please select another vehicle."
             )
 
     # BUG-IND-020 — refuse a wipe-via-empty-list. Updating with items=[]
@@ -2536,13 +2540,14 @@ async def list_material_acknowledgements(
 ):
     """List material acknowledgements with pagination and search."""
     from app.models.issue import VehicleIssue, MaterialAcknowledgement, MaterialAcknowledgementItem
+    from app.models.master import Item
     offset, limit = paginate_params(page, page_size)
     query = (
         select(MaterialAcknowledgement)
         .options(
             selectinload(MaterialAcknowledgement.vehicle_issue).selectinload(VehicleIssue.warehouse),
             selectinload(MaterialAcknowledgement.acknowledger),
-            selectinload(MaterialAcknowledgement.items).selectinload(MaterialAcknowledgementItem.item),
+            selectinload(MaterialAcknowledgement.items).selectinload(MaterialAcknowledgementItem.item).selectinload(Item.primary_uom),
         )
     )
     count_query = select(func.count(MaterialAcknowledgement.id))
@@ -2557,6 +2562,10 @@ async def list_material_acknowledgements(
 
     response_items = []
     for ack in acks:
+        ack_dt = ack.acknowledged_at.isoformat() if ack.acknowledged_at else None
+        if ack_dt and not ack_dt.endswith("Z") and "+" not in ack_dt:
+            ack_dt += "Z"
+
         data = {
             "id": ack.id,
             "acknowledgement_number": ack.acknowledgement_number,
@@ -2568,7 +2577,7 @@ async def list_material_acknowledgements(
             "acknowledged_by": ack.acknowledged_by,
             "acknowledged_by_name": f"{ack.acknowledger.first_name} {ack.acknowledger.last_name or ''}".strip() if ack.acknowledger else None,
             "employee_code": ack.employee_code,
-            "acknowledged_at": ack.acknowledged_at,
+            "acknowledged_at": ack_dt,
             "remarks": ack.remarks,
             "status": ack.status,
             "photos": ack.photos,
@@ -2578,6 +2587,8 @@ async def list_material_acknowledgements(
                     "item_id": ai.item_id,
                     "item_code": ai.item.item_code if ai.item else None,
                     "item_name": ai.item.name if ai.item else None,
+                    "uom": ai.item.primary_uom.name if ai.item and ai.item.primary_uom else None,
+                    "uom_name": ai.item.primary_uom.name if ai.item and ai.item.primary_uom else None,
                     "received_qty": float(ai.received_qty),
                     "remarks": ai.remarks,
                     "serial_numbers": ai.serial_numbers,
@@ -2599,18 +2610,23 @@ async def get_material_acknowledgement(
 ):
     """Get material acknowledgement detail."""
     from app.models.issue import VehicleIssue, MaterialAcknowledgement, MaterialAcknowledgementItem
+    from app.models.master import Item
     result = await db.execute(
         select(MaterialAcknowledgement)
         .options(
             selectinload(MaterialAcknowledgement.vehicle_issue).selectinload(VehicleIssue.warehouse),
             selectinload(MaterialAcknowledgement.acknowledger),
-            selectinload(MaterialAcknowledgement.items).selectinload(MaterialAcknowledgementItem.item),
+            selectinload(MaterialAcknowledgement.items).selectinload(MaterialAcknowledgementItem.item).selectinload(Item.primary_uom),
         )
         .where(MaterialAcknowledgement.id == ack_id)
     )
     ack = result.scalar_one_or_none()
     if not ack:
         raise HTTPException(status_code=404, detail="Acknowledgement not found")
+
+    ack_dt = ack.acknowledged_at.isoformat() if ack.acknowledged_at else None
+    if ack_dt and not ack_dt.endswith("Z") and "+" not in ack_dt:
+        ack_dt += "Z"
 
     data = {
         "id": ack.id,
@@ -2623,7 +2639,7 @@ async def get_material_acknowledgement(
         "acknowledged_by": ack.acknowledged_by,
         "acknowledged_by_name": f"{ack.acknowledger.first_name} {ack.acknowledger.last_name or ''}".strip() if ack.acknowledger else None,
         "employee_code": ack.employee_code,
-        "acknowledged_at": ack.acknowledged_at,
+        "acknowledged_at": ack_dt,
         "remarks": ack.remarks,
         "status": ack.status,
         "photos": ack.photos,
@@ -2633,6 +2649,8 @@ async def get_material_acknowledgement(
                 "item_id": ai.item_id,
                 "item_code": ai.item.item_code if ai.item else None,
                 "item_name": ai.item.name if ai.item else None,
+                "uom": ai.item.primary_uom.name if ai.item and ai.item.primary_uom else None,
+                "uom_name": ai.item.primary_uom.name if ai.item and ai.item.primary_uom else None,
                 "received_qty": float(ai.received_qty),
                 "remarks": ai.remarks,
                 "serial_numbers": ai.serial_numbers,

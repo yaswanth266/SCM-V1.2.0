@@ -149,13 +149,9 @@ const SearchableDropdown = ({
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 const StatusBadge = ({ status }: { status: string }) => {
   const map: Record<string, { bg: string; text: string; label: string }> = {
-    draft:              { bg: '#F1F5F9', text: '#475569', label: 'Draft' },
     pending_approval:   { bg: '#FEF3C7', text: '#D97706', label: 'Pending Approval' },
     approved:           { bg: '#DCFCE7', text: '#16A34A', label: 'Approved' },
-    partially_fulfilled:{ bg: '#E0F2FE', text: '#0369A1', label: 'Partial' },
     fulfilled:          { bg: '#D1FAE5', text: '#059669', label: 'Fulfilled' },
-    rejected:           { bg: '#FEE2E2', text: '#DC2626', label: 'Rejected' },
-    cancelled:          { bg: '#F1F5F9', text: '#94A3B8', label: 'Cancelled' },
   };
   const s = map[status] || { bg: '#F1F5F9', text: '#475569', label: status };
   return (
@@ -165,27 +161,59 @@ const StatusBadge = ({ status }: { status: string }) => {
   );
 };
 
+const formatDateTime = (dateStr: string | null | undefined): string => {
+  if (!dateStr) return '-';
+  try {
+    let normalized = dateStr;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+      const [year, month, day] = normalized.split('-');
+      return `${day}/${month}/${year} 00:00:00`;
+    }
+    if (!normalized.endsWith('Z') && !normalized.includes('+') && !normalized.includes('-')) {
+      if (normalized.includes('T')) {
+        normalized = normalized + 'Z';
+      } else if (normalized.includes(' ')) {
+        normalized = normalized.replace(' ', 'T') + 'Z';
+      }
+    }
+    const d = new Date(normalized);
+    if (isNaN(d.getTime())) return '-';
+    const options: Intl.DateTimeFormatOptions = {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    };
+    return new Intl.DateTimeFormat('en-IN', options).format(d).replace(',', '');
+  } catch (e) {
+    return dateStr || '-';
+  }
+};
+
 // ─── Status Flow Steps ────────────────────────────────────────────────────────
-const STATUS_FLOW = ['draft', 'pending_approval', 'approved', 'partially_fulfilled', 'fulfilled'];
+const STATUS_FLOW = ['pending_approval', 'approved', 'fulfilled'];
 const StatusFlow = ({ currentStatus }: { currentStatus: string }) => {
-  const isFailed = currentStatus === 'cancelled' || currentStatus === 'rejected';
   const currentIdx = STATUS_FLOW.indexOf(currentStatus);
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 16 }}>
       <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, paddingVertical: 8 }}>
         {STATUS_FLOW.map((s, idx) => {
           const isCurrent = s === currentStatus;
-          const isPast = idx < currentIdx && !isFailed;
+          const isPast = idx < currentIdx;
           const label = s.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
           return (
             <View key={s} style={{ flexDirection: 'row', alignItems: 'center' }}>
               <View style={{
                 paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
-                backgroundColor: isFailed ? '#F1F5F9' : isCurrent ? '#481238' : isPast ? '#DCFCE7' : '#F1F5F9',
+                backgroundColor: isCurrent ? '#481238' : isPast ? '#DCFCE7' : '#F1F5F9',
               }}>
                 <Text style={{
                   fontSize: 11, fontWeight: isCurrent ? '800' : '600',
-                  color: isFailed ? '#94A3B8' : isCurrent ? '#FFFFFF' : isPast ? '#16A34A' : '#94A3B8',
+                  color: isCurrent ? '#FFFFFF' : isPast ? '#16A34A' : '#94A3B8',
                 }}>{label}</Text>
               </View>
               {idx < STATUS_FLOW.length - 1 && (
@@ -194,11 +222,6 @@ const StatusFlow = ({ currentStatus }: { currentStatus: string }) => {
             </View>
           );
         })}
-        {isFailed && (
-          <View style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20, backgroundColor: '#FEE2E2', marginLeft: 4 }}>
-            <Text style={{ fontSize: 11, fontWeight: '800', color: '#DC2626' }}>{currentStatus.toUpperCase()}</Text>
-          </View>
-        )}
       </View>
     </ScrollView>
   );
@@ -357,6 +380,7 @@ export default function TemplateIndentsScreen() {
   const [selWarehouseId, setSelWarehouseId] = useState('');
   const [selVehicleCode, setSelVehicleCode] = useState('');
   const [vehicleNumber, setVehicleNumber] = useState('');
+  const [indentDate, setIndentDate] = useState('');
   const [requiredDate, setRequiredDate] = useState('');
   const [remarks, setRemarks] = useState('');
 
@@ -481,16 +505,58 @@ export default function TemplateIndentsScreen() {
     }
   };
 
+  const checkDuplicateIndent = async (vehicleCode: string, alertIfFound = true): Promise<string | null> => {
+    if (!vehicleCode || formMode !== 'new') return null;
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/v1/indent/indents`, {
+        headers: { Authorization: `Bearer ${token}` },
+        params: {
+          template_type: 'dp_project',
+          vehicle_code: vehicleCode,
+          page_size: 20,
+        },
+      });
+      const items = res.data?.items || res.data?.data || res.data || [];
+      const activeDuplicate = items.find((i: any) =>
+        String(i.vehicle_code) === String(vehicleCode) &&
+        !['cancelled', 'rejected'].includes(i.status)
+      );
+      if (activeDuplicate) {
+        if (alertIfFound) {
+          Alert.alert(
+            'Error',
+            `An indent (${activeDuplicate.indent_number}) is already raised against vehicle ${vehicleCode}. Please select another vehicle.`
+          );
+        }
+        return activeDuplicate.indent_number || 'Existing Indent';
+      }
+    } catch { /* silent */ }
+    return null;
+  };
+
   const openNewForm = () => {
     setFormMode('new');
     setFormIndentId(null);
-    setSelProjectId('');
-    setAvailableTemplates([]);
+    
+    // Autofetch project ID from user profile or first available project
+    const defaultProjId = user?.project_id ? String(user.project_id) : (projects.length > 0 ? String(projects[0].id) : '');
+    setSelProjectId(defaultProjId);
+    if (defaultProjId) {
+      fetchTemplatesForProject(defaultProjId);
+    } else {
+      setAvailableTemplates([]);
+    }
+    
     setSelTemplateId('');
     setSelVehicleCode('');
     setVehicleNumber('');
     setRemarks('');
     setTemplateItems([]);
+    // Auto-fill current date-time as DD/MM/YYYY HH:mm:ss
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const dateTimeStr = `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    setIndentDate(dateTimeStr);
     const d = new Date(); d.setDate(d.getDate() + 7);
     setRequiredDate(d.toISOString().split('T')[0]);
     setFormVisible(true);
@@ -507,6 +573,7 @@ export default function TemplateIndentsScreen() {
     setVehicleNumber(indent.vehicle_number || '');
     setRemarks(indent.remarks || '');
     setRequiredDate(indent.required_date ? indent.required_date.split('T')[0] : '');
+    setIndentDate(indent.indent_date ? formatDateTime(indent.indent_date) : '');
     const items = (indent.items || []).map((it: any, idx: number) => ({
       key: it.id || idx,
       item_id: it.item_id,
@@ -555,7 +622,7 @@ export default function TemplateIndentsScreen() {
     }
   };
 
-  const handleSubmitForm = async (submitForApproval = false) => {
+  const handleSubmitForm = async () => {
     if (!selProjectId) { Alert.alert('Validation', 'Please select a project.'); return; }
     if (!selTemplateId) { Alert.alert('Validation', 'Please select a template name.'); return; }
     if (!selWarehouseId) { Alert.alert('Validation', 'Please select a warehouse.'); return; }
@@ -566,6 +633,33 @@ export default function TemplateIndentsScreen() {
 
     const matchedTmpl = availableTemplates.find((t: any) => String(t.id) === selTemplateId);
 
+    // Parse DD/MM/YYYY HH:mm:ss back to ISO string
+    let parsedIndentDate = new Date().toISOString();
+    if (indentDate) {
+      const parts = indentDate.split(' ');
+      if (parts.length === 2) {
+        const dateParts = parts[0].split('/');
+        const timeParts = parts[1].split(':');
+        if (dateParts.length === 3 && timeParts.length === 3) {
+          const day = parseInt(dateParts[0], 10);
+          const month = parseInt(dateParts[1], 10) - 1;
+          const year = parseInt(dateParts[2], 10);
+          const hour = parseInt(timeParts[0], 10);
+          const min = parseInt(timeParts[1], 10);
+          const sec = parseInt(timeParts[2], 10);
+          const d = new Date(year, month, day, hour, min, sec);
+          if (!isNaN(d.getTime())) {
+            parsedIndentDate = d.toISOString();
+          }
+        }
+      }
+    }
+
+    if (formMode === 'new' && selVehicleCode) {
+      const dupIndentNum = await checkDuplicateIndent(selVehicleCode, true);
+      if (dupIndentNum) return;
+    }
+
     setSubmitting(true);
     try {
       const payload = {
@@ -574,6 +668,7 @@ export default function TemplateIndentsScreen() {
         template_type: 'dp_project',
         template_id: parseInt(selTemplateId),
         template_name: matchedTmpl ? matchedTmpl.template_name : undefined,
+        indent_date: parsedIndentDate,
         required_date: requiredDate,
         project_id: parseInt(selProjectId),
         vehicle_code: selVehicleCode || null,
@@ -599,20 +694,30 @@ export default function TemplateIndentsScreen() {
         });
       }
 
-      if (submitForApproval && targetId) {
+      if (targetId) {
         await axios.post(`${API_BASE_URL}/api/v1/indent/indents/${targetId}/submit`, {}, {
           headers: { Authorization: `Bearer ${token}` },
         });
         Alert.alert('Success', formMode === 'new' ? 'Indent created and submitted for approval!' : 'Indent updated and submitted!');
-      } else {
-        Alert.alert('Success', formMode === 'new' ? 'Indent saved as draft.' : 'Indent updated successfully.');
       }
 
       setFormVisible(false);
       fetchList(token, 1, search, filterStatus);
       if (targetId) openDetail(targetId);
     } catch (e: any) {
-      const msg = e?.response?.data?.detail || (typeof e?.response?.data === 'string' ? e.response.data : 'Failed to save indent.');
+      const resData = e?.response?.data;
+      let msg = 'Failed to save indent.';
+      if (typeof resData?.detail === 'string') {
+        msg = resData.detail;
+      } else if (typeof resData?.message === 'string') {
+        msg = resData.message;
+      } else if (Array.isArray(resData?.detail)) {
+        msg = resData.detail.map((d: any) => (typeof d === 'string' ? d : d.msg || d.detail || JSON.stringify(d))).join('\n');
+      } else if (typeof resData === 'string') {
+        msg = resData;
+      } else if (e?.message) {
+        msg = e.message;
+      }
       Alert.alert('Error', msg);
     } finally {
       setSubmitting(false);
@@ -630,10 +735,9 @@ export default function TemplateIndentsScreen() {
     fetchList(token, 1, search, filterStatus);
   };
 
-  const STATUS_OPTIONS = ['', 'draft', 'pending_approval', 'approved', 'partially_fulfilled', 'fulfilled', 'rejected', 'cancelled'];
+  const STATUS_OPTIONS = ['', 'pending_approval', 'approved', 'fulfilled'];
   const STATUS_LABELS: Record<string, string> = {
-    '': 'All', draft: 'Draft', pending_approval: 'Pending', approved: 'Approved',
-    partially_fulfilled: 'Partial', fulfilled: 'Fulfilled', rejected: 'Rejected', cancelled: 'Cancelled',
+    '': 'All', pending_approval: 'Pending Approval', approved: 'Approved', fulfilled: 'Fulfilled',
   };
 
   // ─── RENDER ───────────────────────────────────────────────────────────────
@@ -642,7 +746,7 @@ export default function TemplateIndentsScreen() {
       {/* Header */}
       <LinearGradient colors={themeBg} style={styles.header} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
         <View style={styles.headerTop}>
-          <TouchableOpacity style={styles.headerBtn} onPress={() => router.replace('/indents')}>
+          <TouchableOpacity style={styles.headerBtn} onPress={() => router.replace('/dashboard')}>
             <Icon name="arrow-left" size={20} color="#FFF" />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
@@ -735,8 +839,12 @@ export default function TemplateIndentsScreen() {
                   <Text style={styles.cardValue}>{item.warehouse_name || '-'}</Text>
                 </View>
                 <View style={styles.cardRow}>
-                  <Text style={styles.cardLabel}>Vehicle</Text>
-                  <Text style={styles.cardValue}>{item.vehicle_code ? `${item.vehicle_code} (${item.vehicle_number || '-'})` : '-'}</Text>
+                  <Text style={styles.cardLabel}>Vehicle Code</Text>
+                  <Text style={styles.cardValue}>{item.vehicle_code || '-'}</Text>
+                </View>
+                <View style={styles.cardRow}>
+                  <Text style={styles.cardLabel}>Vehicle Number</Text>
+                  <Text style={styles.cardValue}>{item.vehicle_number || '-'}</Text>
                 </View>
                 <View style={styles.cardRow}>
                   <Text style={styles.cardLabel}>Required</Text>
@@ -779,13 +887,16 @@ export default function TemplateIndentsScreen() {
 
               <View style={styles.infoCard}>
                 <InfoRow label="Indent #" value={selectedIndent.indent_number || '-'} />
+                <InfoRow label="Date & Time" value={formatDateTime(selectedIndent.indent_date || selectedIndent.created_at)} />
+                <InfoRow label="Emp Code" value={selectedIndent.raised_by_emp_code || selectedIndent.employee_code || user?.employee_code || '-'} />
+                <InfoRow label="Emp Name" value={selectedIndent.raised_by_name || selectedIndent.created_by_name || user?.full_name || '-'} />
+                <InfoRow label="Position" value={selectedIndent.position_name || selectedIndent.raising_position || user?.position || '-'} />
                 <InfoRow label="Project" value={selectedIndent.project_name || '-'} />
                 <InfoRow label="Template Name" value={selectedIndent.template_name || '-'} />
                 <InfoRow label="Warehouse" value={selectedIndent.warehouse_name || '-'} />
-                <InfoRow label="Vehicle" value={selectedIndent.vehicle_code ? `${selectedIndent.vehicle_code} (${selectedIndent.vehicle_number || '-'})` : '-'} />
-                <InfoRow label="Indent Date" value={formatDate(selectedIndent.indent_date)} />
+                <InfoRow label="Vehicle Code" value={selectedIndent.vehicle_code || '-'} />
+                <InfoRow label="Vehicle Number" value={selectedIndent.vehicle_number || '-'} />
                 <InfoRow label="Required Date" value={formatDate(selectedIndent.required_date)} />
-                <InfoRow label="Raised By" value={selectedIndent.raised_by_name || '-'} />
                 {selectedIndent.remarks ? <InfoRow label="Remarks" value={selectedIndent.remarks} /> : null}
               </View>
 
@@ -811,50 +922,17 @@ export default function TemplateIndentsScreen() {
               </View>
 
               <View style={styles.actionBar}>
-                {selectedIndent.status === 'draft' && (
-                  <>
-                    <TouchableOpacity
-                      style={[styles.actionBtn, { backgroundColor: '#F1F5F9', flex: 1 }]}
-                      onPress={() => openEditForm(selectedIndent)}
-                    >
-                      <Icon name="edit" size={14} color="#334155" />
-                      <Text style={[styles.actionBtnText, { color: '#334155' }]}>Edit</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.actionBtn, { backgroundColor: themeColor, flex: 2 }]}
-                      onPress={() => Alert.alert('Submit?', 'Submit this indent for approval?', [
-                        { text: 'Cancel', style: 'cancel' },
-                        { text: 'Submit', onPress: () => handleAction(selectedIndent.id, 'submit') },
-                      ])}
-                    >
-                      <Icon name="send" size={14} color="#FFF" />
-                      <Text style={[styles.actionBtnText, { color: '#FFF' }]}>Submit for Approval</Text>
-                    </TouchableOpacity>
-                  </>
-                )}
                 {selectedIndent.status === 'pending_approval' && selectedIndent.can_approve_now === true && selectedIndent.raised_by !== user?.id && (
-                  <>
-                    <TouchableOpacity
-                      style={[styles.actionBtn, { backgroundColor: '#16A34A', flex: 1 }]}
-                      onPress={() => Alert.alert('Approve?', 'Approve this indent?', [
-                        { text: 'Cancel', style: 'cancel' },
-                        { text: 'Approve', onPress: () => handleAction(selectedIndent.id, 'approve') },
-                      ])}
-                    >
-                      <Icon name="check" size={14} color="#FFF" />
-                      <Text style={[styles.actionBtnText, { color: '#FFF' }]}>Approve</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.actionBtn, { backgroundColor: '#DC2626', flex: 1 }]}
-                      onPress={() => Alert.alert('Reject?', 'Reject this indent?', [
-                        { text: 'Cancel', style: 'cancel' },
-                        { text: 'Reject', style: 'destructive', onPress: () => handleAction(selectedIndent.id, 'reject') },
-                      ])}
-                    >
-                      <Icon name="x" size={14} color="#FFF" />
-                      <Text style={[styles.actionBtnText, { color: '#FFF' }]}>Reject</Text>
-                    </TouchableOpacity>
-                  </>
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: '#16A34A', flex: 1 }]}
+                    onPress={() => Alert.alert('Approve?', 'Approve this indent?', [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Approve', onPress: () => handleAction(selectedIndent.id, 'approve') },
+                    ])}
+                  >
+                    <Icon name="check" size={14} color="#FFF" />
+                    <Text style={[styles.actionBtnText, { color: '#FFF' }]}>Approve</Text>
+                  </TouchableOpacity>
                 )}
               </View>
             </ScrollView>
@@ -882,14 +960,31 @@ export default function TemplateIndentsScreen() {
             </View>
           ) : (
             <ScrollView contentContainerStyle={styles.modalScroll} keyboardShouldPersistTaps="handled">
-              {/* Project */}
+              {/* Employee Info Header - Frozen */}
+              <View style={[styles.infoCard, { marginBottom: 16 }]}>
+                <InfoRow label="Emp Code" value={user?.employee_code || user?.emp_code || '-'} />
+                <InfoRow label="Emp Name" value={user?.full_name || user?.name || user?.username || '-'} />
+                <InfoRow label="Position" value={user?.position_name || user?.position || user?.designation || '-'} />
+              </View>
+
+              {/* Date & Timestamp - Editable */}
+              <Text style={styles.fieldLabel}>Date & Timestamp *</Text>
+              <TextInput
+                style={styles.formInput}
+                value={indentDate}
+                onChangeText={setIndentDate}
+                placeholder="DD/MM/YYYY HH:mm:ss"
+                placeholderTextColor="#94A3B8"
+              />
+
+              {/* Project (Frozen) */}
               <SearchableDropdown
                 label="Project *"
                 value={selProjectId}
                 onValueChange={(v) => { setSelProjectId(v); fetchTemplatesForProject(v); }}
                 items={projects.map(p => ({ label: p.name || p.project_name || `#${p.id}`, value: String(p.id) }))}
                 placeholder="Select project..."
-                disabled={formMode === 'edit'}
+                disabled={true}
               />
 
               {/* Template Name */}
@@ -920,6 +1015,7 @@ export default function TemplateIndentsScreen() {
                   const matched = vehicles.find((vh: any) => vh.vehicle_code === v);
                   if (matched) setVehicleNumber(matched.vehicle_number || '');
                   else setVehicleNumber('');
+                  if (v) checkDuplicateIndent(v);
                 }}
                 items={vehicles.map((v: any) => ({
                   label: `${v.vehicle_code} (${v.vehicle_number || '-'})`,
@@ -929,11 +1025,12 @@ export default function TemplateIndentsScreen() {
                 placeholder="Select vehicle code..."
               />
 
+              {/* Vehicle Number (Frozen - Auto-filled) */}
               <Text style={styles.fieldLabel}>Vehicle Number</Text>
               <TextInput
-                style={[styles.formInput, { backgroundColor: '#F8FAFC', color: '#64748B' }]}
+                style={[styles.formInput, { backgroundColor: '#F1F5F9', color: '#64748B' }]}
                 value={vehicleNumber}
-                onChangeText={setVehicleNumber}
+                editable={false}
                 placeholder="Auto-filled from vehicle code"
                 placeholderTextColor="#94A3B8"
               />
@@ -1000,17 +1097,10 @@ export default function TemplateIndentsScreen() {
                 placeholderTextColor="#94A3B8"
               />
 
-              <View style={{ flexDirection: 'row', gap: 10, marginTop: 8 }}>
+              <View style={{ marginTop: 8 }}>
                 <TouchableOpacity
-                  style={[styles.submitBtn, { backgroundColor: '#F1F5F9', flex: 1 }]}
-                  onPress={() => handleSubmitForm(false)}
-                  disabled={submitting}
-                >
-                  <Text style={[styles.submitBtnText, { color: '#334155' }]}>Save Draft</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.submitBtn, { backgroundColor: themeColor, flex: 2 }]}
-                  onPress={() => handleSubmitForm(true)}
+                  style={[styles.submitBtn, { backgroundColor: themeColor }]}
+                  onPress={handleSubmitForm}
                   disabled={submitting}
                 >
                   <Text style={styles.submitBtnText}>Submit for Approval</Text>
@@ -1028,7 +1118,7 @@ export default function TemplateIndentsScreen() {
 const InfoRow = ({ label, value }: { label: string; value: string }) => (
   <View style={styles.infoRow}>
     <Text style={styles.infoLabel}>{label}</Text>
-    <Text style={styles.infoValue} numberOfLines={2}>{value}</Text>
+    <Text style={styles.infoValue}>{value}</Text>
   </View>
 );
 
@@ -1036,35 +1126,34 @@ const InfoRow = ({ label, value }: { label: string; value: string }) => (
 const styles = StyleSheet.create({
   container:     { flex: 1, backgroundColor: '#F6F2F0' },
   header:        { paddingTop: Platform.OS === 'ios' ? 0 : 12, paddingBottom: 14 },
-  headerTop:     { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 8, gap: 10 },
+  headerTop:     { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, height: 48 },
   headerBtn:     { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  headerTitle:   { fontSize: 15, fontWeight: '800', color: '#FFF' },
-  headerSub:     { fontSize: 11, color: 'rgba(255,255,255,0.7)', marginTop: 1 },
+  headerTitle:   { fontSize: 16, fontWeight: '800', color: '#FFF' },
+  headerSub:     { fontSize: 11, color: 'rgba(255,255,255,0.7)' },
 
-  filterBar:     { backgroundColor: '#FFF', paddingHorizontal: 16, paddingTop: 10, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  filterBar:     { paddingHorizontal: 16, paddingVertical: 10, backgroundColor: '#FFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
   searchInput:   { height: 40, backgroundColor: '#F1F5F9', borderRadius: 8, paddingHorizontal: 12, fontSize: 13, color: '#0F172A' },
-  filterChip:    { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: '#F1F5F9', borderWidth: 1, borderColor: '#E2E8F0' },
-  filterChipActive: { backgroundColor: '#481238', borderColor: '#481238' },
-  filterChipText:   { fontSize: 12, fontWeight: '600', color: '#475569' },
-  filterChipTextActive: { color: '#FFF' },
+  filterChip:    { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: '#F1F5F9' },
+  filterChipActive:     { backgroundColor: '#7C3AED' },
+  filterChipText:       { fontSize: 11, fontWeight: '600', color: '#64748B' },
+  filterChipTextActive: { color: '#FFF', fontWeight: '800' },
 
-  centeredBox:   { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
+  centeredBox:   { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   loadingText:   { marginTop: 12, fontSize: 14, color: '#64748B' },
   emptyText:     { fontSize: 15, fontWeight: '600', color: '#64748B', marginTop: 12, marginBottom: 16 },
   createBtn:     { paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 },
-  createBtnText: { color: '#FFF', fontSize: 14, fontWeight: '700' },
-  listContent:   { padding: 16 },
+  createBtnText: { color: '#FFF', fontSize: 14, fontWeight: '800' },
 
-  card:          { backgroundColor: '#FFF', borderRadius: 14, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' },
-  cardHeader:    { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 10 },
-  cardIconBox:   { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  card:          { backgroundColor: '#FFF', borderRadius: 12, padding: 14, marginBottom: 10, borderWidth: 1, borderColor: '#E2E8F0' },
+  cardHeader:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  cardIconBox:   { width: 34, height: 34, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   cardTitle:     { fontSize: 14, fontWeight: '800', color: '#0F172A' },
-  cardSub:       { fontSize: 12, color: '#64748B', marginTop: 2 },
-  cardBody:      { gap: 5, marginBottom: 10 },
-  cardRow:       { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  cardLabel:     { fontSize: 12, color: '#94A3B8', fontWeight: '600' },
-  cardValue:     { fontSize: 12, color: '#334155', fontWeight: '600', flex: 1, textAlign: 'right' },
-  cardFooter:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#F1F5F9', paddingTop: 10 },
+  cardSub:       { fontSize: 11, color: '#64748B' },
+  cardBody:      { gap: 4, marginBottom: 10 },
+  cardRow:       { flexDirection: 'row', justifyContent: 'space-between' },
+  cardLabel:     { fontSize: 12, color: '#64748B' },
+  cardValue:     { fontSize: 12, fontWeight: '600', color: '#0F172A' },
+  cardFooter:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
   cardDate:      { fontSize: 11, color: '#94A3B8' },
 
   modalContainer:{ flex: 1, backgroundColor: '#F8FAFC' },

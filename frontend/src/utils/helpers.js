@@ -74,8 +74,8 @@ export const formatDateTime = (date) => {
   if (typeof date === 'string' && DATE_ONLY_RE.test(date)) {
     return dayjs(date, 'YYYY-MM-DD').format(DATETIME_FORMAT);
   }
-  const d = typeof date === 'string' && !date.endsWith('Z') && !date.includes('+') && !date.includes('-0') ? dayjs(date) : dayjs.utc(date);
-  return d.tz(IST_TZ).format(DATETIME_FORMAT);
+  const d = dayjs.utc(date);
+  return d.isValid() ? d.tz(IST_TZ).format(DATETIME_FORMAT) : dayjs(date).format(DATETIME_FORMAT);
 };
 
 export const formatDateForAPI = (date) => {
@@ -93,6 +93,24 @@ export const formatDateForAPI = (date) => {
 
 export const downloadExcel = (data, filename, sheetName = 'Sheet1') => {
   const ws = XLSX.utils.json_to_sheet(data);
+  
+  // Auto-fit column widths based on maximum cell content length
+  if (Array.isArray(data) && data.length > 0) {
+    const cols = [];
+    const keys = Object.keys(data[0] || {});
+    keys.forEach((key) => {
+      let maxLen = key.length;
+      data.forEach(row => {
+        const valStr = String(row[key] !== null && row[key] !== undefined ? row[key] : '');
+        if (valStr.length > maxLen) {
+          maxLen = valStr.length;
+        }
+      });
+      cols.push({ wch: Math.min(Math.max(maxLen + 3, 10), 50) }); // Enforce min 10, max 50 width
+    });
+    ws['!cols'] = cols;
+  }
+  
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, sheetName);
   XLSX.writeFile(wb, `${filename}_${dayjs().format('YYYYMMDD_HHmmss')}.xlsx`);
@@ -1188,6 +1206,418 @@ export const printVehicleStockToPDF = (data) => {
         <button class="no-print-btn" onclick="window.print()">Print / Save as PDF</button>
         <div class="page-title">${title}</div>
         ${bodyHTML}
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  setTimeout(() => {
+    printWindow.focus();
+  }, 300);
+};
+
+export const exportIndentToExcel = (record) => {
+  const title = 'INDENT DETAIL REPORT';
+  const headers = [
+    { label: 'Indent Number', value: record.indent_number },
+    { label: 'Status', value: record.status },
+    { label: 'Date & Timestamp', value: formatDateTime(record.indent_date || record.created_at) },
+    { label: 'Required Date', value: formatDate(record.required_date) },
+    { label: 'Employee Code', value: record.raised_by_emp_code || record.employee_code },
+    { label: 'Employee Name', value: record.created_by_name || record.raised_by_name },
+    { label: 'Position', value: record.position_name || record.raising_position },
+    { label: 'Indent Type', value: record.indent_type },
+    { label: 'Department', value: record.department || record.department_name },
+    { label: 'Warehouse', value: record.warehouse_name },
+    { label: 'Project', value: record.project_name },
+    { label: 'Vehicle Code', value: record.vehicle_code },
+    { label: 'Vehicle Number', value: record.vehicle_number },
+    { label: 'Remarks', value: record.remarks },
+  ];
+  const items = record.items || [];
+
+  let html = `
+    <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
+    <head>
+      <meta charset="utf-8">
+      <style>
+        .title { background-color: #581c87; color: #ffffff; font-weight: bold; font-size: 16px; text-align: center; height: 40px; border: 1px solid #cbd5e1; }
+        .header-label { background-color: #f8fafc; color: #475569; font-weight: bold; border: 1px solid #cbd5e1; }
+        .header-value { background-color: #ffffff; color: #0f172a; border: 1px solid #cbd5e1; }
+        .item-th { background-color: #6b21a8; color: #ffffff; font-weight: bold; border: 1px solid #cbd5e1; }
+        .item-row { background-color: #faf5ff; color: #581c87; border: 1px solid #cbd5e1; font-weight: 500; }
+        .section-divider { background-color: #f1f5f9; height: 20px; }
+        td, th { padding: 8px; text-align: left; vertical-align: middle; }
+        .text-right { text-align: right; }
+      </style>
+    </head>
+    <body>
+      <table>
+        <tr>
+          <th colspan="6" class="title">${title}</th>
+        </tr>
+  `;
+
+  for (let i = 0; i < headers.length; i += 2) {
+    const h1 = headers[i];
+    const h2 = headers[i + 1];
+    html += `
+      <tr>
+        <td class="header-label">${h1 ? h1.label : ''}</td>
+        <td colspan="2" class="header-value">${h1 && h1.value !== null && h1.value !== undefined ? h1.value : '-'}</td>
+        <td class="header-label">${h2 ? h2.label : ''}</td>
+        <td colspan="2" class="header-value">${h2 && h2.value !== null && h2.value !== undefined ? h2.value : '-'}</td>
+      </tr>
+    `;
+  }
+
+  html += `
+    <tr class="section-divider">
+      <td colspan="6"></td>
+    </tr>
+    <tr>
+      <th class="item-th" style="width: 5%;">#</th>
+      <th class="item-th" style="width: 25%;">Item Code</th>
+      <th class="item-th" style="width: 40%;">Item Name</th>
+      <th class="item-th" style="width: 15%; text-align: right;">Requested Qty</th>
+      <th class="item-th" style="width: 15%;">UOM</th>
+      <th class="item-th" style="width: 20%;">Remarks</th>
+    </tr>
+  `;
+
+  items.forEach((item, idx) => {
+    const itemCode = item.item_code || (item.item && item.item.item_code) || '';
+    const itemName = item.item_name || (item.item && (item.item.item_name || item.item.name)) || '';
+    const qty = Number(item.requested_qty !== undefined ? item.requested_qty : item.qty || 0);
+    const uom = item.uom || item.unit || (item.item && item.item.primary_uom_name) || '-';
+    const remarks = item.remarks || '-';
+    
+    html += `
+      <tr class="item-row">
+        <td>${idx + 1}</td>
+        <td>${itemCode}</td>
+        <td>${itemName}</td>
+        <td class="text-right">${formatNumber(qty)}</td>
+        <td>${uom}</td>
+        <td>${remarks}</td>
+      </tr>
+    `;
+  });
+
+  html += `
+      </table>
+    </body>
+    </html>
+  `;
+
+  const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `indent_detail_${record.indent_number || record.id}_${dayjs().format('YYYYMMDD_HHmmss')}.xls`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+export const printIndentToPDF = (record) => {
+  const title = record.template_name ? 'Template Indent Report' : 'Indent Report';
+  
+  // Clean headers to align exactly with the list
+  const headers = [
+    { label: 'Indent Number', value: record.indent_number || '-' },
+    { label: 'Status', value: String(record.status || '-').toUpperCase() },
+    { label: 'Indent Date', value: formatDate(record.indent_date || record.created_at) },
+    { label: 'Project', value: record.project_name || record.project || '-' },
+    { label: 'Template Name', value: record.template_name || '-' },
+    { label: 'Raised By', value: record.created_by_name || record.raised_by_name || record.raised_by || '-' },
+    { label: 'Vehicle Code', value: record.vehicle_code || '-' },
+    { label: 'Vehicle Number', value: record.vehicle_number || '-' },
+  ];
+  
+  const items = record.items || [];
+  const history = record.approval_history || [];
+
+  let headerHTML = '<table class="info-table"><tbody>';
+  for (let i = 0; i < headers.length; i += 2) {
+    const h1 = headers[i];
+    const h2 = headers[i + 1];
+    
+    const getStatusStyle = (h) => {
+      if (!h || h.label !== 'Status') return '';
+      const s = String(h.value).toLowerCase();
+      let color = '#8c8c8c';
+      if (s.includes('approved') || s.includes('fulfilled')) color = '#22c55e';
+      if (s.includes('pending')) color = '#3b82f6';
+      if (s.includes('reject') || s.includes('cancel')) color = '#ef4444';
+      return `<span class="status-badge" style="background-color: ${color};">${h.value}</span>`;
+    };
+
+    const val1 = h1 ? (h1.label === 'Status' ? getStatusStyle(h1) : h1.value) : '';
+    const val2 = h2 ? (h2.label === 'Status' ? getStatusStyle(h2) : h2.value) : '';
+
+    headerHTML += `
+      <tr>
+        <td class="label">${h1 ? h1.label : ''}</td>
+        <td class="value">${val1 !== null && val1 !== undefined ? val1 : '-'}</td>
+        <td class="label">${h2 ? h2.label : ''}</td>
+        <td class="value">${val2 !== null && val2 !== undefined ? val2 : '-'}</td>
+      </tr>
+    `;
+  }
+  headerHTML += '</tbody></table>';
+
+  let remarksHTML = '';
+  if (record.remarks) {
+    remarksHTML = `
+      <div style="margin-top: 15px; margin-bottom: 15px; padding: 12px; background-color: #faf5ff; border-left: 4px solid #6b21a8; border-radius: 4px; font-size: 13px;">
+        <strong>Remarks:</strong> ${record.remarks}
+      </div>
+    `;
+  }
+
+  let itemsHTML = '';
+  items.forEach((item, idx) => {
+    const itemCode = item.item_code || (item.item && item.item.item_code) || '';
+    const itemName = item.item_name || (item.item && (item.item.item_name || item.item.name)) || '';
+    const qty = Number(item.requested_qty !== undefined ? item.requested_qty : item.qty || 0);
+    const uom = item.uom || item.unit || (item.item && item.item.primary_uom_name) || '-';
+    const remarks = item.remarks || '-';
+
+    itemsHTML += `
+      <tr class="item-row">
+        <td>${idx + 1}</td>
+        <td>${itemCode}</td>
+        <td>${itemName}</td>
+        <td class="text-right">${formatNumber(qty)}</td>
+        <td>${uom}</td>
+        <td>${remarks}</td>
+      </tr>
+    `;
+  });
+
+  let historyHTML = '';
+  if (history.length > 0) {
+    historyHTML += `
+      <div class="section-title">Approval & Rejection History</div>
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th style="width: 25%">Approver</th>
+            <th style="width: 20%">Role / Position</th>
+            <th style="width: 15%">Action</th>
+            <th style="width: 20%">Date & Time</th>
+            <th style="width: 20%">Remarks</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
+    history.forEach((h) => {
+      let actionColor = '#3b82f6';
+      if (h.action === 'approved') actionColor = '#22c55e';
+      if (h.action === 'rejected') actionColor = '#ef4444';
+      if (h.action === 'submitted') actionColor = '#f59e0b';
+
+      historyHTML += `
+        <tr>
+          <td><strong>${h.user_name || ''}</strong></td>
+          <td>${h.position_name || '-'}</td>
+          <td><span class="status-badge" style="background-color: ${actionColor};">${String(h.action).toUpperCase()}</span></td>
+          <td>${formatDateTime(h.timestamp)}</td>
+          <td>${h.remarks || '-'}</td>
+        </tr>
+      `;
+    });
+    historyHTML += '</tbody></table>';
+  }
+
+  const printWindow = window.open('', '_blank');
+  printWindow.document.write(`
+    <html>
+      <head>
+        <title>${title} - ${record.indent_number || record.id}</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; padding: 25px; color: #1e293b; }
+          .page-title { text-align: center; color: #581c87; font-size: 22px; font-weight: bold; margin-bottom: 25px; text-transform: uppercase; border-bottom: 3px solid #581c87; padding-bottom: 12px; }
+          .section-title { font-size: 14px; font-weight: bold; color: #6b21a8; margin-top: 30px; margin-bottom: 12px; border-bottom: 2px solid #cbd5e1; padding-bottom: 6px; text-transform: uppercase; }
+          .info-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+          .info-table td { padding: 10px 12px; border: 1px solid #cbd5e1; font-size: 13px; }
+          .info-table td.label { background-color: #f8fafc; font-weight: bold; width: 20%; color: #475569; }
+          .info-table td.value { width: 30%; color: #0f172a; }
+          .items-table, .history-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          .items-table th, .history-table th { background-color: #6b21a8; color: white; padding: 10px 12px; border: 1px solid #cbd5e1; text-align: left; font-weight: bold; font-size: 13px; }
+          .items-table td, .history-table td { padding: 9px 12px; border: 1px solid #cbd5e1; font-size: 13px; }
+          .item-row { background-color: #faf5ff; color: #581c87; font-weight: bold; }
+          .status-badge { color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block; }
+          .text-right { text-align: right; }
+          .no-print-btn { background-color: #6b21a8; color: white; padding: 10px 20px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-bottom: 20px; font-size: 13px; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+          .no-print-btn:hover { background-color: #7e22ce; }
+          @media print {
+            .no-print-btn { display: none; }
+            body { padding: 10px; }
+          }
+        </style>
+      </head>
+      <body>
+        <button class="no-print-btn" onclick="window.print()">Print / Save as PDF</button>
+        <div class="page-title">${title}</div>
+        ${headerHTML}
+        ${remarksHTML}
+        <div class="section-title">REQUESTED ITEMS LIST</div>
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th style="width: 5%">#</th>
+              <th style="width: 20%">Item Code</th>
+              <th style="width: 35%">Item Name</th>
+              <th style="width: 15%" class="text-right">Requested Qty</th>
+              <th style="width: 10%">UOM</th>
+              <th style="width: 15%">Remarks</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHTML}
+          </tbody>
+        </table>
+        ${historyHTML}
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+  setTimeout(() => {
+    printWindow.focus();
+  }, 300);
+};
+
+export const printVehicleIssueToPDF = (record) => {
+  const title = 'Vehicle Material Issue Report';
+  
+  const headers = [
+    { label: 'Issue Number', value: record.issue_number || '-' },
+    { label: 'Status', value: String(record.status || '-').toUpperCase() },
+    { label: 'Issue Date', value: formatDate(record.issue_date || record.created_at) },
+    { label: 'Source Warehouse', value: record.warehouse_name || '-' },
+    { label: 'Vehicle Code', value: record.vehicle_code || '-' },
+    { label: 'Vehicle Number', value: record.vehicle_number || '-' },
+    { label: 'Issued To / Employee', value: record.raised_by_name || record.created_by_name || record.issued_to_name || '-' },
+    { label: 'Department', value: record.department || '-' },
+  ];
+  
+  const items = record.items || [];
+
+  let headerHTML = '<table class="info-table"><tbody>';
+  for (let i = 0; i < headers.length; i += 2) {
+    const h1 = headers[i];
+    const h2 = headers[i + 1];
+    
+    const getStatusStyle = (h) => {
+      if (!h || h.label !== 'Status') return '';
+      const s = String(h.value).toLowerCase();
+      let color = '#8c8c8c';
+      if (s.includes('acknowledged') || s.includes('approved')) color = '#22c55e';
+      if (s.includes('issued') || s.includes('pending')) color = '#3b82f6';
+      if (s.includes('reject') || s.includes('cancel')) color = '#ef4444';
+      return `<span class="status-badge" style="background-color: ${color};">${h.value}</span>`;
+    };
+
+    const val1 = h1 ? (h1.label === 'Status' ? getStatusStyle(h1) : h1.value) : '';
+    const val2 = h2 ? (h2.label === 'Status' ? getStatusStyle(h2) : h2.value) : '';
+
+    headerHTML += `
+      <tr>
+        <td class="label">${h1 ? h1.label : ''}</td>
+        <td class="value">${val1 !== null && val1 !== undefined ? val1 : '-'}</td>
+        <td class="label">${h2 ? h2.label : ''}</td>
+        <td class="value">${val2 !== null && val2 !== undefined ? val2 : '-'}</td>
+      </tr>
+    `;
+  }
+  headerHTML += '</tbody></table>';
+
+  let remarksHTML = '';
+  if (record.remarks) {
+    remarksHTML = `
+      <div style="margin-top: 15px; margin-bottom: 15px; padding: 12px; background-color: #f0fdf4; border-left: 4px solid #16a34a; border-radius: 4px; font-size: 13px;">
+        <strong>Remarks:</strong> ${record.remarks}
+      </div>
+    `;
+  }
+
+  let itemsHTML = '';
+  items.forEach((item, idx) => {
+    const itemCode = item.item_code || (item.item && item.item.item_code) || '';
+    const itemName = item.item_name || (item.item && (item.item.item_name || item.item.name)) || '';
+    const qty = Number(item.qty || 0);
+    const uom = item.uom_name || item.uom || item.unit || '-';
+    const batch = item.batch_number || '-';
+    
+    let serialsDisplay = '-';
+    if (item.serial_numbers && item.serial_numbers.length > 0) {
+      const prefix = itemCode ? `${itemCode}-1-` : '';
+      serialsDisplay = item.serial_numbers.map(s => s.startsWith(prefix) ? s : `${prefix}${s}`).join(', ');
+    }
+
+    itemsHTML += `
+      <tr class="item-row">
+        <td>${idx + 1}</td>
+        <td>${itemCode}</td>
+        <td>${itemName}</td>
+        <td class="text-right">${formatNumber(qty)}</td>
+        <td>${uom}</td>
+        <td>${batch}</td>
+        <td>${serialsDisplay}</td>
+      </tr>
+    `;
+  });
+
+  const printWindow = window.open('', '_blank');
+  printWindow.document.write(`
+    <html>
+      <head>
+        <title>${title} - ${record.issue_number || record.id}</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; padding: 25px; color: #1e293b; }
+          .page-title { text-align: center; color: #0f172a; font-size: 22px; font-weight: bold; margin-bottom: 25px; text-transform: uppercase; border-bottom: 3px solid #3b82f6; padding-bottom: 12px; }
+          .section-title { font-size: 14px; font-weight: bold; color: #1e3a8a; margin-top: 30px; margin-bottom: 12px; border-bottom: 2px solid #cbd5e1; padding-bottom: 6px; text-transform: uppercase; }
+          .info-table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+          .info-table td { padding: 10px 12px; border: 1px solid #cbd5e1; font-size: 13px; }
+          .info-table td.label { background-color: #f8fafc; font-weight: bold; width: 20%; color: #475569; }
+          .info-table td.value { width: 30%; color: #0f172a; }
+          .items-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          .items-table th { background-color: #1e3a8a; color: white; padding: 10px 12px; border: 1px solid #cbd5e1; text-align: left; font-weight: bold; font-size: 13px; }
+          .items-table td { padding: 9px 12px; border: 1px solid #cbd5e1; font-size: 13px; }
+          .item-row { background-color: #f8fafc; color: #334155; }
+          .status-badge { color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; display: inline-block; }
+          .text-right { text-align: right; }
+          .no-print-btn { background-color: #1e3a8a; color: white; padding: 10px 20px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; margin-bottom: 20px; font-size: 13px; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+          .no-print-btn:hover { background-color: #1d4ed8; }
+          @media print {
+            .no-print-btn { display: none; }
+            body { padding: 10px; }
+          }
+        </style>
+      </head>
+      <body>
+        <button class="no-print-btn" onclick="window.print()">Print / Save as PDF</button>
+        <div class="page-title">${title}</div>
+        ${headerHTML}
+        ${remarksHTML}
+        <div class="section-title">ISSUED ITEMS LIST</div>
+        <table class="items-table">
+          <thead>
+            <tr>
+              <th style="width: 5%">#</th>
+              <th style="width: 15%">Item Code</th>
+              <th style="width: 30%">Item Name</th>
+              <th style="width: 10%" class="text-right">Issued Qty</th>
+              <th style="width: 10%">UOM</th>
+              <th style="width: 10%">Batch</th>
+              <th style="width: 20%">Serial / Asset Codes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${itemsHTML}
+          </tbody>
+        </table>
       </body>
     </html>
   `);

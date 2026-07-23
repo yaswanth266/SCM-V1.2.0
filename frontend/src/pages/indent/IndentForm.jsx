@@ -7,7 +7,7 @@ import {
 import {
   PlusOutlined, ArrowLeftOutlined, SendOutlined, EditOutlined,
   CloseCircleOutlined, MinusCircleOutlined, SaveOutlined,
-  CheckCircleOutlined, PaperClipOutlined,
+  CheckCircleOutlined, PaperClipOutlined, DownloadOutlined, PrinterOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -17,7 +17,7 @@ import ItemSelector from '../../components/ItemSelector';
 import api from '../../config/api';
 import {
   formatDate, formatDateTime, formatCurrency, getErrorMessage, formatDateForAPI,
-  handleFormValidationFailed,
+  handleFormValidationFailed, exportIndentToExcel, printIndentToPDF,
 } from '../../utils/helpers';
 import { DATE_FORMAT } from '../../utils/constants';
 import useAuthStore from '../../store/authStore';
@@ -506,6 +506,8 @@ const IndentForm = () => {
                 <Button danger icon={<CloseCircleOutlined />} onClick={() => setRejectModalOpen(true)}>Reject</Button>
               </>
             )}
+            <Button icon={<DownloadOutlined />} onClick={() => exportIndentToExcel({ ...indent, items: indentItemsList })}>Export Excel</Button>
+            <Button type="primary" icon={<PrinterOutlined />} onClick={() => printIndentToPDF({ ...indent, items: indentItemsList })}>Print PDF</Button>
             <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/indent/indents')}>Back</Button>
           </Space>
         </PageHeader>

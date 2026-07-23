@@ -250,6 +250,7 @@ export default function ApprovalsScreen() {
 
   // List & Filter
   const [approvals, setApprovals] = useState<any[]>([]);
+  const [indentDetailsMap, setIndentDetailsMap] = useState<Record<number, any>>({});
   const [activeTab, setActiveTab] = useState<string>('pending'); // pending, on_hold, approved, rejected
   const [page, setPage] = useState<number>(1);
   const [total, setTotal] = useState<number>(0);
@@ -318,6 +319,27 @@ export default function ApprovalsScreen() {
       setApprovals(items);
       setTotal(resData.total ?? resData.total_items ?? resData.count ?? items.length);
       setPage(pageNum);
+
+      // Pre-fetch document details in background for indents so card lists render item lists & template badges instantly
+      const indentReqs = items.filter((r: any) => r.document_type === 'indent' || r.document_type === 'template_indent');
+      if (indentReqs.length > 0) {
+        Promise.allSettled(
+          indentReqs.map((r: any) =>
+            axios.get(`${apiBase}/api/v1/approvals/pending/${r.id}/detail`, {
+              headers: { Authorization: `Bearer ${authToken}` },
+            })
+          )
+        ).then((results) => {
+          const mapUpdate: Record<number, any> = {};
+          results.forEach((res, idx) => {
+            if (res.status === 'fulfilled' && res.value.data) {
+              const reqId = indentReqs[idx].id;
+              mapUpdate[reqId] = res.value.data;
+            }
+          });
+          setIndentDetailsMap((prev) => ({ ...prev, ...mapUpdate }));
+        });
+      }
     } catch (e) {
       console.error(e);
       Alert.alert('Error', 'Failed to retrieve pending approvals.');
@@ -344,6 +366,25 @@ export default function ApprovalsScreen() {
     fetchApprovals(API_BASE_URL, token, 1, tab);
   };
 
+  // ─── Template Indent Helper ──────────────────────────────────────────────────
+  const checkIsTemplateIndent = (record: any, detail?: any) => {
+    const docType = record?.document_type || detail?.document_type;
+    if (docType !== 'indent' && docType !== 'template_indent') return false;
+
+    return Boolean(
+      (record?.template_id && record.template_id !== 0) ||
+      (record?.template_name && record.template_name !== '') ||
+      (record?.template_type && record.template_type !== '') ||
+      record?.is_template ||
+      record?.document_type === 'template_indent' ||
+      (detail?.template_id && detail.template_id !== 0) ||
+      (detail?.template_name && detail.template_name !== '') ||
+      (detail?.template_type && detail.template_type !== '') ||
+      detail?.is_template ||
+      detail?.document_type === 'template_indent'
+    );
+  };
+
   // ─── Fetch Details ──────────────────────────────────────────────────────────
   const openApprovalDetails = async (record: any) => {
     setSelectedRecord(record);
@@ -367,9 +408,11 @@ export default function ApprovalsScreen() {
       if (detailRes.status === 'fulfilled') {
         const dData = detailRes.value.data;
         setDetailData(dData);
-        // Prepopulate overrides with quantities
+
+        // Prepopulate overrides with quantities ONLY for Normal Indents
+        const isTemplate = checkIsTemplateIndent(record, dData);
         const overrides: any = {};
-        if (dData && Array.isArray(dData.items)) {
+        if (!isTemplate && dData && Array.isArray(dData.items)) {
           dData.items.forEach((item: any) => {
             overrides[item.id] = (item.approved_qty != null ? item.approved_qty : item.requested_qty || item.qty || 0).toString();
           });
@@ -419,8 +462,9 @@ export default function ApprovalsScreen() {
             try {
               const body: any = { comments: actionComment };
 
-              // Build qty overrides if present (specifically for indents)
-              if (action === 'approve' && selectedRecord.document_type === 'indent' && Object.keys(qtyOverrides).length > 0) {
+              // Build qty overrides if present (specifically for Normal Indents)
+              const isTemplate = checkIsTemplateIndent(selectedRecord, detailData);
+              if (action === 'approve' && selectedRecord.document_type === 'indent' && !isTemplate && Object.keys(qtyOverrides).length > 0) {
                 body.item_overrides = Object.entries(qtyOverrides)
                   .filter(([, v]) => v !== '' && v != null && !isNaN(Number(v)))
                   .map(([id, v]) => ({
@@ -510,14 +554,6 @@ export default function ApprovalsScreen() {
           <ActivityIndicator size="large" color="#4A1060" />
           <Text style={styles.loadingText}>Loading approvals...</Text>
         </View>
-      ) : approvals.length === 0 ? (
-        <ScrollView
-          contentContainerStyle={styles.emptyContainer}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-        >
-          <Icon name="document" size={48} color="#CBD5E1" />
-          <Text style={styles.emptyText}>No approvals found</Text>
-        </ScrollView>
       ) : (
         <FlatList
           data={approvals}
@@ -536,6 +572,11 @@ export default function ApprovalsScreen() {
           renderItem={({ item }) => {
             const statusStyle = getStatusStyle(item.status);
             const dateStr = item.created_at ? formatDateTime(item.created_at) : '-';
+            const isIndent = item.document_type === 'indent' || item.document_type === 'template_indent';
+            const detail = indentDetailsMap[item.id] || {};
+            const isTemplateIndent = checkIsTemplateIndent(item, detail);
+            const itemsList = detail.items || item.items_preview || item.items || [];
+            const tmplName = detail.template_name || item.template_name || '';
 
             return (
               <TouchableOpacity
@@ -544,7 +585,29 @@ export default function ApprovalsScreen() {
                 onPress={() => openApprovalDetails(item)}
               >
                 <View style={styles.cardHeader}>
-                  <Text style={styles.cardTitle}>{item.document_number || `Request #${item.id}`}</Text>
+                  <View style={{ flex: 1, marginRight: 8 }}>
+                    <Text style={styles.cardTitle}>{item.document_number || `Request #${item.id}`}</Text>
+                    {isIndent && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4, gap: 6, flexWrap: 'wrap' }}>
+                        <View style={[
+                          styles.indentTypeBadge,
+                          { backgroundColor: isTemplateIndent ? '#F3E8FF' : '#EFF6FF', borderColor: isTemplateIndent ? '#D8B4FE' : '#BFDBFE' }
+                        ]}>
+                          <Text style={[
+                            styles.indentTypeText,
+                            { color: isTemplateIndent ? '#7E22CE' : '#1D4ED8' }
+                          ]}>
+                            {isTemplateIndent ? 'Template' : 'Normal'}
+                          </Text>
+                        </View>
+                        {tmplName ? (
+                          <Text style={{ fontSize: 11, color: '#6B21A8', fontWeight: '600' }} numberOfLines={1}>
+                            • {tmplName}
+                          </Text>
+                        ) : null}
+                      </View>
+                    )}
+                  </View>
                   <View style={[styles.statusTag, { backgroundColor: statusStyle.bg }]}>
                     <Text style={[styles.statusText, { color: statusStyle.text }]}>
                       {item.status?.toUpperCase()}
@@ -561,21 +624,76 @@ export default function ApprovalsScreen() {
                     <Icon name="user" size={14} color="#7C3AED" />
                     <Text style={styles.detailText}>Requester: {item.requested_by_name || '-'}</Text>
                   </View>
-                  <View style={styles.detailRow}>
-                    <Icon name="document" size={14} color="#7C3AED" />
-                    <Text style={styles.detailText}>Type: {item.document_type?.replace(/_/g, ' ').toUpperCase()}</Text>
-                  </View>
+                  {item.vehicle_code || item.vehicle_number ? (
+                    <>
+                      <View style={styles.detailRow}>
+                        <Icon name="truck" size={14} color="#7C3AED" />
+                        <Text style={styles.detailText}>Vehicle Code: {item.vehicle_code || '-'}</Text>
+                      </View>
+                      <View style={styles.detailRow}>
+                        <Icon name="truck" size={14} color="#7C3AED" />
+                        <Text style={styles.detailText}>Vehicle Number: {item.vehicle_number || '-'}</Text>
+                      </View>
+                    </>
+                  ) : null}
                 </View>
+
+                {/* Visible Indent Items List Preview Box */}
+                {itemsList.length > 0 && (
+                  <View style={styles.cardItemsBox}>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <Text style={styles.cardItemsHeader}>
+                        Indent Items ({itemsList.length}):
+                      </Text>
+                      {isTemplateIndent && (
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#7E22CE' }}>
+                          Fixed Template Items
+                        </Text>
+                      )}
+                    </View>
+                    {itemsList.slice(0, 3).map((it: any, iIdx: number) => (
+                      <View key={iIdx} style={styles.cardItemRow}>
+                        <Text style={styles.cardItemBullet}>•</Text>
+                        <Text style={styles.cardItemText} numberOfLines={1}>
+                          {it.item_name || it.item_code}
+                        </Text>
+                        <Text style={styles.cardItemQty}>
+                          {it.requested_qty ?? it.qty ?? 0} {it.uom || ''}
+                        </Text>
+                      </View>
+                    ))}
+                    {itemsList.length > 3 && (
+                      <Text style={styles.cardMoreItemsText}>+ {itemsList.length - 3} more item(s)...</Text>
+                    )}
+                  </View>
+                )}
 
                 <View style={styles.cardFooter}>
                   <Text style={styles.cardFooterType}>
                     Current Level: {item.current_level} / {item.total_levels}
                   </Text>
-                  <Icon name="chevron-right" size={16} color="#7C3AED" />
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: '#7C3AED' }}>View & Approve</Text>
+                    <Icon name="chevron-right" size={16} color="#7C3AED" />
+                  </View>
                 </View>
               </TouchableOpacity>
             );
           }}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Icon name="check-circle" size={48} color="#CBD5E1" />
+              <Text style={styles.emptyText}>
+                {activeTab === 'pending'
+                  ? 'No pending approval requests'
+                  : activeTab === 'on_hold'
+                  ? 'No requests on hold'
+                  : activeTab === 'approved'
+                  ? 'No approved requests found'
+                  : 'No rejected requests found'}
+              </Text>
+            </View>
+          }
         />
       )}
 
@@ -654,30 +772,97 @@ export default function ApprovalsScreen() {
                   </View>
                 </View>
 
-                <View style={styles.descRow}>
-                  <View style={styles.descCol}>
-                    <Text style={styles.descLabel}>Status</Text>
-                    <View style={[
-                      styles.smallStatusTag,
-                      { backgroundColor: activeTab === 'pending' ? '#FEF3C7' : activeTab === 'approved' ? '#D1FAE5' : '#FEE2E2' }
-                    ]}>
-                      <Text style={[
-                        styles.smallStatusText,
-                        { color: activeTab === 'pending' ? '#D97706' : activeTab === 'approved' ? '#059669' : '#DC2626' }
-                      ]}>
-                        {selectedRecord.status?.toUpperCase()}
-                      </Text>
+                {(() => {
+                  const isIndentDoc = selectedRecord?.document_type === 'indent' || selectedRecord?.document_type === 'template_indent' || detailData?.document_type === 'indent' || detailData?.document_type === 'template_indent';
+                  const isModalTemplateIndent = checkIsTemplateIndent(selectedRecord, detailData);
+
+                  return (
+                    <View style={styles.descRow}>
+                      <View style={styles.descCol}>
+                        <Text style={styles.descLabel}>Status</Text>
+                        <View style={[
+                          styles.smallStatusTag,
+                          { backgroundColor: activeTab === 'pending' ? '#FEF3C7' : activeTab === 'approved' ? '#D1FAE5' : '#FEE2E2' }
+                        ]}>
+                          <Text style={[
+                            styles.smallStatusText,
+                            { color: activeTab === 'pending' ? '#D97706' : activeTab === 'approved' ? '#059669' : '#DC2626' }
+                          ]}>
+                            {selectedRecord.status?.toUpperCase()}
+                          </Text>
+                        </View>
+                      </View>
+                      {!isIndentDoc && (
+                        <View style={styles.descCol}>
+                          <Text style={styles.descLabel}>Amount</Text>
+                          <Text style={[styles.descValue, { fontWeight: '700', color: '#4A1060' }]}>
+                            {selectedRecord.amount != null ? `₹${selectedRecord.amount}` : '-'}
+                          </Text>
+                        </View>
+                      )}
                     </View>
-                  </View>
-                  {selectedRecord.document_type !== 'indent' && (
-                    <View style={styles.descCol}>
-                      <Text style={styles.descLabel}>Amount</Text>
-                      <Text style={[styles.descValue, { fontWeight: '700', color: '#4A1060' }]}>
-                        {selectedRecord.amount != null ? `₹${selectedRecord.amount}` : '-'}
-                      </Text>
-                    </View>
-                  )}
-                </View>
+                  );
+                })()}
+
+                {/* Indent Specific Details */}
+                {(() => {
+                  const isIndentDoc = selectedRecord?.document_type === 'indent' || selectedRecord?.document_type === 'template_indent' || detailData?.document_type === 'indent' || detailData?.document_type === 'template_indent';
+                  const isModalTemplateIndent = checkIsTemplateIndent(selectedRecord, detailData);
+
+                  if (!isIndentDoc) return null;
+
+                  return (
+                    <>
+                      <View style={styles.descRow}>
+                        <View style={styles.descCol}>
+                          <Text style={styles.descLabel}>Emp Code</Text>
+                          <Text style={styles.descValue}>
+                            {selectedRecord?.emp_code || selectedRecord?.employee_code || selectedRecord?.raised_by_emp_code || detailData?.raised_by_emp_code || detailData?.employee_code || '-'}
+                          </Text>
+                        </View>
+                        <View style={styles.descCol}>
+                          <Text style={styles.descLabel}>Position</Text>
+                          <Text style={styles.descValue}>
+                            {selectedRecord?.position_name || selectedRecord?.position || selectedRecord?.raising_position || detailData?.position_name || '-'}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.descRow}>
+                        <View style={styles.descCol}>
+                          <Text style={styles.descLabel}>Indent Type</Text>
+                          <View style={[
+                            styles.smallStatusTag,
+                            {
+                              backgroundColor: isModalTemplateIndent ? '#F3E8FF' : '#EFF6FF',
+                              borderColor: isModalTemplateIndent ? '#D8B4FE' : '#BFDBFE',
+                              borderWidth: 1,
+                            }
+                          ]}>
+                            <Text style={[
+                              styles.smallStatusText,
+                              { color: isModalTemplateIndent ? '#7E22CE' : '#1D4ED8', fontWeight: '700' }
+                            ]}>
+                              {isModalTemplateIndent ? 'Template' : 'Normal'}
+                            </Text>
+                          </View>
+                          {(detailData?.template_name || selectedRecord?.template_name) ? (
+                            <Text style={{ fontSize: 11, color: '#7E22CE', marginTop: 2, fontWeight: '700' }}>
+                              Template: {detailData?.template_name || selectedRecord?.template_name}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <View style={styles.descCol}>
+                          <Text style={styles.descLabel}>Vehicle Code</Text>
+                          <Text style={styles.descValue}>{selectedRecord?.vehicle_code || detailData?.vehicle_code || '-'}</Text>
+                        </View>
+                        <View style={styles.descCol}>
+                          <Text style={styles.descLabel}>Vehicle Number</Text>
+                          <Text style={styles.descValue}>{selectedRecord?.vehicle_number || detailData?.vehicle_number || '-'}</Text>
+                        </View>
+                      </View>
+                    </>
+                  );
+                })()}
 
                 {(detailData?.project_name || detailData?.warehouse_name) && (
                   <View style={styles.descRow}>
@@ -737,7 +922,19 @@ export default function ApprovalsScreen() {
                 <View style={{ marginTop: 12 }}>
                   <Text style={styles.sectionHeading}>Requested Items ({detailData.items.length})</Text>
                   {detailData.items.map((item: any, idx: number) => {
-                    const isIndent = selectedRecord.document_type === 'indent';
+                    const isIndentDoc = selectedRecord?.document_type === 'indent' || selectedRecord?.document_type === 'template_indent' || detailData?.document_type === 'indent' || detailData?.document_type === 'template_indent';
+                    const isModalTemplateIndent = Boolean(
+                      selectedRecord?.is_template ||
+                      selectedRecord?.template_id ||
+                      selectedRecord?.template_name ||
+                      selectedRecord?.template_type ||
+                      selectedRecord?.document_type === 'template_indent' ||
+                      detailData?.template_id ||
+                      detailData?.template_name ||
+                      detailData?.template_type ||
+                      detailData?.is_template ||
+                      detailData?.document_type === 'template_indent'
+                    );
                     const requestedQty = item.qty ?? item.requested_qty ?? 0;
                     
                     return (
@@ -762,14 +959,14 @@ export default function ApprovalsScreen() {
                             <Text style={styles.itemDetailValue}>{requestedQty}</Text>
                           </View>
 
-                          {!isIndent && (item.rate != null || item.unit_price != null) && (
+                          {!isIndentDoc && (item.rate != null || item.unit_price != null) && (
                             <View style={styles.itemDetailCol}>
                               <Text style={styles.itemDetailLabel}>Rate</Text>
                               <Text style={styles.itemDetailValue}>₹{item.rate != null ? item.rate : item.unit_price}</Text>
                             </View>
                           )}
 
-                          {!isIndent && item.amount != null && (
+                          {!isIndentDoc && item.amount != null && (
                             <View style={styles.itemDetailCol}>
                               <Text style={styles.itemDetailLabel}>Amount</Text>
                               <Text style={[styles.itemDetailValue, { fontWeight: '700', color: '#4A1060' }]}>
@@ -780,7 +977,7 @@ export default function ApprovalsScreen() {
                         </View>
 
                         {/* Stock Tag (Indent Only) */}
-                        {isIndent && item.stock_status && (
+                        {isIndentDoc && item.stock_status && (
                           <View style={[
                             styles.stockTag,
                             {
@@ -803,30 +1000,25 @@ export default function ApprovalsScreen() {
                           </View>
                         )}
 
-                        {/* Action overriding (Indent Only & Active Tab Pending/On Hold) */}
-                        {isIndent && (activeTab === 'pending' || activeTab === 'on_hold') ? (
+                        {/* Action overriding (Normal Indent Only & Active Tab Pending/On Hold) */}
+                        {isIndentDoc && !isModalTemplateIndent && (activeTab === 'pending' || activeTab === 'on_hold') ? (
                           <View style={styles.itemOverrideContainer}>
                             <Text style={styles.overrideLabel}>Approve Qty:</Text>
                             <TextInput
                               style={styles.overrideInput}
                               keyboardType="numeric"
-                              value={qtyOverrides[item.id] || ''}
+                              value={qtyOverrides[item.id] !== undefined ? String(qtyOverrides[item.id]) : String(requestedQty)}
                               onChangeText={(text) => {
                                 setQtyOverrides((prev: any) => ({ ...prev, [item.id]: text }));
                               }}
                             />
                           </View>
-                        ) : isIndent ? (
-                          <View style={styles.itemApprovedDisplay}>
-                            <Text style={styles.overrideLabelDisplay}>Approved Qty:</Text>
-                            <Text style={styles.overrideValueDisplay}>
-                              {item.approved_qty != null ? item.approved_qty : requestedQty}
-                            </Text>
-                          </View>
                         ) : (
                           <View style={styles.itemApprovedDisplay}>
-                            <Text style={styles.overrideLabelDisplay}>Approved Qty:</Text>
-                            <Text style={styles.overrideValueDisplay}>
+                            <Text style={styles.overrideLabelDisplay}>
+                              {isModalTemplateIndent ? 'Template Qty (Fixed):' : 'Approved Qty:'}
+                            </Text>
+                            <Text style={[styles.overrideValueDisplay, isModalTemplateIndent && { color: '#7E22CE', fontWeight: '800' }]}>
                               {item.approved_qty != null ? item.approved_qty : requestedQty}
                             </Text>
                           </View>
@@ -1612,5 +1804,58 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#475569',
     fontStyle: 'italic',
+  },
+  indentTypeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignSelf: 'flex-start',
+  },
+  indentTypeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  cardItemsBox: {
+    marginTop: 10,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  cardItemsHeader: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  cardItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 3,
+  },
+  cardItemBullet: {
+    fontSize: 12,
+    color: '#64748B',
+    marginRight: 6,
+  },
+  cardItemText: {
+    fontSize: 12,
+    color: '#334155',
+    flex: 1,
+    fontWeight: '500',
+  },
+  cardItemQty: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+    marginLeft: 6,
+  },
+  cardMoreItemsText: {
+    fontSize: 11,
+    color: '#64748B',
+    fontStyle: 'italic',
+    marginTop: 4,
   },
 });

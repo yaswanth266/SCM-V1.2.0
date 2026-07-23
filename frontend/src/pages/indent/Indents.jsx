@@ -20,14 +20,6 @@ import { IndentPrint } from '../../components/PrintTemplates';
 
 const { Text } = Typography;
 
-// Auto Reorder is not user-selectable — backend creates those automatically
-// from reorder level rules. Users only pick Regular or Urgent.
-const INDENT_TYPES = [
-  { label: 'Regular', value: 'regular' },
-  { label: 'Urgent', value: 'urgent' },
-  { label: 'Auto Reorder', value: 'auto_reorder' },
-];
-
 const Indents = () => {
   const { user: currentUser, hasPermission } = useAuthStore();
   const navigate = useNavigate();
@@ -52,7 +44,6 @@ const Indents = () => {
 
   const [refreshKey, setRefreshKey] = useState(0);
   const [filterStatus, setFilterStatus] = useState(undefined);
-  const [filterType, setFilterType] = useState(undefined);
   const [filterWarehouse, setFilterWarehouse] = useState(undefined);
   const [filterProject, setFilterProject] = useState(undefined);
   const [warehouses, setWarehouses] = useState([]);
@@ -114,12 +105,11 @@ const Indents = () => {
     async (params) => {
       const qp = { ...params };
       if (filterStatus) qp.status = filterStatus;
-      if (filterType) qp.indent_type = filterType;
       if (filterWarehouse) qp.warehouse_id = filterWarehouse;
       if (filterProject) qp.project_id = filterProject;
       return await api.get('/indent/indents', { params: qp });
     },
-    [filterStatus, filterType, filterWarehouse, filterProject]
+    [filterStatus, filterWarehouse, filterProject]
   );
 
   const handleAction = async (id, action) => {
@@ -323,14 +313,6 @@ const Indents = () => {
           { label: 'Rejected', value: 'rejected' },
           { label: 'Cancelled', value: 'cancelled' },
         ]}
-      />
-      <Select
-        placeholder="Type"
-        allowClear
-        style={{ width: 130 }}
-        value={filterType}
-        onChange={(v) => { setFilterType(v); setRefreshKey((k) => k + 1); }}
-        options={INDENT_TYPES}
       />
       {projects.length > 1 && (
         <Select

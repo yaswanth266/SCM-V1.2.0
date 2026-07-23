@@ -23,7 +23,7 @@ from app.schemas.indent import VehicleStockBalanceResponse
 from app.services.number_series import generate_number
 from app.services.stock_service import post_stock_ledger
 from app.services.approval_service import submit_for_approval
-from app.utils.dependencies import get_current_user, require_any_role, require_permission, require_key
+from app.utils.dependencies import get_current_user, require_any_role, require_permission, require_key, get_user_vehicle_scope
 from app.utils.helpers import paginate_params, build_paginated_response, apply_search_filter
 
 router = APIRouter()
@@ -305,21 +305,26 @@ async def get_stock_balances(
         acs = list(asset_codes_map.get(key, []))
         ccs = list(consumable_codes_map.get(key, []))
         
-        # If the item is asset or consumable, and the database has NO serials/codes:
-        if b.item and b.item.item_type in ("asset", "consumable") and not sns and not acs and not ccs:
-            qty_int = int(b.total_qty)
+        # Ensure code count matches total quantity for asset, consumable, or serial-tracked items
+        if b.item and (b.item.item_type in ("asset", "consumable") or b.item.has_serial):
+            qty_int = int(b.total_qty or 0)
             if qty_int > 0:
                 from app.services.asset_service import generate_asset_code
-                for i in range(1, qty_int + 1):
-                    if i > 1000:  # Protect against massive quantities
-                        break
-                    v_sn = f"V{i}"
-                    v_code = generate_asset_code(v_sn, b.item.item_code)
-                    sns.append(v_sn)
-                    if b.item.item_type == "asset":
-                        acs.append(v_code)
-                    else:
-                        ccs.append(v_code)
+                target_list = acs if b.item.item_type == "asset" else (ccs if b.item.item_type == "consumable" else sns)
+                if len(target_list) < qty_int:
+                    for i in range(len(target_list) + 1, qty_int + 1):
+                        if i > 1000:
+                            break
+                        v_sn = f"V{i}"
+                        v_code = generate_asset_code(v_sn, b.item.item_code)
+                        if b.item.item_type == "asset":
+                            if v_code not in acs:
+                                acs.append(v_code)
+                        elif b.item.item_type == "consumable":
+                            if v_code not in ccs:
+                                ccs.append(v_code)
+                        if v_sn not in sns:
+                            sns.append(v_sn)
 
         data = {
             "id": b.id,
@@ -543,7 +548,7 @@ async def get_vehicle_stock_balance(
     search: str = Query(None),
     vehicle_code: str = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("inventory-vehicle-stock-balance", "view", "inventory-vehicle-stock-balance")),
 ):
     """List vehicle stock levels with search and pagination."""
     from app.models.stock import VehicleStockBalance
@@ -555,6 +560,14 @@ async def get_vehicle_stock_balance(
         selectinload(VehicleStockBalance.batch),
     )
     count_query = select(func.count(VehicleStockBalance.id))
+
+    # Scope to user/position allowed vehicles
+    scoped_vehicles, scoped_user_ids = await get_user_vehicle_scope(db, current_user)
+    if scoped_vehicles is not None:
+        if not scoped_vehicles:
+            return build_paginated_response([], 0, page, page_size)
+        query = query.where(VehicleStockBalance.vehicle_code.in_(list(scoped_vehicles)))
+        count_query = count_query.where(VehicleStockBalance.vehicle_code.in_(list(scoped_vehicles)))
 
     if vehicle_code:
         query = query.where(VehicleStockBalance.vehicle_code == vehicle_code)
@@ -636,21 +649,7 @@ async def get_vehicle_stock_balance(
                 if act_cc:
                     ccs.append(act_cc)
 
-        # Fallback if item is asset or consumable, and no serials exist
-        if r.item and r.item.item_type in ("asset", "consumable") and not sns and not acs and not ccs:
-            qty_int = int(r.qty or 0)
-            if qty_int > 0:
-                from app.services.asset_service import generate_asset_code
-                for i in range(1, qty_int + 1):
-                    if i > 1000:
-                        break
-                    v_sn = f"V{i}"
-                    v_code = generate_asset_code(v_sn, r.item.item_code)
-                    sns.append(v_sn)
-                    if r.item.item_type == "asset":
-                        acs.append(v_code)
-                    else:
-                        ccs.append(v_code)
+
 
         data.append({
             "id": r.id,
@@ -688,7 +687,7 @@ async def get_vehicle_stock_ledger(
     date_to: str = Query(None),
     search: str = Query(None),
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_permission("inventory-vehicle-stock-ledger", "view", "inventory-vehicle-stock-ledger")),
 ):
     """Retrieve vehicle stock ledger entries with filters, search and pagination."""
     from app.models.stock import VehicleStockLedger
@@ -714,6 +713,20 @@ async def get_vehicle_stock_ledger(
         )
     )
     count_query = select(func.count(VehicleStockLedger.id))
+
+    # Scope to user/position allowed vehicles & creators
+    scoped_vehicles, scoped_user_ids = await get_user_vehicle_scope(db, current_user)
+    if scoped_vehicles is not None:
+        if not scoped_vehicles and not scoped_user_ids:
+            return build_paginated_response([], 0, page, page_size)
+        conds = []
+        if scoped_vehicles:
+            conds.append(VehicleStockLedger.vehicle_code.in_(list(scoped_vehicles)))
+        if scoped_user_ids:
+            conds.append(VehicleStockLedger.created_by.in_(list(scoped_user_ids)))
+        if conds:
+            query = query.where(or_(*conds))
+            count_query = count_query.where(or_(*conds))
 
     if vehicle_code:
         query = query.where(VehicleStockLedger.vehicle_code == vehicle_code)

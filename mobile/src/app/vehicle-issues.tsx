@@ -12,7 +12,41 @@ import {
   ActivityIndicator,
   RefreshControl,
   Platform,
+  Image,
 } from 'react-native';
+
+const formatDateTime = (dateStr: string | null | undefined): string => {
+  if (!dateStr) return '-';
+  try {
+    let normalized = dateStr;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+      const [year, month, day] = normalized.split('-');
+      return `${day}/${month}/${year} 00:00:00`;
+    }
+    if (!normalized.endsWith('Z') && !normalized.includes('+') && !normalized.includes('-')) {
+      if (normalized.includes('T')) {
+        normalized = normalized + 'Z';
+      } else if (normalized.includes(' ')) {
+        normalized = normalized.replace(' ', 'T') + 'Z';
+      }
+    }
+    const d = new Date(normalized);
+    if (isNaN(d.getTime())) return '-';
+    const options: Intl.DateTimeFormatOptions = {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    };
+    return new Intl.DateTimeFormat('en-IN', options).format(d).replace(',', '');
+  } catch (e) {
+    return dateStr || '-';
+  }
+};
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -91,6 +125,7 @@ const SearchableDropdownSelect = ({
   items,
   placeholder = 'Select an option',
   allowClear = false,
+  disabled = false,
 }: {
   label: string;
   value: string;
@@ -98,6 +133,7 @@ const SearchableDropdownSelect = ({
   items: { label: string; value: string; subLabel?: string }[];
   placeholder?: string;
   allowClear?: boolean;
+  disabled?: boolean;
 }) => {
   const [modalVisible, setModalVisible] = useState(false);
   const [searchText, setSearchText] = useState('');
@@ -115,17 +151,18 @@ const SearchableDropdownSelect = ({
     <View style={{ marginBottom: 14 }}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <TouchableOpacity
-        style={styles.dropdownTrigger}
+        style={[styles.dropdownTrigger, disabled && { backgroundColor: '#F1F5F9', borderColor: '#E2E8F0' }]}
+        disabled={disabled}
         onPress={() => {
           setSearchText('');
           setModalVisible(true);
         }}
       >
-        <Text style={[styles.dropdownTriggerText, !selectedItem && { color: '#94A3B8' }]} numberOfLines={1}>
+        <Text style={[styles.dropdownTriggerText, !selectedItem && { color: '#94A3B8' }, disabled && { color: '#64748B' }]} numberOfLines={1}>
           {selectedItem ? selectedItem.label : placeholder}
         </Text>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-          {allowClear && value ? (
+          {allowClear && value && !disabled ? (
             <TouchableOpacity
               onPress={(e) => {
                 e.stopPropagation();
@@ -136,7 +173,7 @@ const SearchableDropdownSelect = ({
               <Icon name="x" size={14} color="#94A3B8" />
             </TouchableOpacity>
           ) : null}
-          <View style={styles.dropdownArrow} />
+          {!disabled && <View style={styles.dropdownArrow} />}
         </View>
       </TouchableOpacity>
 
@@ -381,10 +418,20 @@ const AssetCodesTreeModal = ({
             <Text style={{ fontSize: 11, color: '#64748B', marginTop: 1 }} numberOfLines={1}>{itemName} ({itemCode})</Text>
           </View>
           <TouchableOpacity
-            style={{ backgroundColor: selected.length === targetQty ? '#10B981' : '#4F46E5', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, flexShrink: 0 }}
+            disabled={selected.length !== targetQty}
+            style={{
+              backgroundColor: selected.length === targetQty ? '#10B981' : '#94A3B8',
+              paddingHorizontal: 12,
+              paddingVertical: 7,
+              borderRadius: 8,
+              flexShrink: 0,
+              opacity: selected.length === targetQty ? 1 : 0.6,
+            }}
             onPress={() => {
-              onSave(selected);
-              onClose();
+              if (selected.length === targetQty) {
+                onSave(selected);
+                onClose();
+              }
             }}
           >
             <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 12 }}>Apply ({selected.length})</Text>
@@ -479,10 +526,24 @@ const AssetCodesTreeModal = ({
         {/* Sticky Bottom Action Bar */}
         <View style={{ padding: 12, backgroundColor: '#FFFFFF', borderTopWidth: 1, borderTopColor: '#E2E8F0' }}>
           <TouchableOpacity
-            style={{ backgroundColor: selected.length === targetQty ? '#10B981' : '#4F46E5', paddingVertical: 13, borderRadius: 10, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 3, elevation: 2 }}
+            disabled={selected.length !== targetQty}
+            style={{
+              backgroundColor: selected.length === targetQty ? '#10B981' : '#94A3B8',
+              paddingVertical: 13,
+              borderRadius: 10,
+              alignItems: 'center',
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.1,
+              shadowRadius: 3,
+              elevation: 2,
+              opacity: selected.length === targetQty ? 1 : 0.6,
+            }}
             onPress={() => {
-              onSave(selected);
-              onClose();
+              if (selected.length === targetQty) {
+                onSave(selected);
+                onClose();
+              }
             }}
           >
             <Text style={{ color: '#FFFFFF', fontWeight: '800', fontSize: 14 }}>
@@ -696,23 +757,29 @@ export default function VehicleIssuesScreen() {
   const [selectedIssue, setSelectedIssue] = useState<any>(null);
   const [detailModalVisible, setDetailModalVisible] = useState<boolean>(false);
   const [detailLoading, setDetailLoading] = useState<boolean>(false);
+  const [associatedAck, setAssociatedAck] = useState<any>(null);
+  const [previewImageModalVisible, setPreviewImageModalVisible] = useState<boolean>(false);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string>('');
 
   // Form Modal
   const [formModalVisible, setFormModalVisible] = useState<boolean>(false);
+  const [formMode, setFormMode] = useState<'new' | 'edit'>('new');
+  const [editingIssueId, setEditingIssueId] = useState<number | null>(null);
   const [formLoading, setFormLoading] = useState<boolean>(false);
   const [selectedIndentId, setSelectedIndentId] = useState<string>('');
   const [selectedWarehouseId, setSelectedWarehouseId] = useState<string>('');
   const [selectedProjectId, setSelectedProjectId] = useState<string>('');
   const [selectedVehicleCode, setSelectedVehicleCode] = useState<string>('');
   const [vehicleNumber, setVehicleNumber] = useState<string>('');
-  const [serviceCode, setServiceCode] = useState<string>('');
   const [department, setDepartment] = useState<string>('');
   const [selectedIssuedTo, setSelectedIssuedTo] = useState<string>('');
-  const [issueDate, setIssueDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [issueDate, setIssueDate] = useState<string>('');
   const [remarks, setRemarks] = useState<string>('');
   const [formItems, setFormItems] = useState<any[]>([]);
 
   // Stock Balance & FEFO Batches State
+  const [isCentralWarehouse, setIsCentralWarehouse] = useState<boolean>(true);
+  const [isTemplateIndent, setIsTemplateIndent] = useState<boolean>(false);
   const [stockMap, setStockMap] = useState<{ [itemId: number]: number }>({});
   const [itemStockDetails, setItemStockDetails] = useState<{
     [itemId: number]: { batches: any[]; bins: any[]; rawRows: any[] };
@@ -827,11 +894,32 @@ export default function VehicleIssuesScreen() {
   const openDetails = async (issueId: number) => {
     setDetailLoading(true);
     setDetailModalVisible(true);
+    setAssociatedAck(null);
     try {
       const res = await axios.get(`${API_BASE_URL}/api/v1/warehouse/vehicle-issues/${issueId}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      setSelectedIssue(res.data);
+      const data = res.data;
+      setSelectedIssue(data);
+
+      if (data.status === 'acknowledged' || data.status === 'completed') {
+        try {
+          const ackRes = await axios.get(`${API_BASE_URL}/api/v1/indent/material-acknowledgements`, {
+            headers: { Authorization: `Bearer ${token}` },
+            params: { search: data.issue_number, page_size: 1 },
+          });
+          const ackItemsList = ackRes.data?.items || ackRes.data?.data || ackRes.data || [];
+          if (Array.isArray(ackItemsList) && ackItemsList.length > 0) {
+            const ackId = ackItemsList[0].id;
+            const fullAckRes = await axios.get(`${API_BASE_URL}/api/v1/indent/material-acknowledgements/${ackId}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            setAssociatedAck(fullAckRes.data);
+          }
+        } catch (err) {
+          console.error("Failed to fetch associated acknowledgement:", err);
+        }
+      }
     } catch (e) {
       console.error(e);
       Alert.alert('Error', 'Failed to retrieve issue details.');
@@ -852,6 +940,32 @@ export default function VehicleIssuesScreen() {
     } catch (err: any) {
       Alert.alert('Action Failed', err.response?.data?.detail || 'Failed to confirm vehicle issue.');
     }
+  };
+
+  const handleCancelIssue = async (issueId: number) => {
+    Alert.alert(
+      'Cancel Issue',
+      'Are you sure you want to cancel this issue? Reservations will be released.',
+      [
+        { text: 'No', style: 'cancel' },
+        {
+          text: 'Yes, Cancel',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await axios.post(`${API_BASE_URL}/api/v1/warehouse/vehicle-issues/${issueId}/cancel`, {}, {
+                headers: { Authorization: `Bearer ${token}` },
+              });
+              Alert.alert('Success', 'Vehicle issue cancelled successfully.');
+              setDetailModalVisible(false);
+              handleRefresh();
+            } catch (err: any) {
+              Alert.alert('Action Failed', err.response?.data?.detail || 'Failed to cancel vehicle issue.');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const refreshStockForItems = async (warehouseIdStr: string, itemIds: number[]) => {
@@ -995,6 +1109,21 @@ export default function VehicleIssuesScreen() {
     return fallback;
   };
 
+  const checkWarehouseCentral = async (whId: string) => {
+    if (!whId) return;
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/v1/masters/warehouses/${whId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const whData = res.data;
+      setIsCentralWarehouse(
+        !!(whData?.is_central ?? (whData?.parent_id === null || whData?.parent_id === undefined))
+      );
+    } catch {
+      setIsCentralWarehouse(true);
+    }
+  };
+
   const handleWarehouseChange = (whIdStr: string) => {
     setSelectedWarehouseId(whIdStr);
     if (!whIdStr) {
@@ -1002,6 +1131,7 @@ export default function VehicleIssuesScreen() {
       setItemStockDetails({});
       return;
     }
+    checkWarehouseCentral(whIdStr);
     if (formItems.length > 0) {
       const itemIds = Array.from(new Set(formItems.map((l: any) => l.item_id).filter(Boolean)));
       refreshStockForItems(whIdStr, itemIds as number[]);
@@ -1011,11 +1141,14 @@ export default function VehicleIssuesScreen() {
 
   // Re-fetch stock balances & breakdown whenever selectedWarehouseId or token changes
   useEffect(() => {
-    if (selectedWarehouseId && formItems.length > 0 && token) {
-      const itemIds = Array.from(new Set(formItems.map((l: any) => l.item_id).filter(Boolean)));
-      if (itemIds.length > 0) {
-        refreshStockForItems(selectedWarehouseId, itemIds as number[]);
-        itemIds.forEach((id: any) => fetchItemStockDetails(selectedWarehouseId, id));
+    if (selectedWarehouseId && token) {
+      checkWarehouseCentral(selectedWarehouseId);
+      if (formItems.length > 0) {
+        const itemIds = Array.from(new Set(formItems.map((l: any) => l.item_id).filter(Boolean)));
+        if (itemIds.length > 0) {
+          refreshStockForItems(selectedWarehouseId, itemIds as number[]);
+          itemIds.forEach((id: any) => fetchItemStockDetails(selectedWarehouseId, id));
+        }
       }
     }
   }, [selectedWarehouseId, token]);
@@ -1033,13 +1166,15 @@ export default function VehicleIssuesScreen() {
       const ind = res.data;
       if (!ind) return;
 
+      const isTempl = Boolean(ind.template_id || ind.template_name || ind.template_type);
+      setIsTemplateIndent(isTempl);
+
       const targetWh = ind.warehouse_id ? String(ind.warehouse_id) : selectedWarehouseId;
       if (ind.warehouse_id) setSelectedWarehouseId(String(ind.warehouse_id));
       if (ind.department) setDepartment(ind.department);
       if (ind.raised_by) setSelectedIssuedTo(String(ind.raised_by));
       if (ind.vehicle_code) setSelectedVehicleCode(ind.vehicle_code);
       if (ind.vehicle_number) setVehicleNumber(ind.vehicle_number);
-      if (ind.service_code) setServiceCode(ind.service_code);
       if (ind.project_id) setSelectedProjectId(String(ind.project_id));
 
       if (ind.items && ind.items.length > 0) {
@@ -1081,19 +1216,76 @@ export default function VehicleIssuesScreen() {
   };
 
   const openNewForm = () => {
+    setFormMode('new');
+    setEditingIssueId(null);
     setSelectedIndentId('');
-    setSelectedWarehouseId('');
+    setSelectedWarehouseId(user?.warehouse_id ? String(user.warehouse_id) : '');
     setSelectedProjectId('');
     setSelectedVehicleCode('');
     setVehicleNumber('');
-    setServiceCode('');
     setDepartment('');
     setSelectedIssuedTo('');
-    setIssueDate(new Date().toISOString().split('T')[0]);
+    setIsTemplateIndent(false);
+    
+    // Auto-fill current date-time as DD/MM/YYYY HH:mm:ss
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const dateTimeStr = `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    setIssueDate(dateTimeStr);
+    
     setRemarks('');
     setFormItems([]);
     setStockMap({});
     setItemStockDetails({});
+    setFormModalVisible(true);
+  };
+
+  const openEditForm = (issue: any) => {
+    setFormMode('edit');
+    setEditingIssueId(issue.id);
+    setSelectedIndentId(issue.indent_id ? String(issue.indent_id) : '');
+    setSelectedWarehouseId(issue.warehouse_id ? String(issue.warehouse_id) : '');
+    setSelectedProjectId(issue.project_id ? String(issue.project_id) : '');
+    setSelectedVehicleCode(issue.vehicle_code || '');
+    setVehicleNumber(issue.vehicle_number || '');
+    setDepartment(issue.department || '');
+    setSelectedIssuedTo(issue.issued_to ? String(issue.issued_to) : '');
+    setRemarks(issue.remarks || '');
+    
+    // Set formatted issue date
+    setIssueDate(issue.issue_date ? formatDateTime(issue.issue_date) : '');
+
+    const isTempl = Boolean(issue.template_id || issue.template_name || issue.template_type);
+    setIsTemplateIndent(isTempl);
+
+    // Map items list
+    const items = (issue.items || []).map((it: any) => ({
+      item_id: it.item_id,
+      item_code: it.item_code || '',
+      item_name: it.item_name || '',
+      item_type: it.item_type || '',
+      qty: String(it.qty || 0),
+      uom_id: it.uom_id || 1,
+      uom_name: it.uom_name || 'Pcs',
+      rate: String(it.rate || 0),
+      has_serial: !!it.has_serial,
+      has_batch: !!it.has_batch,
+      serial_text: (it.serial_numbers || []).join(', '),
+      batch_number_text: it.batch_number_text || it.batch_number || '',
+      bin_code_text: it.bin_code_text || '',
+      selected_batch_id: it.batch_id || null,
+      selected_bin_id: it.bin_id || null,
+    }));
+    setFormItems(items);
+
+    // Fetch stock balances
+    if (issue.warehouse_id) {
+      const itemIds = items.map((it: any) => it.item_id).filter(Boolean);
+      refreshStockForItems(String(issue.warehouse_id), itemIds);
+      itemIds.forEach((id: number) => fetchItemStockDetails(String(issue.warehouse_id), id));
+    }
+
+    setDetailModalVisible(false);
     setFormModalVisible(true);
   };
 
@@ -1180,17 +1372,99 @@ export default function VehicleIssuesScreen() {
         return;
       }
 
-      payloadItems.push({
-        item_id: line.item_id,
-        qty: q,
-        uom_id: line.uom_id,
-        rate: r,
-        batch_id: line.selected_batch_id || null,
-        bin_id: line.selected_bin_id || null,
-        serial_numbers: serials.length > 0 ? serials : null,
-        batch_number_text: line.batch_number_text || null,
-        bin_code_text: line.bin_code_text || null,
+      const selectedBatches = line.selected_batch_id ? [line.selected_batch_id] : [];
+      const selectedBins = line.selected_bin_id ? [line.selected_bin_id] : [];
+      const details = itemStockDetails[line.item_id] || { batches: [], bins: [], rawRows: [] };
+      const rawRows = details.rawRows || [];
+
+      const matchingRows = rawRows.filter((r: any) => {
+        const matchBatch = selectedBatches.length === 0 || selectedBatches.some((bId: any) => String(bId) === String(r.batch_id));
+        const matchBin = selectedBins.length === 0 || selectedBins.some((bId: any) => String(bId) === String(r.bin_id));
+        return matchBatch && matchBin && parseFloat(r.available_qty) > 0;
       });
+
+      matchingRows.sort((a: any, b: any) => {
+        if (a.expiry_date && b.expiry_date) {
+          return new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime();
+        }
+        if (a.expiry_date) return -1;
+        if (b.expiry_date) return 1;
+        return 0;
+      });
+
+      if (matchingRows.length === 0) {
+        payloadItems.push({
+          item_id: line.item_id,
+          qty: q,
+          uom_id: line.uom_id,
+          batch_id: isCentralWarehouse ? (selectedBatches[0] || null) : null,
+          bin_id: isCentralWarehouse ? (selectedBins[0] || null) : null,
+          rate: r,
+          serial_numbers: isSerialOrAsset ? serials : null,
+          batch_number_text: !isCentralWarehouse ? (line.batch_number_text || null) : null,
+          bin_code_text: !isCentralWarehouse ? (line.bin_code_text || null) : null,
+        });
+        continue;
+      }
+
+      let remainingQty = q;
+      for (const row of matchingRows) {
+        if (remainingQty <= 0) break;
+        const avail = parseFloat(row.available_qty) || 0;
+        const take = Math.min(avail, remainingQty);
+        payloadItems.push({
+          item_id: line.item_id,
+          qty: take,
+          uom_id: line.uom_id,
+          batch_id: isCentralWarehouse ? (row.batch_id || null) : null,
+          bin_id: isCentralWarehouse ? (row.bin_id || null) : null,
+          rate: parseFloat(row.valuation_rate) || r || 0,
+          serial_numbers: isSerialOrAsset ? serials : null,
+          batch_number_text: !isCentralWarehouse ? (line.batch_number_text || null) : null,
+          bin_code_text: !isCentralWarehouse ? (line.bin_code_text || null) : null,
+        });
+        remainingQty -= take;
+      }
+
+      if (remainingQty > 0) {
+        if (payloadItems.length > 0) {
+          payloadItems[payloadItems.length - 1].qty += remainingQty;
+        } else {
+          payloadItems.push({
+            item_id: line.item_id,
+            qty: remainingQty,
+            uom_id: line.uom_id,
+            batch_id: isCentralWarehouse ? (selectedBatches[0] || null) : null,
+            bin_id: isCentralWarehouse ? (selectedBins[0] || null) : null,
+            rate: r,
+            serial_numbers: isSerialOrAsset ? serials : null,
+            batch_number_text: !isCentralWarehouse ? (line.batch_number_text || null) : null,
+            bin_code_text: !isCentralWarehouse ? (line.bin_code_text || null) : null,
+          });
+        }
+      }
+    }
+
+    // Parse issueDate (DD/MM/YYYY HH:mm:ss) back to ISO string
+    let parsedIssueDate = new Date().toISOString();
+    if (issueDate) {
+      const parts = issueDate.split(' ');
+      if (parts.length === 2) {
+        const dateParts = parts[0].split('/');
+        const timeParts = parts[1].split(':');
+        if (dateParts.length === 3 && timeParts.length === 3) {
+          const day = parseInt(dateParts[0], 10);
+          const month = parseInt(dateParts[1], 10) - 1;
+          const year = parseInt(dateParts[2], 10);
+          const hour = parseInt(timeParts[0], 10);
+          const min = parseInt(timeParts[1], 10);
+          const sec = parseInt(timeParts[2], 10);
+          const d = new Date(year, month, day, hour, min, sec);
+          if (!isNaN(d.getTime())) {
+            parsedIssueDate = d.toISOString();
+          }
+        }
+      }
     }
 
     setFormLoading(true);
@@ -1200,7 +1474,7 @@ export default function VehicleIssuesScreen() {
         indent_id: selectedIndentId ? parseInt(selectedIndentId) : null,
         vehicle_code: selectedVehicleCode,
         vehicle_number: finalVehicleNumber,
-        issue_date: issueDate,
+        issue_date: parsedIssueDate,
         department: department || null,
         issued_to: selectedIssuedTo ? parseInt(selectedIssuedTo) : null,
         project_id: selectedProjectId ? parseInt(selectedProjectId) : null,
@@ -1208,11 +1482,17 @@ export default function VehicleIssuesScreen() {
         items: payloadItems,
       };
 
-      await axios.post(`${API_BASE_URL}/api/v1/warehouse/vehicle-issues`, payload, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      Alert.alert('Success', 'Vehicle Issue created successfully!');
+      if (formMode === 'new') {
+        await axios.post(`${API_BASE_URL}/api/v1/warehouse/vehicle-issues`, payload, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        Alert.alert('Success', 'Vehicle Issue created and material issued successfully!');
+      } else {
+        await axios.put(`${API_BASE_URL}/api/v1/warehouse/vehicle-issues/${editingIssueId}`, payload, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        Alert.alert('Success', 'Vehicle Issue updated successfully!');
+      }
       setFormModalVisible(false);
       handleRefresh();
     } catch (err: any) {
@@ -1310,6 +1590,7 @@ export default function VehicleIssuesScreen() {
                   <Text style={styles.detailText}>Vehicle Code: {item.vehicle_code || '-'}</Text>
                   <Text style={styles.detailText}>Vehicle Number: {item.vehicle_number || '-'}</Text>
                   <Text style={styles.detailText}>Warehouse: {item.warehouse_name || '-'}</Text>
+                  <Text style={styles.detailText}>Department: {item.department || '-'}</Text>
                   <Text style={styles.detailText}>Items: {item.items?.length || 0}</Text>
                 </View>
 
@@ -1353,8 +1634,28 @@ export default function VehicleIssuesScreen() {
                 </View>
                 <View style={styles.infoRow}>
                   <Text style={styles.infoLabel}>Status</Text>
-                  <Text style={[styles.infoValue, { color: selectedIssue.status === 'issued' ? '#10B981' : '#D97706' }]}>
-                    {selectedIssue.status?.toUpperCase()}
+                  <View style={[styles.statusBadge, { backgroundColor: selectedIssue.status === 'issued' ? '#D1FAE5' : '#FEF3C7' }]}>
+                    <Text style={[styles.statusBadgeText, { color: selectedIssue.status === 'issued' ? '#059669' : '#D97706' }]}>
+                      {selectedIssue.status?.toUpperCase() || 'DRAFT'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Source Warehouse</Text>
+                  <Text style={styles.infoValue}>{selectedIssue.warehouse_name || '-'}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Project</Text>
+                  <Text style={styles.infoValue}>{selectedIssue.project_name || '-'}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Department</Text>
+                  <Text style={styles.infoValue}>{selectedIssue.department || '-'}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Date & Time</Text>
+                  <Text style={styles.infoValue}>
+                    {formatDateTime(selectedIssue.issue_date || selectedIssue.created_at)}
                   </Text>
                 </View>
                 <View style={styles.infoRow}>
@@ -1366,51 +1667,150 @@ export default function VehicleIssuesScreen() {
                   <Text style={styles.infoValue}>{selectedIssue.vehicle_number || '-'}</Text>
                 </View>
                 <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Source Warehouse</Text>
-                  <Text style={styles.infoValue}>{selectedIssue.warehouse_name || '-'}</Text>
+                  <Text style={styles.infoLabel}>Indent Reference</Text>
+                  <Text style={styles.infoValue}>{selectedIssue.indent_number || '-'}</Text>
                 </View>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Project</Text>
-                  <Text style={styles.infoValue}>{selectedIssue.project_name || '-'}</Text>
-                </View>
-                <View style={styles.infoRow}>
-                  <Text style={styles.infoLabel}>Issued To</Text>
-                  <Text style={styles.infoValue}>{selectedIssue.issued_to_name || '-'}</Text>
-                </View>
-                <View style={styles.infoRow}>
+                <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
                   <Text style={styles.infoLabel}>Remarks</Text>
                   <Text style={styles.infoValue}>{selectedIssue.remarks || '-'}</Text>
                 </View>
               </View>
 
-              <Text style={styles.sectionHeading}>Issued Items</Text>
-              {(selectedIssue.items || []).map((it: any, idx: number) => (
-                <View key={it.id || idx} style={styles.itemRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.itemName}>{it.item_name || it.item_code}</Text>
-                    <Text style={styles.itemMeta}>Code: {it.item_code}</Text>
-                    {it.serial_numbers && it.serial_numbers.length > 0 && (
-                      <Text style={[styles.itemMeta, { color: '#4F46E5', fontWeight: '600', marginTop: 2 }]}>
-                        Codes: {it.serial_numbers.join(', ')}
-                      </Text>
-                    )}
-                  </View>
-                  <Text style={{ fontWeight: '700', color: '#0F172A' }}>
-                    {it.qty} {it.uom_name || ''}
-                  </Text>
+              <Text style={styles.sectionHeading}>Recipient Details</Text>
+              <View style={styles.infoCard}>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Emp Name</Text>
+                  <Text style={styles.infoValue}>{selectedIssue.raised_by_name || selectedIssue.issued_to_name || '-'}</Text>
                 </View>
-              ))}
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Position</Text>
+                  <Text style={styles.infoValue}>{selectedIssue.position_name || '-'}</Text>
+                </View>
+                <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+                  <Text style={styles.infoLabel}>Emp Code</Text>
+                  <Text style={styles.infoValue}>{selectedIssue.raised_by_emp_code || '-'}</Text>
+                </View>
+              </View>
 
-              {selectedIssue.status === 'draft' && (
-                <TouchableOpacity
-                  style={[styles.submitBtn, { marginTop: 24, backgroundColor: '#10B981' }]}
-                  onPress={() => handleConfirmIssue(selectedIssue.id)}
-                >
-                  <Text style={styles.submitBtnText}>Confirm & Dispatch Issue</Text>
-                </TouchableOpacity>
+              <Text style={styles.sectionHeading}>Issuer Details</Text>
+              <View style={styles.infoCard}>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Issued By</Text>
+                  <Text style={styles.infoValue}>{selectedIssue.issued_by_name || selectedIssue.created_by_name || '-'}</Text>
+                </View>
+                <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+                  <Text style={styles.infoLabel}>Emp Code</Text>
+                  <Text style={styles.infoValue}>{selectedIssue.created_by_emp_code || '-'}</Text>
+                </View>
+              </View>
+
+              {/* Overall Acknowledgement Photos */}
+              {associatedAck && associatedAck.photos && associatedAck.photos.length > 0 && (
+                <View style={[styles.infoCard, { marginBottom: 16 }]}>
+                  <Text style={[styles.infoLabel, { marginBottom: 8, fontWeight: '700', color: '#334155' }]}>
+                    📷 Acknowledgement Photos ({associatedAck.photos.length})
+                  </Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      {associatedAck.photos.map((url: string, pIdx: number) => {
+                        const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
+                        return (
+                          <TouchableOpacity
+                            key={pIdx}
+                            onPress={() => {
+                              setPreviewImageUrl(fullUrl);
+                              setPreviewImageModalVisible(true);
+                            }}
+                          >
+                            <Image
+                              source={{ uri: fullUrl }}
+                              style={{ width: 70, height: 70, borderRadius: 8, borderWidth: 1, borderColor: '#CBD5E1' }}
+                            />
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                </View>
               )}
+
+              <Text style={styles.sectionHeading}>Issued Items</Text>
+              {(selectedIssue.items || []).map((it: any, idx: number) => {
+                const ackItem = associatedAck?.items?.find((ai: any) => ai.item_id === it.item_id);
+                const itemPhotos = ackItem?.photos || [];
+
+                return (
+                  <View key={it.id || idx} style={styles.itemRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.itemName}>{it.item_name || it.item_code}</Text>
+                      <Text style={styles.itemMeta}>Code: {it.item_code}</Text>
+                      {it.serial_numbers && it.serial_numbers.length > 0 && (
+                        <Text style={[styles.itemMeta, { color: '#4F46E5', fontWeight: '600', marginTop: 2 }]}>
+                          Codes: {it.serial_numbers.join(', ')}
+                        </Text>
+                      )}
+                      {itemPhotos.length > 0 && (
+                        <View style={{ marginTop: 8 }}>
+                          <Text style={[styles.itemMeta, { fontWeight: '700', marginBottom: 4, color: '#334155' }]}>
+                            Item Photos ({itemPhotos.length}):
+                          </Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                            <View style={{ flexDirection: 'row', gap: 6 }}>
+                              {itemPhotos.map((url: string, pIdx: number) => {
+                                const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
+                                return (
+                                  <TouchableOpacity
+                                    key={pIdx}
+                                    onPress={() => {
+                                      setPreviewImageUrl(fullUrl);
+                                      setPreviewImageModalVisible(true);
+                                    }}
+                                  >
+                                    <Image
+                                      source={{ uri: fullUrl }}
+                                      style={{ width: 50, height: 50, borderRadius: 6, borderWidth: 1, borderColor: '#CBD5E1' }}
+                                    />
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </View>
+                          </ScrollView>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={{ fontWeight: '700', color: '#0F172A' }}>
+                      {it.qty} {it.uom_name || ''}
+                    </Text>
+                  </View>
+                );
+              })}
+
+
             </ScrollView>
           )}
+        </SafeAreaView>
+      </Modal>
+
+      {/* Full Screen Image Preview Modal */}
+      <Modal
+        visible={previewImageModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewImageModalVisible(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center' }}>
+          <TouchableOpacity
+            style={{ position: 'absolute', top: 40, right: 20, zIndex: 10, padding: 10 }}
+            onPress={() => setPreviewImageModalVisible(false)}
+          >
+            <Icon name="x" size={28} color="#FFFFFF" />
+          </TouchableOpacity>
+          {previewImageUrl ? (
+            <Image
+              source={{ uri: previewImageUrl }}
+              style={{ width: '90%', height: '80%', resizeMode: 'contain' }}
+            />
+          ) : null}
         </SafeAreaView>
       </Modal>
 
@@ -1436,6 +1836,22 @@ export default function VehicleIssuesScreen() {
             </View>
           ) : (
             <ScrollView contentContainerStyle={styles.modalScroll}>
+              {/* Frozen Employee & Position Info */}
+              <View style={[styles.infoCard, { marginBottom: 16 }]}>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Emp Code</Text>
+                  <Text style={styles.infoValue}>{user?.employee_code || user?.emp_code || '-'}</Text>
+                </View>
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>Emp Name</Text>
+                  <Text style={styles.infoValue}>{user?.full_name || user?.name || user?.username || '-'}</Text>
+                </View>
+                <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+                  <Text style={styles.infoLabel}>Position</Text>
+                  <Text style={styles.infoValue}>{user?.position_name || user?.position || user?.designation || '-'}</Text>
+                </View>
+              </View>
+
               <SearchableDropdownSelect
                 label="Reference Indent (Optional)"
                 value={selectedIndentId}
@@ -1459,6 +1875,7 @@ export default function VehicleIssuesScreen() {
                   subLabel: wh.code ? `Code: ${wh.code}` : undefined,
                 }))}
                 placeholder="Search & Select Source Warehouse"
+                disabled={true}
               />
 
               <SearchableDropdownSelect
@@ -1477,23 +1894,27 @@ export default function VehicleIssuesScreen() {
                   subLabel: v.vehicle_type || undefined,
                 }))}
                 placeholder="Search & Select Vehicle Code"
+                disabled={true}
               />
 
               <Text style={styles.fieldLabel}>Vehicle Number</Text>
               <TextInput
-                style={styles.formInput}
-                placeholder="e.g. TS09AB1234"
+                style={[styles.formInput, { backgroundColor: '#F1F5F9', color: '#64748B' }]}
+                placeholder="Auto-populated from vehicle code"
+                placeholderTextColor="#94A3B8"
                 value={vehicleNumber}
-                onChangeText={setVehicleNumber}
+                editable={false}
               />
 
-              <Text style={styles.fieldLabel}>Service Code</Text>
+              <Text style={styles.fieldLabel}>Department</Text>
               <TextInput
-                style={styles.formInput}
-                placeholder="e.g. SRV-102"
-                value={serviceCode}
-                onChangeText={setServiceCode}
+                style={[styles.formInput, { backgroundColor: '#F1F5F9', color: '#64748B' }]}
+                placeholder="Auto-populated from indent"
+                placeholderTextColor="#94A3B8"
+                value={department}
+                editable={false}
               />
+
 
               <SearchableDropdownSelect
                 label="Project (Optional)"
@@ -1505,25 +1926,14 @@ export default function VehicleIssuesScreen() {
                 }))}
                 placeholder="Search & Select Project"
                 allowClear
+                disabled={true}
               />
 
-              <SearchableDropdownSelect
-                label="Issued To (Optional)"
-                value={selectedIssuedTo}
-                onValueChange={setSelectedIssuedTo}
-                items={usersList.map((u) => ({
-                  label: u.name || u.full_name || u.username,
-                  value: String(u.id),
-                  subLabel: u.employee_code || u.email || undefined,
-                }))}
-                placeholder="Search & Select User"
-                allowClear
-              />
-
-              <Text style={styles.fieldLabel}>Issue Date</Text>
+              <Text style={styles.fieldLabel}>Issue Date * (DD/MM/YYYY HH:mm:ss)</Text>
               <TextInput
                 style={styles.formInput}
-                placeholder="YYYY-MM-DD"
+                placeholder="DD/MM/YYYY HH:mm:ss"
+                placeholderTextColor="#94A3B8"
                 value={issueDate}
                 onChangeText={setIssueDate}
               />
@@ -1539,12 +1949,14 @@ export default function VehicleIssuesScreen() {
               {/* Items Section */}
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, marginBottom: 8 }}>
                 <Text style={styles.sectionHeading}>Items List *</Text>
-                <TouchableOpacity
-                  style={[styles.emptyButton, { paddingVertical: 6, paddingHorizontal: 12 }]}
-                  onPress={() => setItemPickerVisible(true)}
-                >
-                  <Text style={[styles.emptyButtonText, { fontSize: 12 }]}>+ Add Item</Text>
-                </TouchableOpacity>
+                {!isTemplateIndent && (
+                  <TouchableOpacity
+                    style={[styles.emptyButton, { paddingVertical: 6, paddingHorizontal: 12 }]}
+                    onPress={() => setItemPickerVisible(true)}
+                  >
+                    <Text style={[styles.emptyButtonText, { fontSize: 12 }]}>+ Add Item</Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               {formItems.map((line, idx) => {
@@ -1561,6 +1973,47 @@ export default function VehicleIssuesScreen() {
                   ? line.serial_text.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0)
                   : [];
 
+                // Sort batches by expiry_date ascending (FEFO: First Expiring First Out)
+                const sortedBatches = [...(details.batches || [])].sort((a: any, b: any) => {
+                  if (a.expiry_date && b.expiry_date) {
+                    return new Date(a.expiry_date).getTime() - new Date(b.expiry_date).getTime();
+                  }
+                  if (a.expiry_date) return -1;
+                  if (b.expiry_date) return 1;
+                  return 0;
+                });
+
+                // Filter batches according to FEFO requirement allocation (matching Web VehicleMaterialIssueForm.jsx)
+                const targetQty = parseFloat(line.qty || '0') || 0;
+                const currentSelectedBatch = line.batch_number_text;
+
+                let displayedBatches = sortedBatches;
+                if (targetQty > 0 && sortedBatches.length > 0) {
+                  let accumulatedQty = 0;
+                  const filtered = [];
+                  for (const b of sortedBatches) {
+                    if (
+                      accumulatedQty < targetQty ||
+                      (currentSelectedBatch && (b.batch_number === currentSelectedBatch || String(b.id) === String(currentSelectedBatch)))
+                    ) {
+                      filtered.push(b);
+                      accumulatedQty += Number(b.qty || 0);
+                    }
+                  }
+                  displayedBatches = filtered;
+                }
+
+                const formatExpDate = (d?: string) => {
+                  if (!d) return '';
+                  try {
+                    const date = new Date(d);
+                    if (isNaN(date.getTime())) return d;
+                    return `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
+                  } catch {
+                    return d;
+                  }
+                };
+
                 return (
                   <View key={idx} style={styles.formItemCard}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
@@ -1575,16 +2028,19 @@ export default function VehicleIssuesScreen() {
                           </View>
                         </View>
                       </View>
-                      <TouchableOpacity onPress={() => handleRemoveItemLine(idx)}>
-                        <Icon name="trash-2" size={18} color="#EF4444" />
-                      </TouchableOpacity>
+                      {!isTemplateIndent && (
+                        <TouchableOpacity onPress={() => handleRemoveItemLine(idx)}>
+                          <Icon name="trash-2" size={18} color="#EF4444" />
+                        </TouchableOpacity>
+                      )}
                     </View>
 
                     <Text style={[styles.fieldLabel, { marginTop: 4 }]}>Quantity *</Text>
                     <TextInput
-                      style={styles.formInput}
+                      style={[styles.formInput, isTemplateIndent && { backgroundColor: '#F1F5F9', color: '#64748B' }]}
                       keyboardType="numeric"
                       value={line.qty}
+                      editable={!isTemplateIndent}
                       onChangeText={(val) => {
                         setFormItems((prev) =>
                           prev.map((item, i) => (i === idx ? { ...item, qty: val } : item))
@@ -1593,12 +2049,12 @@ export default function VehicleIssuesScreen() {
                     />
 
                     {/* FEFO Batches Select / Input */}
-                    {details.batches && details.batches.length > 0 ? (
+                    {displayedBatches && displayedBatches.length > 0 ? (
                       <SearchableDropdownSelect
                         label="Batch Number (FEFO Stock)"
-                        value={line.batch_number_text || ''}
+                        value={line.batch_number_text || (displayedBatches.length > 0 ? displayedBatches[0].batch_number : '')}
                         onValueChange={(val) => {
-                          const matched = details.batches.find((b) => b.batch_number === val || String(b.id) === val);
+                          const matched = details.batches.find((b: any) => b.batch_number === val || String(b.id) === val);
                           setFormItems((prev) =>
                             prev.map((item, i) =>
                               i === idx
@@ -1611,10 +2067,13 @@ export default function VehicleIssuesScreen() {
                             )
                           );
                         }}
-                        items={details.batches.map((b) => ({
-                          label: `${b.batch_number}${b.expiry_date ? ` (Exp: ${new Date(b.expiry_date).toLocaleDateString()})` : ''} · Qty: ${b.qty}`,
-                          value: b.batch_number,
-                        }))}
+                        items={displayedBatches.map((b: any) => {
+                          const expStr = b.expiry_date ? formatExpDate(b.expiry_date) : '';
+                          return {
+                            label: `${b.batch_number}${expStr ? ` (Exp: ${expStr})` : ''} · Qty: ${b.qty}`,
+                            value: b.batch_number,
+                          };
+                        })}
                         placeholder="Select Batch (FEFO Sorted)"
                         allowClear
                       />
@@ -1634,47 +2093,7 @@ export default function VehicleIssuesScreen() {
                       </>
                     )}
 
-                    {/* Bin Select / Input */}
-                    {details.bins && details.bins.length > 0 ? (
-                      <SearchableDropdownSelect
-                        label="Bin Location"
-                        value={line.bin_code_text || ''}
-                        onValueChange={(val) => {
-                          const matched = details.bins.find((b) => b.code === val || String(b.id) === val);
-                          setFormItems((prev) =>
-                            prev.map((item, i) =>
-                              i === idx
-                                ? {
-                                    ...item,
-                                    bin_code_text: matched ? matched.code : val,
-                                    selected_bin_id: matched ? matched.id : null,
-                                  }
-                                : item
-                            )
-                          );
-                        }}
-                        items={details.bins.map((b) => ({
-                          label: `${b.code} · Qty: ${b.qty}`,
-                          value: b.code,
-                        }))}
-                        placeholder="Select Bin Location"
-                        allowClear
-                      />
-                    ) : (
-                      <>
-                        <Text style={styles.fieldLabel}>Bin Code / Location (Optional)</Text>
-                        <TextInput
-                          style={styles.formInput}
-                          placeholder="Bin code..."
-                          value={line.bin_code_text}
-                          onChangeText={(val) => {
-                            setFormItems((prev) =>
-                              prev.map((item, i) => (i === idx ? { ...item, bin_code_text: val } : item))
-                            );
-                          }}
-                        />
-                      </>
-                    )}
+
 
                     {/* Dedicated Asset / Consumable / Serial Code Picker Trigger */}
                     {isTracked && (
@@ -1995,26 +2414,50 @@ const styles = StyleSheet.create({
   },
   infoCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 14,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    gap: 8,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
   infoRow: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
   },
   infoLabel: {
+    width: 130,
     fontSize: 13,
+    fontWeight: '600',
     color: '#64748B',
+    paddingRight: 8,
   },
   infoValue: {
+    flex: 1,
     fontSize: 13,
     fontWeight: '700',
     color: '#0F172A',
+    textAlign: 'right',
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    alignSelf: 'flex-end',
+  },
+  statusBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   sectionHeading: {
     fontSize: 15,

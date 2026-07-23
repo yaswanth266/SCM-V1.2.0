@@ -1302,8 +1302,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
             <Descriptions.Item label="Emp Name">{recordData.raised_by_name || indentDetails?.empName || recordData.issued_to_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="Position">{recordData.position_name || indentDetails?.position || '-'}</Descriptions.Item>
             <Descriptions.Item label="Vehicle Code">{recordData.vehicle_code || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Vehicle Number">{recordData.vehicle_number || '-'}</Descriptions.Item>
-            <Descriptions.Item label="Service Code" span={2}>{recordData.service_code || '-'}</Descriptions.Item>
+            <Descriptions.Item label="Vehicle Number" span={2}>{recordData.vehicle_number || '-'}</Descriptions.Item>
             <Descriptions.Item label="Remarks" span={3}>{recordData.remarks || '-'}</Descriptions.Item>
           </Descriptions>
         </Card>
@@ -2032,7 +2031,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
           )}
 
           <Row gutter={16}>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="vehicle_code" label="Vehicle Code">
                 {templateType ? (
                   <Select
@@ -2051,14 +2050,9 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
                 )}
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item name="vehicle_number" label="Vehicle Number">
                 <Input placeholder={templateType ? "Auto-populated from code" : "Auto-loaded from Indent"} disabled={!templateType} style={!templateType ? { color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' } : {}} />
-              </Form.Item>
-            </Col>
-            <Col span={8}>
-              <Form.Item name="service_code" label="Service Code">
-                <Input placeholder={templateType ? "Enter service code" : "Auto-loaded from Indent"} disabled={!templateType} style={!templateType ? { color: 'rgba(0, 0, 0, 0.85)', backgroundColor: '#fafafa' } : {}} />
               </Form.Item>
             </Col>
           </Row>

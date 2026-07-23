@@ -7,6 +7,7 @@ import {
 import {
   ArrowLeftOutlined, SendOutlined, EditOutlined,
   CloseCircleOutlined, SaveOutlined, CheckCircleOutlined,
+  DownloadOutlined, PrinterOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -15,7 +16,7 @@ import StatusTag from '../../components/StatusTag';
 import api from '../../config/api';
 import {
   formatDate, formatDateTime, getErrorMessage, formatDateForAPI,
-  handleFormValidationFailed,
+  handleFormValidationFailed, exportIndentToExcel, printIndentToPDF,
 } from '../../utils/helpers';
 import { DATE_FORMAT } from '../../utils/constants';
 import useAuthStore from '../../store/authStore';
@@ -202,13 +203,12 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
       });
       const items = res.data?.items || res.data?.data || res.data || [];
       const activeDuplicate = items.find((i) =>
-        Number(i.template_id) === Number(templateId) &&
         String(i.vehicle_code) === String(vehicleCode) &&
-        ['draft', 'pending_approval', 'approved', 'partially_fulfilled'].includes(i.status)
+        !['cancelled', 'rejected'].includes(i.status)
       );
       if (activeDuplicate) {
         message.error(
-          `An active template indent (${activeDuplicate.indent_number}) already exists for this Template and Vehicle (${vehicleCode}). Duplicate creation is blocked!`,
+          `An indent (${activeDuplicate.indent_number}) is already raised against vehicle ${vehicleCode}. Please select another vehicle.`,
           6
         );
       }
@@ -369,6 +369,8 @@ const TemplateIndentForm = ({ title = "Template Indent" }) => {
                 </Popconfirm>
               </>
             )}
+            <Button icon={<DownloadOutlined />} onClick={() => exportIndentToExcel({ ...indent, items: indentItems })}>Export Excel</Button>
+            <Button type="primary" icon={<PrinterOutlined />} onClick={() => printIndentToPDF({ ...indent, items: indentItems })}>Print PDF</Button>
             <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/indent/template-indents')}>Back</Button>
           </Space>
         </PageHeader>

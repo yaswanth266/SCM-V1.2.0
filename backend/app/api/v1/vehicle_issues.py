@@ -15,7 +15,7 @@ from app.schemas.warehouse import (
     VehicleIssueCreate, VehicleIssueUpdate, VehicleIssueResponse,
 )
 from app.services.number_series import generate_number
-from app.services.stock_service import reserve_stock, release_reservation, _get_or_create_balance, post_vehicle_stock_ledger
+from app.services.stock_service import reserve_stock, release_reservation, _get_or_create_balance, post_stock_ledger, post_vehicle_stock_ledger
 from app.utils.dependencies import get_current_user, require_key, require_permission
 from app.utils.helpers import paginate_params, build_paginated_response, apply_search_filter
 from app.api.v1.warehouse import validate_material_issue_items_flow, clean_serial_numbers
@@ -23,12 +23,12 @@ from app.api.v1.warehouse import validate_material_issue_items_flow, clean_seria
 router = APIRouter()
 
 
-@router.post("", status_code=201, dependencies=[Depends(require_key("warehouse-material-issues"))])
+@router.post("", status_code=201, dependencies=[Depends(require_key("warehouse-vehicle-material-issues", "warehouse-material-issues"))])
 async def create_vehicle_issue(
     payload: VehicleIssueCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(
-        "warehouse-material-issues", "create", "warehouse-material-issues"
+        ["warehouse-vehicle-material-issues", "warehouse-material-issues"], "create", "warehouse-material-issues"
     )),
 ):
     """Create a new vehicle issue. Auto-generates issue_number."""
@@ -115,6 +115,29 @@ async def create_vehicle_issue(
                 detail=f"Template '{display_name}' has already been issued to vehicle '{payload.vehicle_code} ({payload.vehicle_number})'! Duplicate template issues to the same vehicle are strictly prohibited."
             )
 
+    # Validate stock availability in bulk first
+    for item in payload.items:
+        bal_conds = [
+            StockBalance.item_id == item.item_id,
+            StockBalance.warehouse_id == payload.warehouse_id,
+        ]
+        if is_central:
+            if item.batch_id is not None:
+                bal_conds.append(StockBalance.batch_id == item.batch_id)
+            else:
+                bal_conds.append(StockBalance.batch_id.is_(None))
+            if item.bin_id is not None:
+                bal_conds.append(StockBalance.bin_id == item.bin_id)
+
+        bal_row = await db.execute(select(StockBalance).where(and_(*bal_conds)))
+        balances = bal_row.scalars().all()
+        avail = sum((b.available_qty or Decimal("0")) for b in balances) or Decimal("0")
+        if (item.qty or Decimal("0")) > avail:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Insufficient stock for item {item.item_id}: available={avail}, requested={item.qty}"
+            )
+
     # Generate issue number
     issue_number = await generate_number(db, "warehouse", "vehicle_issue")
 
@@ -127,7 +150,7 @@ async def create_vehicle_issue(
         issue_date=payload.issue_date,
         department=payload.department,
         issued_to=payload.issued_to,
-        status="draft",
+        status="issued",
         remarks=payload.remarks,
         issued_by=current_user.id,
         project_id=payload.project_id,
@@ -138,9 +161,20 @@ async def create_vehicle_issue(
     db.add(vi)
     await db.flush()
 
+    created_items = []
     for item in payload.items:
-        amount = item.qty * item.rate
+        balance = await _get_or_create_balance(
+            db,
+            item_id=item.item_id,
+            warehouse_id=payload.warehouse_id,
+            bin_id=item.bin_id,
+            batch_id=item.batch_id,
+        )
+        effective_rate = balance.valuation_rate or Decimal("0")
+        rate = effective_rate if (effective_rate and effective_rate > 0) else (item.rate or Decimal("0"))
+        amount = (item.qty or Decimal("0")) * rate
         cleaned_sns = await clean_serial_numbers(db, item.item_id, item.serial_numbers)
+
         vii = VehicleIssueItem(
             vehicle_issue_id=vi.id,
             item_id=item.item_id,
@@ -148,19 +182,94 @@ async def create_vehicle_issue(
             qty=item.qty,
             uom_id=item.uom_id,
             bin_id=item.bin_id,
-            rate=item.rate,
+            rate=rate,
             amount=amount,
             serial_numbers=cleaned_sns,
             batch_number_text=item.batch_number_text,
             bin_code_text=item.bin_code_text,
         )
         db.add(vii)
+        created_items.append(vii)
 
     await db.flush()
-    return {"id": vi.id, "issue_number": issue_number, "message": "Vehicle issue created successfully"}
+
+    # Update serial status if serial numbers are specified
+    if is_central:
+        for item in payload.items:
+            if item.serial_numbers:
+                sn_stmt = select(SerialNumber).where(
+                    SerialNumber.item_id == item.item_id,
+                    SerialNumber.serial_number.in_(item.serial_numbers),
+                    SerialNumber.warehouse_id == payload.warehouse_id,
+                    SerialNumber.status == "available"
+                )
+                sn_rows = (await db.execute(sn_stmt)).scalars().all()
+                for sn in sn_rows:
+                    sn.status = "issued"
+
+    # Post stock ledger entries & update warehouse balance
+    for item in created_items:
+        if (item.qty or Decimal("0")) > 0:
+            await post_stock_ledger(
+                db,
+                item_id=item.item_id,
+                warehouse_id=payload.warehouse_id,
+                transaction_type="material_issue",
+                qty_out=item.qty,
+                rate=item.rate,
+                bin_id=item.bin_id,
+                batch_id=item.batch_id,
+                reference_type="vehicle_issue",
+                reference_id=vi.id,
+                uom_id=item.uom_id,
+                created_by=current_user.id,
+            )
+
+    # Update indent issued qty if linked to an indent
+    if payload.indent_id:
+        indent_result = await db.execute(
+            select(Indent).options(selectinload(Indent.items)).where(Indent.id == payload.indent_id)
+        )
+        indent = indent_result.scalar_one_or_none()
+        if indent:
+            for vi_item in created_items:
+                base_qty = vi_item.qty or Decimal("0")
+                candidates = [il for il in indent.items if il.item_id == vi_item.item_id]
+                remaining_to_credit = Decimal(str(base_qty))
+                for ind_item in candidates:
+                    if remaining_to_credit <= 0:
+                        break
+                    add_qty = remaining_to_credit
+                    if ind_item.uom_id and vi_item.uom_id and ind_item.uom_id != vi_item.uom_id:
+                        try:
+                            cr = await db.execute(
+                                select(_UC).where(
+                                    _UC.from_uom_id == vi_item.uom_id,
+                                    _UC.to_uom_id == ind_item.uom_id,
+                                )
+                            )
+                            conv = cr.scalar_one_or_none()
+                            if conv and conv.conversion_factor:
+                                add_qty = remaining_to_credit * Decimal(str(conv.conversion_factor))
+                        except Exception:
+                            pass
+
+                    target = Decimal(str(ind_item.approved_qty or ind_item.requested_qty or 0))
+                    already = Decimal(str(ind_item.issued_qty or 0))
+                    capacity = target - already
+                    if capacity <= 0:
+                        continue
+                    take = min(add_qty, capacity)
+                    ind_item.issued_qty = already + take
+                    remaining_to_credit -= take
+                if remaining_to_credit > 0 and candidates:
+                    candidates[-1].issued_qty = (candidates[-1].issued_qty or Decimal("0")) + remaining_to_credit
+
+    await db.flush()
+    return {"id": vi.id, "issue_number": issue_number, "status": "issued", "message": "Vehicle issue created and material issued successfully"}
 
 
-@router.get("", dependencies=[Depends(require_key("warehouse-material-issues", "indent-material-acknowledgement", "indent-acknowledgement"))])
+@router.get("", dependencies=[Depends(require_key("warehouse-vehicle-material-issues", "warehouse-material-issues", "indent-material-acknowledgement", "indent-acknowledgement"))])
 async def list_vehicle_issues(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -266,7 +375,7 @@ async def list_vehicle_issues(
             "vehicle_code": vi.vehicle_code,
             "vehicle_number": vi.vehicle_number,
             "issue_date": vi.issue_date,
-            "department": vi.department,
+            "department": vi.department or (vi.indent.department if vi.indent else None),
             "issued_to": vi.issued_to,
             "issued_to_name": f"{vi.issued_to_user.first_name} {vi.issued_to_user.last_name or ''}".strip() if vi.issued_to_user else None,
             "raised_by_name": r_name,
@@ -304,7 +413,7 @@ async def list_vehicle_issues(
     return build_paginated_response(data, total, page, page_size)
 
 
-@router.get("/{issue_id}", response_model=VehicleIssueResponse, dependencies=[Depends(require_key("warehouse-material-issues", "indent-material-acknowledgement", "indent-acknowledgement"))])
+@router.get("/{issue_id}", response_model=VehicleIssueResponse, dependencies=[Depends(require_key("warehouse-vehicle-material-issues", "warehouse-material-issues", "indent-material-acknowledgement", "indent-acknowledgement"))])
 async def get_vehicle_issue(
     issue_id: int,
     db: AsyncSession = Depends(get_db),
@@ -318,7 +427,7 @@ async def get_vehicle_issue(
             selectinload(VehicleIssue.items).selectinload(VehicleIssueItem.uom),
             selectinload(VehicleIssue.items).selectinload(VehicleIssueItem.batch),
             selectinload(VehicleIssue.warehouse),
-            selectinload(VehicleIssue.issued_to_user),
+            selectinload(VehicleIssue.issued_to_user).selectinload(User.employee),
             selectinload(VehicleIssue.project),
         )
         .where(VehicleIssue.id == issue_id)
@@ -365,6 +474,10 @@ async def get_vehicle_issue(
             response["department"] = vi.issued_to_user.department
         if not response.get("position_name") and getattr(vi.issued_to_user, "designation", None):
             response["position_name"] = vi.issued_to_user.designation
+        if not response.get("raised_by_name"):
+            response["raised_by_name"] = f"{vi.issued_to_user.first_name} {vi.issued_to_user.last_name or ''}".strip()
+        if not response.get("raised_by_emp_code"):
+            response["raised_by_emp_code"] = getattr(vi.issued_to_user, "employee_code", None) or (vi.issued_to_user.employee.employee_code if vi.issued_to_user.employee else None)
 
     if vi.issued_by:
         usr_res = await db.execute(select(User).where(User.id == vi.issued_by))
@@ -388,7 +501,7 @@ async def get_vehicle_issue(
     return response
 
 
-@router.put("/{issue_id}", dependencies=[Depends(require_key("warehouse-material-issues"))])
+@router.put("/{issue_id}", dependencies=[Depends(require_key("warehouse-vehicle-material-issues", "warehouse-material-issues"))])
 async def update_vehicle_issue(
     issue_id: int,
     payload: VehicleIssueUpdate,
@@ -473,12 +586,12 @@ async def update_vehicle_issue(
     return {"id": vi.id, "issue_number": vi.issue_number, "message": "Vehicle issue updated successfully"}
 
 
-@router.post("/{issue_id}/issue", dependencies=[Depends(require_key("warehouse-material-issues"))])
+@router.post("/{issue_id}/issue", dependencies=[Depends(require_key("warehouse-vehicle-material-issues", "warehouse-material-issues"))])
 async def issue_vehicle_material(
     issue_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(
-        "warehouse-material-issues", "approve", "warehouse-material-issues"
+        ["warehouse-vehicle-material-issues", "warehouse-material-issues"], "approve", "warehouse-material-issues"
     )),
 ):
     """Deduct/Reserve stock and mark vehicle issue as issued."""
@@ -558,16 +671,15 @@ async def issue_vehicle_material(
     vi.status = "issued"
     vi.issued_by = current_user.id
 
-    # Post stock ledger entries & update warehouse balance and vehicle stock balance
+    # Post stock ledger entries & update warehouse balance
     for item in vi.items:
         if (item.qty or Decimal("0")) > 0:
-            vsb = await post_vehicle_stock_ledger(
+            await post_stock_ledger(
                 db,
                 item_id=item.item_id,
                 warehouse_id=vi.warehouse_id,
-                vehicle_code=vi.vehicle_code,
-                vehicle_number=vi.vehicle_number,
-                qty=item.qty,
+                transaction_type="material_issue",
+                qty_out=item.qty,
                 rate=item.rate,
                 bin_id=item.bin_id,
                 batch_id=item.batch_id,
@@ -576,9 +688,6 @@ async def issue_vehicle_material(
                 uom_id=item.uom_id,
                 created_by=current_user.id,
             )
-            if item.serial_numbers and vsb:
-                existing_serials = vsb.serial_numbers or []
-                vsb.serial_numbers = list(set(existing_serials + (item.serial_numbers or [])))
 
     # Update indent issued qty if linked to an indent
     if vi.indent_id:
@@ -625,12 +734,12 @@ async def issue_vehicle_material(
     return {"id": vi.id, "issue_number": vi.issue_number, "message": "Vehicle issue confirmed successfully, stock reserved"}
 
 
-@router.post("/{issue_id}/cancel", dependencies=[Depends(require_key("warehouse-material-issues"))])
+@router.post("/{issue_id}/cancel", dependencies=[Depends(require_key("warehouse-vehicle-material-issues", "warehouse-material-issues"))])
 async def cancel_vehicle_issue(
     issue_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_permission(
-        "warehouse-material-issues", "delete", "warehouse-material-issues"
+        ["warehouse-vehicle-material-issues", "warehouse-material-issues"], "delete", "warehouse-material-issues"
     )),
 ):
     """Cancel a draft or issued vehicle issue and release reservations."""

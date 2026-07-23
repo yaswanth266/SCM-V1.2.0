@@ -272,9 +272,17 @@ async def allowed_keys_for_role(db: AsyncSession, role: Role) -> List[str]:
                 "warehouse-vehicle-material-issues",
                 "warehouse-material-issues-template",
             ])
+        elif key == "warehouse-vehicle-material-issues":
+            mapped_keys.extend([
+                "warehouse-material-issues",
+            ])
         elif key == "inventory-masters":
             mapped_keys.extend([
                 "inventory-masters-project-templates",
+            ])
+        elif key == "inventory-masters-project-templates":
+            mapped_keys.extend([
+                "inventory-masters",
             ])
         elif key == "indent-transactions" or key == "indent-indents" or key == "indent":
             mapped_keys.extend([
@@ -291,6 +299,10 @@ async def allowed_keys_for_role(db: AsyncSession, role: Role) -> List[str]:
         elif key == "indent-acknowledgement":
             mapped_keys.extend([
                 "indent-material-acknowledgement",
+            ])
+        elif key == "indent-material-acknowledgement":
+            mapped_keys.extend([
+                "indent-acknowledgement",
             ])
             
         for k in mapped_keys:

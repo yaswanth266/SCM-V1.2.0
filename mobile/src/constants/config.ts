@@ -10,9 +10,9 @@
  *   API_BASE_URL = 'http://10.0.2.2:8000'       ← Android emulator (localhost)
  */
 
-// FastAPI backend address (port 8000)
-export const API_BASE_URL = 'http://10.2.1.131:8000';
+// FastAPI backend address (proxied through the frontend port 8003)
+export const API_BASE_URL = 'http://103.174.161.68:8003';
 
-// Vite/React web frontend address (port 3000 for dev, 80/443 for production)
+// Vite/React web frontend address (port 8003)
 // Used by the dashboard when opening web pages in the in-app browser.
-export const WEB_BASE_URL = 'http://10.2.1.131:3000';
+export const WEB_BASE_URL = 'http://103.174.161.68:8003';

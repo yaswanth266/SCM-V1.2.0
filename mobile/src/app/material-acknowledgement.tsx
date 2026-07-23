@@ -101,17 +101,22 @@ const Icon = ({ name, size = 18, color = '#7A6D66' }: { name: string; size?: num
 };
 
 // ─── Photo Thumbnail ──────────────────────────────────────────────────────────
-const PhotoThumb = ({ url, onRemove }: { url: string; onRemove: () => void }) => (
-  <View style={{ position: 'relative', marginRight: 8, marginBottom: 8 }}>
-    <Image
-      source={{ uri: url.startsWith('http') ? url : `${API_BASE_URL}${url}` }}
-      style={styles.photoThumb}
-    />
-    <TouchableOpacity style={styles.photoRemoveBtn} onPress={onRemove}>
-      <Text style={{ color: '#fff', fontSize: 12, fontWeight: '900', lineHeight: 16, textAlign: 'center' }}>×</Text>
-    </TouchableOpacity>
-  </View>
-);
+const PhotoThumb = ({ url, onRemove, onPress }: { url: string; onRemove: () => void; onPress?: () => void }) => {
+  const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
+  return (
+    <View style={{ position: 'relative', marginRight: 8, marginBottom: 8 }}>
+      <TouchableOpacity onPress={onPress}>
+        <Image
+          source={{ uri: fullUrl }}
+          style={styles.photoThumb}
+        />
+      </TouchableOpacity>
+      <TouchableOpacity style={styles.photoRemoveBtn} onPress={onRemove}>
+        <Text style={{ color: '#fff', fontSize: 12, fontWeight: '900', lineHeight: 16, textAlign: 'center' }}>×</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
 
 // ─── Custom Pagination Footer ──────────────────────────────────────────────────
 const PaginationFooter = ({
@@ -254,6 +259,13 @@ export default function MaterialAcknowledgementScreen() {
   // Photos
   const [overallPhotos, setOverallPhotos] = useState<{ uri: string; url: string }[]>([]);
   const [uploadingPhoto, setUploadingPhoto] = useState<boolean>(false);
+  const [previewImageModalVisible, setPreviewImageModalVisible] = useState<boolean>(false);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string>('');
+
+  // Serial Selection Modal State
+  const [serialModalVisible, setSerialModalVisible] = useState<boolean>(false);
+  const [activeItemIndex, setActiveItemIndex] = useState<number | null>(null);
+  const [tempSelectedSerials, setTempSelectedSerials] = useState<string[]>([]);
 
   // Initialization
   useEffect(() => {
@@ -387,6 +399,7 @@ export default function MaterialAcknowledgementScreen() {
 
       const formatted = (issue.items || []).map((item: any) => {
         const serials = Array.isArray(item.serial_numbers) ? item.serial_numbers : [];
+        const isSerialOrAsset = item.has_serial || item.item_type === 'asset' || item.item_type === 'consumable';
         return {
           id: item.id,
           item_id: item.item_id,
@@ -395,11 +408,11 @@ export default function MaterialAcknowledgementScreen() {
           item_type: item.item_type || item.item?.item_type || '',
           uom_name: item.uom_name || item.uom?.name || '',
           issued_qty: Number(item.qty || 0),
-          received_qty: String(item.qty || 0),
+          received_qty: isSerialOrAsset ? String(serials.length) : String(item.qty || 0),
           remarks: '',
           has_serial: item.has_serial || false,
           serial_numbers: [...serials],
-          serial_text: serials.join(', '),
+          selected_serial_numbers: [...serials],
           photos: [] as string[],
         };
       });
@@ -415,7 +428,14 @@ export default function MaterialAcknowledgementScreen() {
 
   const handleReceiveAll = () => {
     setAckItems((prev) =>
-      prev.map((item) => ({ ...item, received_qty: String(item.issued_qty) }))
+      prev.map((item) => {
+        const isSerialOrAsset = item.has_serial || item.item_type === 'asset' || item.item_type === 'consumable';
+        return {
+          ...item,
+          selected_serial_numbers: [...item.serial_numbers],
+          received_qty: isSerialOrAsset ? String(item.serial_numbers.length) : String(item.issued_qty),
+        };
+      })
     );
   };
 
@@ -450,7 +470,7 @@ export default function MaterialAcknowledgementScreen() {
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: 'images',
       allowsEditing: true,
       quality: 0.8,
     });
@@ -527,6 +547,29 @@ export default function MaterialAcknowledgementScreen() {
     );
   };
 
+  const openSerialModal = (idx: number) => {
+    const item = ackItems[idx];
+    setActiveItemIndex(idx);
+    setTempSelectedSerials([...(item.selected_serial_numbers || [])]);
+    setSerialModalVisible(true);
+  };
+
+  const applySerialSelection = () => {
+    if (activeItemIndex === null) return;
+    setAckItems((prev) =>
+      prev.map((item, idx) => {
+        if (idx !== activeItemIndex) return item;
+        return {
+          ...item,
+          selected_serial_numbers: [...tempSelectedSerials],
+          received_qty: String(tempSelectedSerials.length),
+        };
+      })
+    );
+    setSerialModalVisible(false);
+    setActiveItemIndex(null);
+  };
+
   // ─── Submit ────────────────────────────────────────────────────────────────
   const handleSubmitAcknowledgement = async () => {
     if (!selectedIssueId) {
@@ -534,7 +577,7 @@ export default function MaterialAcknowledgementScreen() {
       return;
     }
     if (!employeeCode.trim()) {
-      Alert.alert('Validation Error', 'Please enter your Employee Code.');
+      Alert.alert('Validation Error', 'Employee code could not be detected from your profile. Please log in again.');
       return;
     }
 
@@ -553,15 +596,8 @@ export default function MaterialAcknowledgementScreen() {
         return;
       }
 
-      let serials: string[] = [];
-      if (item.serial_text && item.serial_text.trim()) {
-        serials = item.serial_text
-          .split(',')
-          .map((s: string) => s.trim())
-          .filter((s: string) => s.length > 0);
-      } else if (item.serial_numbers) {
-        serials = item.serial_numbers;
-      }
+      const isSerialOrAsset = item.has_serial || item.item_type === 'asset' || item.item_type === 'consumable';
+      const serials = isSerialOrAsset ? (item.selected_serial_numbers || []) : [];
 
       payloadItems.push({
         item_id: item.item_id,
@@ -614,7 +650,7 @@ export default function MaterialAcknowledgementScreen() {
         <View style={styles.headerTop}>
           <TouchableOpacity
             style={styles.headerButton}
-            onPress={() => router.replace('/acknowledgement-selector')}
+            onPress={() => router.replace('/dashboard')}
           >
             <Icon name="arrow-left" size={20} color="#FFFFFF" />
           </TouchableOpacity>
@@ -782,17 +818,27 @@ export default function MaterialAcknowledgementScreen() {
               {selectedAck.photos && selectedAck.photos.length > 0 && (
                 <View style={[styles.infoCard, { marginBottom: 16 }]}>
                   <Text style={[styles.infoLabel, { marginBottom: 8, fontWeight: '700', color: '#334155' }]}>
-                    📷 Acknowledgement Photos
+                    📷 Acknowledgement Photos ({selectedAck.photos.length})
                   </Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                    <View style={{ flexDirection: 'row' }}>
-                      {selectedAck.photos.map((url: string, idx: number) => (
-                        <Image
-                          key={idx}
-                          source={{ uri: url.startsWith('http') ? url : `${API_BASE_URL}${url}` }}
-                          style={[styles.photoThumb, { marginRight: 8 }]}
-                        />
-                      ))}
+                    <View style={{ flexDirection: 'row', gap: 8 }}>
+                      {selectedAck.photos.map((url: string, idx: number) => {
+                        const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
+                        return (
+                          <TouchableOpacity
+                            key={idx}
+                            onPress={() => {
+                              setPreviewImageUrl(fullUrl);
+                              setPreviewImageModalVisible(true);
+                            }}
+                          >
+                            <Image
+                              source={{ uri: fullUrl }}
+                              style={[styles.photoThumb, { marginRight: 0 }]}
+                            />
+                          </TouchableOpacity>
+                        );
+                      })}
                     </View>
                   </ScrollView>
                 </View>
@@ -819,16 +865,26 @@ export default function MaterialAcknowledgementScreen() {
                   {/* Item Photos */}
                   {item.photos && item.photos.length > 0 && (
                     <View style={{ marginTop: 8 }}>
-                      <Text style={[styles.itemMeta, { fontWeight: '700', marginBottom: 4 }]}>Item Photos:</Text>
+                      <Text style={[styles.itemMeta, { fontWeight: '700', marginBottom: 4 }]}>Item Photos ({item.photos.length}):</Text>
                       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                        <View style={{ flexDirection: 'row' }}>
-                          {item.photos.map((url: string, pIdx: number) => (
-                            <Image
-                              key={pIdx}
-                              source={{ uri: url.startsWith('http') ? url : `${API_BASE_URL}${url}` }}
-                              style={[styles.photoThumb, { marginRight: 6 }]}
-                            />
-                          ))}
+                        <View style={{ flexDirection: 'row', gap: 6 }}>
+                          {item.photos.map((url: string, pIdx: number) => {
+                            const fullUrl = url.startsWith('http') ? url : `${API_BASE_URL}${url}`;
+                            return (
+                              <TouchableOpacity
+                                key={pIdx}
+                                onPress={() => {
+                                  setPreviewImageUrl(fullUrl);
+                                  setPreviewImageModalVisible(true);
+                                }}
+                              >
+                                <Image
+                                  source={{ uri: fullUrl }}
+                                  style={[styles.photoThumb, { marginRight: 0 }]}
+                                />
+                              </TouchableOpacity>
+                            );
+                          })}
                         </View>
                       </ScrollView>
                     </View>
@@ -937,12 +993,13 @@ export default function MaterialAcknowledgementScreen() {
                 </View>
               </Modal>
 
-              <Text style={styles.fieldLabel}>Employee Code *</Text>
+              <Text style={styles.fieldLabel}>Employee Code</Text>
               <TextInput
-                style={styles.formInput}
-                placeholder="Enter employee code"
+                style={[styles.formInput, { backgroundColor: '#F1F5F9', color: '#64748B' }]}
+                placeholder="Auto-filled from your profile"
+                placeholderTextColor="#94A3B8"
                 value={employeeCode}
-                onChangeText={setEmployeeCode}
+                editable={false}
               />
 
               <Text style={styles.fieldLabel}>Overall Remarks</Text>
@@ -969,6 +1026,26 @@ export default function MaterialAcknowledgementScreen() {
                     <Text style={styles.infoLabel}>Warehouse</Text>
                     <Text style={styles.infoValue}>{selectedIssueDetail.warehouse_name || '-'}</Text>
                   </View>
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>Employee Code</Text>
+                    <Text style={styles.infoValue}>{selectedIssueDetail.raised_by_emp_code || selectedIssueDetail.employee_code || '-'}</Text>
+                  </View>
+                  <View style={styles.infoRow}>
+                    <Text style={styles.infoLabel}>Project</Text>
+                    <Text style={styles.infoValue}>{selectedIssueDetail.project_name || '-'}</Text>
+                  </View>
+                  {selectedIssueDetail.department && (
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>Department</Text>
+                      <Text style={styles.infoValue}>{selectedIssueDetail.department}</Text>
+                    </View>
+                  )}
+                  {(selectedIssueDetail.issued_by_name || selectedIssueDetail.created_by_name) && (
+                    <View style={[styles.infoRow, { borderBottomWidth: 0 }]}>
+                      <Text style={styles.infoLabel}>Issued By</Text>
+                      <Text style={styles.infoValue}>{selectedIssueDetail.issued_by_name || selectedIssueDetail.created_by_name}</Text>
+                    </View>
+                  )}
                 </View>
               )}
 
@@ -986,97 +1063,98 @@ export default function MaterialAcknowledgementScreen() {
                     </TouchableOpacity>
                   </View>
 
-                  {ackItems.map((item, idx) => (
-                    <View key={item.id || idx} style={styles.formItemCard}>
-                      <Text style={styles.formItemTitle}>
-                        {item.item_name} ({item.item_code})
-                      </Text>
-                      <Text style={styles.formItemSub}>
-                        Issued Qty: {item.issued_qty} {item.uom_name}
-                      </Text>
+                  {ackItems.map((item, idx) => {
+                    const isSerialOrAsset = item.has_serial || item.item_type === 'asset' || item.item_type === 'consumable';
+                    const selectedCount = (item.selected_serial_numbers || []).length;
 
-                      <Text style={[styles.fieldLabel, { marginTop: 8 }]}>Received Qty *</Text>
-                      <TextInput
-                        style={styles.formInput}
-                        keyboardType="numeric"
-                        value={item.received_qty}
-                        onChangeText={(text) => {
-                          setAckItems((prev) =>
-                            prev.map((it, i) => (i === idx ? { ...it, received_qty: text } : it))
-                          );
-                        }}
-                      />
+                    return (
+                      <View key={item.id || idx} style={styles.formItemCard}>
+                        <Text style={styles.formItemTitle}>
+                          {item.item_name} ({item.item_code})
+                        </Text>
+                        <Text style={styles.formItemSub}>
+                          Issued Qty: {item.issued_qty} {item.uom_name}
+                        </Text>
 
-                      {(item.has_serial || item.item_type === 'asset' || item.item_type === 'consumable' || (item.serial_numbers && item.serial_numbers.length > 0)) && (
-                        <View style={{ marginTop: 8, marginBottom: 8, padding: 8, backgroundColor: '#F1F5F9', borderRadius: 8 }}>
-                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                            <Text style={{ fontSize: 12, fontWeight: '700', color: '#1E293B' }}>
-                              Asset / Consumable / Serial Codes (Auto-selected)
-                            </Text>
-                            <View style={{ backgroundColor: '#DBEAFE', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10 }}>
-                              <Text style={{ fontSize: 10, color: '#1D4ED8', fontWeight: 'bold' }}>
-                                {item.serial_numbers ? item.serial_numbers.length : 0} Selected
+                        <Text style={[styles.fieldLabel, { marginTop: 8 }]}>Received Qty *</Text>
+                        <TextInput
+                          style={[styles.formInput, isSerialOrAsset && { backgroundColor: '#F1F5F9', color: '#64748B' }]}
+                          keyboardType="numeric"
+                          value={item.received_qty}
+                          editable={!isSerialOrAsset}
+                          onChangeText={(text) => {
+                            setAckItems((prev) =>
+                              prev.map((it, i) => (i === idx ? { ...it, received_qty: text } : it))
+                            );
+                          }}
+                        />
+
+                        {isSerialOrAsset && (
+                          <View style={{ marginTop: 8, marginBottom: 8 }}>
+                            <TouchableOpacity
+                              style={{
+                                backgroundColor: '#FFFFFF',
+                                borderWidth: 1.5,
+                                borderColor: selectedCount > 0 ? '#10B981' : '#CBD5E1',
+                                borderRadius: 8,
+                                padding: 10,
+                                flexDirection: 'row',
+                                justifyContent: 'center',
+                                alignItems: 'center',
+                              }}
+                              onPress={() => openSerialModal(idx)}
+                            >
+                              <Text style={{ fontSize: 13, fontWeight: '700', color: selectedCount > 0 ? '#10B981' : '#475569' }}>
+                                {selectedCount > 0
+                                  ? `Selected Serials (${selectedCount} / ${item.issued_qty})`
+                                  : `Select Serials / Codes (Max: ${item.issued_qty})`}
                               </Text>
-                            </View>
-                          </View>
-                          {item.serial_numbers && item.serial_numbers.length > 0 ? (
-                            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                              {item.serial_numbers.map((code: string, cIdx: number) => (
-                                <View key={cIdx} style={{ backgroundColor: '#E0E7FF', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 }}>
-                                  <Text style={{ fontSize: 11, color: '#3730A3', fontWeight: '600' }}>{code}</Text>
-                                </View>
-                              ))}
-                            </View>
-                          ) : null}
-                          <Text style={[styles.fieldLabel, { marginTop: 6, fontSize: 11 }]}>Edit Selected Codes (comma-separated)</Text>
-                          <TextInput
-                            style={[styles.formInput, { fontSize: 12, height: 36 }]}
-                            placeholder="Code1, Code2..."
-                            value={item.serial_text}
-                            onChangeText={(text) => {
-                              const parsedArr = text.split(',').map((s) => s.trim()).filter(Boolean);
-                              setAckItems((prev) =>
-                                prev.map((it, i) =>
-                                  i === idx ? { ...it, serial_text: text, serial_numbers: parsedArr } : it
-                                )
-                              );
-                            }}
-                          />
-                        </View>
-                      )}
+                            </TouchableOpacity>
 
-                      {/* Item-wise Photos */}
-                      <Text style={[styles.fieldLabel, { marginTop: 4 }]}>Item Photos</Text>
-                      <View style={styles.photoRow}>
-                        <TouchableOpacity
-                          style={styles.photoAddBtn}
-                          onPress={() => showPhotoOptions(true, idx)}
-                          disabled={uploadingPhoto}
-                        >
-                          {uploadingPhoto ? (
-                            <ActivityIndicator size="small" color="#481238" />
-                          ) : (
-                            <>
-                              <Icon name="camera" size={14} color="#481238" />
-                              <Text style={styles.photoAddBtnText}>Add Photo</Text>
-                            </>
-                          )}
-                        </TouchableOpacity>
-                        {(item.photos || []).map((url: string, pIdx: number) => (
-                          <PhotoThumb
-                            key={pIdx}
-                            url={url}
-                            onRemove={() =>
-                              setAckItems((prev) =>
-                                prev.map((it, i) =>
-                                  i === idx
-                                    ? { ...it, photos: (it.photos || []).filter((_: string, pi: number) => pi !== pIdx) }
-                                    : it
+                            {selectedCount > 0 && (
+                              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                                {item.selected_serial_numbers.map((code: string, cIdx: number) => (
+                                  <View key={cIdx} style={{ backgroundColor: '#D1FAE5', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 }}>
+                                    <Text style={{ fontSize: 11, color: '#065F46', fontWeight: '600' }}>{code}</Text>
+                                  </View>
+                                ))}
+                              </View>
+                            )}
+                          </View>
+                        )}
+
+                        {/* Item-wise Photos */}
+                        <Text style={[styles.fieldLabel, { marginTop: 4 }]}>Item Photos</Text>
+                        <View style={styles.photoRow}>
+                          <TouchableOpacity
+                            style={styles.photoAddBtn}
+                            onPress={() => showPhotoOptions(true, idx)}
+                            disabled={uploadingPhoto}
+                          >
+                            {uploadingPhoto ? (
+                              <ActivityIndicator size="small" color="#481238" />
+                            ) : (
+                              <>
+                                <Icon name="camera" size={14} color="#481238" />
+                                <Text style={styles.photoAddBtnText}>Add Photo</Text>
+                              </>
+                            )}
+                          </TouchableOpacity>
+                          {(item.photos || []).map((url: string, pIdx: number) => (
+                            <PhotoThumb
+                              key={pIdx}
+                              url={url}
+                              onRemove={() =>
+                                setAckItems((prev) =>
+                                  prev.map((it, i) =>
+                                    i === idx
+                                      ? { ...it, photos: (it.photos || []).filter((_: string, pi: number) => pi !== pIdx) }
+                                      : it
+                                  )
                                 )
-                              )
-                            }
-                          />
-                        ))}
+                              }
+                            />
+                          ))}
                       </View>
 
                       <Text style={[styles.fieldLabel, { marginTop: 4 }]}>Line Remarks</Text>
@@ -1091,7 +1169,8 @@ export default function MaterialAcknowledgementScreen() {
                         }}
                       />
                     </View>
-                  ))}
+                    );
+                  })}
 
                   {/* ─── Overall Proof Photos ─────────────────────────────────── */}
                   <View style={styles.overallPhotoSection}>
@@ -1118,6 +1197,11 @@ export default function MaterialAcknowledgementScreen() {
                         <PhotoThumb
                           key={pIdx}
                           url={photo.url}
+                          onPress={() => {
+                            const fullUrl = photo.url.startsWith('http') ? photo.url : `${API_BASE_URL}${photo.url}`;
+                            setPreviewImageUrl(fullUrl);
+                            setPreviewImageModalVisible(true);
+                          }}
                           onRemove={() =>
                             setOverallPhotos((prev) => prev.filter((_, i) => i !== pIdx))
                           }
@@ -1137,6 +1221,105 @@ export default function MaterialAcknowledgementScreen() {
               ) : null}
             </ScrollView>
           )}
+        </SafeAreaView>
+      </Modal>
+      {/* --- Serial Selection Modal --- */}
+      <Modal
+        visible={serialModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setSerialModalVisible(false)}
+      >
+        <SafeAreaView style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+          <View style={{
+            backgroundColor: '#FFFFFF',
+            borderTopLeftRadius: 16,
+            borderTopRightRadius: 16,
+            padding: 20,
+            maxHeight: '80%',
+          }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <View>
+                <Text style={{ fontSize: 16, fontWeight: '800', color: '#1E293B' }}>
+                  Select Serial Numbers / Asset Codes
+                </Text>
+                {activeItemIndex !== null && ackItems[activeItemIndex] && (
+                  <Text style={{ fontSize: 12, color: '#64748B', marginTop: 2 }}>
+                    {ackItems[activeItemIndex].item_name} ({ackItems[activeItemIndex].item_code})
+                  </Text>
+                )}
+              </View>
+              <TouchableOpacity onPress={() => setSerialModalVisible(false)} style={{ padding: 4 }}>
+                <Icon name="x" size={24} color="#64748B" />
+              </TouchableOpacity>
+            </View>
+
+            {activeItemIndex !== null && ackItems[activeItemIndex] && (
+              <ScrollView contentContainerStyle={{ paddingBottom: 20 }}>
+                {ackItems[activeItemIndex].serial_numbers && ackItems[activeItemIndex].serial_numbers.length > 0 ? (
+                  ackItems[activeItemIndex].serial_numbers.map((code: string, cIdx: number) => {
+                    const isChecked = tempSelectedSerials.includes(code);
+                    return (
+                      <TouchableOpacity
+                        key={cIdx}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          paddingVertical: 12,
+                          borderBottomWidth: 1,
+                          borderBottomColor: '#F1F5F9',
+                        }}
+                        activeOpacity={0.7}
+                        onPress={() => {
+                          if (isChecked) {
+                            setTempSelectedSerials(prev => prev.filter(s => s !== code));
+                          } else {
+                            setTempSelectedSerials(prev => [...prev, code]);
+                          }
+                        }}
+                      >
+                        <View style={{
+                          width: 20,
+                          height: 20,
+                          borderRadius: 4,
+                          borderWidth: 2,
+                          borderColor: isChecked ? '#10B981' : '#CBD5E1',
+                          backgroundColor: isChecked ? '#10B981' : 'transparent',
+                          justifyContent: 'center',
+                          alignItems: 'center',
+                          marginRight: 12,
+                        }}>
+                          {isChecked && <Icon name="check" size={14} color="#FFFFFF" />}
+                        </View>
+                        <Text style={{ fontSize: 14, color: '#334155', fontWeight: '500', fontFamily: 'monospace' }}>
+                          {code}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })
+                ) : (
+                  <View style={{ padding: 24, alignItems: 'center' }}>
+                    <Text style={{ color: '#94A3B8' }}>No serial numbers found for this item.</Text>
+                  </View>
+                )}
+              </ScrollView>
+            )}
+
+            <TouchableOpacity
+              style={{
+                backgroundColor: '#481238',
+                paddingVertical: 12,
+                borderRadius: 8,
+                alignItems: 'center',
+                marginTop: 12,
+              }}
+              onPress={applySerialSelection}
+            >
+              <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 15 }}>
+                Apply Selection ({tempSelectedSerials.length})
+              </Text>
+            </TouchableOpacity>
+          </View>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
@@ -1302,26 +1485,39 @@ const styles = StyleSheet.create({
   },
   infoCard: {
     backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 14,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    gap: 8,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
   infoRow: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
   },
   infoLabel: {
+    width: 130,
     fontSize: 13,
+    fontWeight: '600',
     color: '#64748B',
+    paddingRight: 6,
   },
   infoValue: {
+    flex: 1,
     fontSize: 13,
     fontWeight: '700',
     color: '#0F172A',
+    textAlign: 'right',
   },
   sectionHeading: {
     fontSize: 15,

@@ -1,12 +1,12 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Select, Space, Popconfirm, Tag, App } from 'antd';
-import { PlusOutlined, EyeOutlined, StopOutlined } from '@ant-design/icons';
+import { Button, Select, Space, Popconfirm, Tag, App, Tooltip } from 'antd';
+import { PlusOutlined, EyeOutlined, StopOutlined, PrinterOutlined } from '@ant-design/icons';
 import PageHeader from '../../components/PageHeader';
 import DataTable from '../../components/DataTable';
 import StatusTag from '../../components/StatusTag';
 import api from '../../config/api';
-import { formatDate, getErrorMessage } from '../../utils/helpers';
+import { formatDate, getErrorMessage, printIndentToPDF } from '../../utils/helpers';
 import useAuthStore from '../../store/authStore';
 
 const TemplateIndentList = ({ title = "Template Indents" }) => {
@@ -17,8 +17,21 @@ const TemplateIndentList = ({ title = "Template Indents" }) => {
   const [filterStatus, setFilterStatus] = useState(undefined);
   const [filterProject, setFilterProject] = useState(undefined);
   const [projects, setProjects] = useState([]);
+  const [downloadingId, setDownloadingId] = useState(null);
 
   const isRaiser = (record) => record?.raised_by === currentUser?.id;
+
+  const handleDownloadPDF = async (record) => {
+    setDownloadingId(record.id);
+    try {
+      const res = await api.get(`/indent/indents/${record.id}`);
+      printIndentToPDF(res.data);
+    } catch (err) {
+      message.error(`Failed to load indent details: ${getErrorMessage(err)}`);
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   const loadProjects = useCallback(async () => {
     try {
@@ -71,7 +84,20 @@ const TemplateIndentList = ({ title = "Template Indents" }) => {
       dataIndex: 'template_name',
       key: 'template_name',
       width: 180,
-      render: (v) => <Tag color="purple" style={{ fontWeight: 600 }}>{v || '-'}</Tag>,
+      render: (v) => (
+        <Tooltip title={v} placement="topLeft">
+          <div style={{
+            maxWidth: 160,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap'
+          }}>
+            <Tag color="purple" style={{ fontWeight: 600, marginRight: 0 }}>
+              {v || '-'}
+            </Tag>
+          </div>
+        </Tooltip>
+      ),
     },
     { title: 'Vehicle Code', dataIndex: 'vehicle_code', key: 'vehicle_code', width: 120, render: (v) => v || '-' },
     { title: 'Vehicle Number', dataIndex: 'vehicle_number', key: 'vehicle_number', width: 140, render: (v) => v || '-' },
@@ -81,18 +107,26 @@ const TemplateIndentList = ({ title = "Template Indents" }) => {
     {
       title: 'Actions',
       key: 'actions',
-      width: 100,
+      width: 120,
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
-          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/indent/template-indents/${record.id}`)} />
+          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => navigate(`/indent/template-indents/${record.id}`)} title="View Details" />
+          <Button
+            type="link"
+            size="small"
+            icon={<PrinterOutlined />}
+            loading={downloadingId === record.id}
+            onClick={() => handleDownloadPDF(record)}
+            title="Download PDF"
+          />
           {record.status === 'draft' && isRaiser(record) && (
             <Popconfirm
               title="Cancel this draft?"
               onConfirm={() => handleAction(record.id, 'reject')}
               okButtonProps={{ danger: true }}
             >
-              <Button type="link" size="small" danger icon={<StopOutlined />} />
+              <Button type="link" size="small" danger icon={<StopOutlined />} title="Cancel Draft" />
             </Popconfirm>
           )}
         </Space>
@@ -109,13 +143,9 @@ const TemplateIndentList = ({ title = "Template Indents" }) => {
         value={filterStatus}
         onChange={(v) => { setFilterStatus(v); setRefreshKey((k) => k + 1); }}
         options={[
-          { label: 'Draft', value: 'draft' },
           { label: 'Pending Approval', value: 'pending_approval' },
           { label: 'Approved', value: 'approved' },
-          { label: 'Partially Fulfilled', value: 'partially_fulfilled' },
           { label: 'Fulfilled', value: 'fulfilled' },
-          { label: 'Rejected', value: 'rejected' },
-          { label: 'Cancelled', value: 'cancelled' },
         ]}
       />
       {projects.length > 1 && (
