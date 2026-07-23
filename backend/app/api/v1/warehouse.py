@@ -3029,7 +3029,6 @@ async def create_material_issue(
 
     if not is_central:
         for it in payload.items:
-            it.batch_id = None
             it.bin_id = None
 
     await validate_material_issue_items_flow(db, payload.warehouse_id, payload.items, is_central)
@@ -3935,7 +3934,6 @@ async def update_material_issue(
 
     if not is_central and payload.items is not None:
         for it in payload.items:
-            it.batch_id = None
             it.bin_id = None
 
     if payload.items is not None:
@@ -4171,6 +4169,19 @@ async def issue_material(
     for item in mi.items:
         # Validate that batch-tracked items have a batch assigned before issuing
         BATCH_REQUIRED_TYPES_MI = {"medicine", "pharma", "drug", "consumable_medicine"}
+        if not is_central and item.batch_id is None:
+            sb_batch_res = await db.execute(
+                select(StockBalance.batch_id).where(
+                    StockBalance.warehouse_id == mi.warehouse_id,
+                    StockBalance.item_id == item.item_id,
+                    StockBalance.available_qty > 0,
+                    StockBalance.batch_id.isnot(None)
+                ).order_by(StockBalance.id.asc())
+            )
+            found_batch_id = sb_batch_res.scalar()
+            if found_batch_id:
+                item.batch_id = found_batch_id
+
         requires_batch = is_central and ((item.item.has_batch) or (
             item.item.item_type and str(item.item.item_type).lower() in BATCH_REQUIRED_TYPES_MI
         ))

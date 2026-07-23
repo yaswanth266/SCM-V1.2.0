@@ -68,10 +68,10 @@ export default function RoleSwitcher() {
         setSidebar(resp);
         await refreshUser();
         message.success(`Switched position`);
-        const IS_UAT = String(import.meta.env.VITE_UAT || '').toLowerCase() === 'true' || 
-                       String(import.meta.env.VITE_UAT || '').toLowerCase() === '1' ||
-                       String(import.meta.env.VITE_UAT || '').toLowerCase() === 'yes' ||
-                       String(import.meta.env.VITE_UAT || '').toLowerCase() === 'on';
+        const IS_UAT = String(import.meta.env.VITE_UAT || '').toLowerCase() === 'true' ||
+          String(import.meta.env.VITE_UAT || '').toLowerCase() === '1' ||
+          String(import.meta.env.VITE_UAT || '').toLowerCase() === 'yes' ||
+          String(import.meta.env.VITE_UAT || '').toLowerCase() === 'on';
         const uatPrefix = IS_UAT ? '/uat' : '';
         window.location.href = `${uatPrefix}/dashboard`;
       } catch (e) {
@@ -120,10 +120,10 @@ export default function RoleSwitcher() {
       setSidebar(resp);
       await refreshUser();
       message.success(`Acting as: ${resp.active_role_code}`);
-      const IS_UAT = String(import.meta.env.VITE_UAT || '').toLowerCase() === 'true' || 
-                     String(import.meta.env.VITE_UAT || '').toLowerCase() === '1' ||
-                     String(import.meta.env.VITE_UAT || '').toLowerCase() === 'yes' ||
-                     String(import.meta.env.VITE_UAT || '').toLowerCase() === 'on';
+      const IS_UAT = String(import.meta.env.VITE_UAT || '').toLowerCase() === 'true' ||
+        String(import.meta.env.VITE_UAT || '').toLowerCase() === '1' ||
+        String(import.meta.env.VITE_UAT || '').toLowerCase() === 'yes' ||
+        String(import.meta.env.VITE_UAT || '').toLowerCase() === 'on';
       const uatPrefix = IS_UAT ? '/uat' : '';
       window.location.href = `${uatPrefix}/dashboard`;
     } catch (e) {

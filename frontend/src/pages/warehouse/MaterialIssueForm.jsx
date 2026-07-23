@@ -33,7 +33,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
   const location = useLocation();
   const isNew = !id || id === 'new';
   const user = useAuthStore((s) => s.user);
-  const backPath = templateType 
+  const backPath = templateType
     ? `/warehouse/material-issues/ap104-${templateType}`
     : '/warehouse/material-issues';
 
@@ -295,7 +295,14 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         }
       });
 
-      const batches = Array.from(batchMap.values());
+      const batches = Array.from(batchMap.values()).sort((a, b) => {
+        if (a.expiry_date && b.expiry_date) {
+          return new Date(a.expiry_date) - new Date(b.expiry_date);
+        }
+        if (a.expiry_date) return -1;
+        if (b.expiry_date) return 1;
+        return 0;
+      });
       const bins = Array.from(binMap.values());
 
       const serialsMap = {};
@@ -371,28 +378,28 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
       try {
         const whRes = await api.get('/masters/warehouses', { params: { page_size: 200 } });
         const whList = Array.isArray(whRes.data) ? whRes.data : (whRes.data?.items || []);
-        
+
         const userRole = (user?.user_type || '').toLowerCase();
         const isAdmin = ['admin', 'superadmin', 'super_admin', 'manager'].includes(userRole);
-        
+
         if (isAdmin) {
           // Look for central warehouse: parent_id is null/undefined or name/code contains central
-          const centralWh = whList.find(w => 
-            w.parent_id === null || 
-            w.parent_id === undefined || 
-            (w.code || '').toUpperCase().includes('CENTRAL') || 
+          const centralWh = whList.find(w =>
+            w.parent_id === null ||
+            w.parent_id === undefined ||
+            (w.code || '').toUpperCase().includes('CENTRAL') ||
             (w.name || '').toUpperCase().includes('CENTRAL')
           );
           if (centralWh) {
             sourceWarehouseId = centralWh.id;
           }
         }
-        
+
         // If not admin, or central warehouse not found, default to user's assigned warehouse
         if (!sourceWarehouseId && user?.warehouse_id) {
           sourceWarehouseId = Number(user.warehouse_id);
         }
-        
+
         // If still not resolved, fall back to indent's warehouse
         if (!sourceWarehouseId) {
           sourceWarehouseId = ind.warehouse_id;
@@ -519,7 +526,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         params: { is_active: true, search, limit: 100 },
       });
       const data = res.data || [];
-      
+
       const currentVal = form.getFieldValue('vehicle_code');
       if (currentVal) {
         setVehicles((prev) => {
@@ -690,11 +697,11 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
 
     const userRole = (user?.user_type || '').toLowerCase();
     const isAdmin = ['admin', 'superadmin', 'super_admin', 'manager'].includes(userRole);
-    
+
     let defaultWarehouseId = null;
     if (isAdmin) {
-      const centralOption = warehouses.find(w => 
-        (w.label || '').toUpperCase().includes('CENTRAL') || 
+      const centralOption = warehouses.find(w =>
+        (w.label || '').toUpperCase().includes('CENTRAL') ||
         (w.label || '').toUpperCase().includes('HQ') ||
         (w.label || '').toUpperCase().includes('HEAD')
       );
@@ -702,7 +709,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         defaultWarehouseId = centralOption.value;
       }
     }
-    
+
     if (!defaultWarehouseId && user?.warehouse_id) {
       const assignedWarehouseId = Number(user?.warehouse_id);
       const assignedWarehouseOption = warehouses.find(
@@ -712,7 +719,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         defaultWarehouseId = assignedWarehouseOption.value;
       }
     }
-    
+
     if (!defaultWarehouseId) {
       defaultWarehouseId = warehouses.length === 1 ? warehouses[0].value : null;
     }
@@ -729,7 +736,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
       const items = recordData?.items || [];
       const invalidItems = items.filter(
         (i) => (i.has_serial || i.item_type === 'asset' || i.item_type === 'consumable') &&
-               (!i.serial_numbers || i.serial_numbers.length !== Math.round(Number(i.qty)))
+          (!i.serial_numbers || i.serial_numbers.length !== Math.round(Number(i.qty)))
       );
       if (invalidItems.length > 0) {
         message.error('For asset, consumable, or serial-tracked items, selected codes count must equal the quantity. Please edit the issue to select codes.');
@@ -766,18 +773,18 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
   const handlePrintAllIssueQRs = () => {
     if (!recordData || !recordData.items) return;
     const printWindow = window.open('', '_blank');
-    
+
     let labelsHTML = '';
     recordData.items.forEach(item => {
       const serials = item.serial_numbers || [];
       if (serials.length === 0) return;
-      
+
       const matCode = item.item_code || '';
       const name = item.item_name || '';
       const batch = item.batch_number || item.batch_name || '-';
       const wh = recordData.warehouse_name || '-';
       const exp = item.expiry_date ? dayjs(item.expiry_date).format('YYYY-MM-DD') : '-';
-      
+
       serials.forEach(code => {
         const payload = `Material: ${matCode}\nItem: ${name}\nBatch: ${batch}\nCode: ${code}\nWarehouse: ${wh}\nExpiry: ${exp}`;
         const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(payload)}`;
@@ -978,8 +985,8 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
       }
 
       const invalidSerials = validItems.filter(
-        (i) => (i.has_serial || i.item_type === 'asset' || i.item_type === 'consumable') && 
-               (!i.serial_numbers || i.serial_numbers.length !== Math.round(Number(i.qty)))
+        (i) => (i.has_serial || i.item_type === 'asset' || i.item_type === 'consumable') &&
+          (!i.serial_numbers || i.serial_numbers.length !== Math.round(Number(i.qty)))
       );
       if (invalidSerials.length > 0) {
         message.error('For asset, consumable, or serial-tracked items, selected serial numbers / asset codes count must equal the quantity');
@@ -988,9 +995,9 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
 
       const itemsWithoutBatch = isCentralWarehouse
         ? validItems.filter((i) => {
-            const selectedBatches = i.batch_ids || (i.batch_id ? [i.batch_id] : []);
-            return i.has_batch && selectedBatches.length === 0;
-          })
+          const selectedBatches = i.batch_ids || (i.batch_id ? [i.batch_id] : []);
+          return i.has_batch && selectedBatches.length === 0;
+        })
         : []; // non-central WH: batch is optional text, never block submission
       if (itemsWithoutBatch.length > 0) {
         message.error('Batch selection is required for items flagged with batch tracking');
@@ -1048,7 +1055,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
             item_id: item.item_id,
             qty: item.qty,
             uom_id: item.uom_id,
-            batch_id: isCentralWarehouse ? (selectedBatches[0] || null) : null,
+            batch_id: selectedBatches[0] || null,
             bin_id: isCentralWarehouse ? (selectedBins[0] || null) : null,
             rate: item.rate,
             serial_numbers: (item.has_serial || item.item_type === 'asset' || item.item_type === 'consumable') ? item.serial_numbers : null,
@@ -1067,7 +1074,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
             item_id: item.item_id,
             qty: take,
             uom_id: item.uom_id,
-            batch_id: isCentralWarehouse ? (row.batch_id || null) : null,
+            batch_id: row.batch_id || selectedBatches[0] || null,
             bin_id: isCentralWarehouse ? (row.bin_id || null) : null,
             rate: Number(row.valuation_rate) || item.rate || 0,
             serial_numbers: (item.has_serial || item.item_type === 'asset' || item.item_type === 'consumable') ? item.serial_numbers : null,
@@ -1085,7 +1092,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
               item_id: item.item_id,
               qty: remainingQty,
               uom_id: item.uom_id,
-              batch_id: isCentralWarehouse ? (selectedBatches[0] || null) : null,
+              batch_id: selectedBatches[0] || null,
               bin_id: isCentralWarehouse ? (selectedBins[0] || null) : null,
               rate: item.rate,
               serial_numbers: (item.has_serial || item.item_type === 'asset' || item.item_type === 'consumable') ? item.serial_numbers : null,
@@ -1463,8 +1470,8 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         // Non-central warehouse: breakdown returns batch_id=null for all rows.
         // Show an optional text input for source batch traceability (no ledger validation).
         const allBatchIdsNull = details.batches.length > 0 && details.batches.every(b => b.id === null);
-        if (allBatchIdsNull || !isCentralWarehouse) {
-          // Non-central: always show free-text input
+        if (allBatchIdsNull && !record.has_batch) {
+          // Non-central without batch tracking: show free-text input
           return (
             <Input
               value={record.batch_number_text || ''}
@@ -1517,8 +1524,8 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
             />
           );
         }
-        // Sort and filter batches based on requested qty and expiry date
-        let displayedBatches = [...details.batches];
+        // Sort and filter active batches (qty > 0) based on FEFO (earliest expiry date first)
+        let displayedBatches = details.batches.filter(b => (b.qty || 0) > 0);
         displayedBatches.sort((a, b) => {
           if (a.expiry_date && b.expiry_date) {
             return new Date(a.expiry_date) - new Date(b.expiry_date);
@@ -1528,27 +1535,39 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
           return 0;
         });
 
-        const targetQty = record.qty || 0;
+        const targetQty = Number(record.qty) || 0;
         const selectedBatchIds = new Set(
           record.batch_ids || (record.batch_id ? [record.batch_id] : [])
         );
 
-        if (targetQty > 0) {
+        if (targetQty > 0 && displayedBatches.length > 0) {
           let accumulatedQty = 0;
-          const filtered = [];
+          const fefoFiltered = [];
           for (const b of displayedBatches) {
-            if (accumulatedQty < targetQty || selectedBatchIds.has(b.id)) {
-              filtered.push(b);
-              accumulatedQty += b.qty || 0;
+            fefoFiltered.push(b);
+            accumulatedQty += Number(b.qty) || 0;
+            if (accumulatedQty >= targetQty) {
+              break;
             }
           }
-          displayedBatches = filtered;
+          // Ensure any currently selected batch is also retained in the list if editing
+          for (const b of displayedBatches) {
+            if (selectedBatchIds.has(b.id) && !fefoFiltered.some(f => f.id === b.id)) {
+              fefoFiltered.push(b);
+            }
+          }
+          displayedBatches = fefoFiltered;
         }
+
+        const currentBatchIds = record.batch_ids || (record.batch_id ? [record.batch_id] : []);
+        const autoSelectedBatchIds = currentBatchIds.length > 0
+          ? currentBatchIds
+          : (displayedBatches.length > 0 ? [displayedBatches[0].id] : []);
 
         return (
           <Select
             mode="multiple"
-            value={record.batch_ids || (record.batch_id ? [record.batch_id] : [])}
+            value={autoSelectedBatchIds}
             onChange={(selectedValues) => {
               const firstBatchId = selectedValues[0] || null;
               let rateUpdate = {};
@@ -1617,7 +1636,8 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         }
 
         const selectedBatches = record.batch_ids || (record.batch_id ? [record.batch_id] : []);
-        if (record.has_batch && selectedBatches.length === 0) {
+
+        if (record.has_batch && selectedBatches.length === 0 && isCentralWarehouse) {
           return (
             <Select
               value={val}
@@ -1629,31 +1649,34 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
           );
         }
 
-        let binOptions = details.bins;
-        if (selectedBatches.length > 0) {
-          const filteredRows = (details.rawRows || []).filter(r =>
+        let binOptions = [];
+        if (selectedBatches.length > 0 && (details.rawRows || []).length > 0) {
+          const filteredRows = details.rawRows.filter(r =>
             selectedBatches.some(bId => String(bId) === String(r.batch_id))
           );
           const filteredBinMap = new Map();
           filteredRows.forEach((r) => {
             const bnid = r.bin_id;
             const bCode = r.bin_code || r.bin_name || (bnid ? `Bin ${bnid}` : 'General Area');
-            const bnidKey = bnid === null ? 'null_bin' : bnid;
-            if (!filteredBinMap.has(bnidKey)) {
-              filteredBinMap.set(bnidKey, {
+            const key = bnid == null ? 'general' : bnid;
+            if (!filteredBinMap.has(key)) {
+              filteredBinMap.set(key, {
                 id: bnid,
                 code: bCode,
                 qty: Number(r.available_qty) || 0,
               });
             } else {
-              filteredBinMap.get(bnidKey).qty += Number(r.available_qty) || 0;
+              filteredBinMap.get(key).qty += Number(r.available_qty) || 0;
             }
           });
           binOptions = Array.from(filteredBinMap.values());
         }
+        if (binOptions.length === 0) {
+          binOptions = details.bins || [];
+        }
 
         if (binOptions.length === 0) {
-          // Non-central: show optional text input for bin/location traceability
+          // If non-central warehouse, show free-text location input
           if (!isCentralWarehouse) {
             return (
               <Input
@@ -1710,7 +1733,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         const serialsMap = details.serialsMap || {};
         const key = `${record.batch_id || 'null'}-${record.bin_id || 'null'}`;
         const availableSerials = serialsMap[key] || [];
-        
+
         const isAssetOrConsumableOrSerial = record.item_type === 'asset' || record.item_type === 'consumable' || record.has_serial;
         const selectedCount = val?.length || 0;
         const isAsset = record.item_type === 'asset';
@@ -1719,9 +1742,14 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
         const label = isAsset ? 'Codes Selected' : isConsumable ? 'Codes Selected' : 'Serials Selected';
         const buttonText = isAsset || isConsumable ? 'Select Codes' : 'Select Serials';
 
-        const selectedBatches = record.batch_ids || (record.batch_id ? [record.batch_id] : []);
+        const activeBatchIds = record.batch_ids || (record.batch_id ? [record.batch_id] : []);
+        const autoBatches = (details.batches || []).filter(b => (b.qty || 0) > 0);
+        const effectiveBatchIds = activeBatchIds.length > 0
+          ? activeBatchIds
+          : (autoBatches.length > 0 ? [autoBatches[0].id] : []);
+
         const needsBatch = record.has_batch;
-        const batchMissing = needsBatch && selectedBatches.length === 0;
+        const batchMissing = needsBatch && effectiveBatchIds.length === 0;
 
         if (batchMissing) {
           if (isAssetOrConsumableOrSerial) {
@@ -1749,7 +1777,7 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
             </Tooltip>
           );
         }
-        
+
         if (isAssetOrConsumableOrSerial) {
           return (
             <Tooltip title="Click to select specific items/serials from tree hierarchy">
@@ -1758,6 +1786,12 @@ const MaterialIssueForm = ({ templateType, title: propTitle }) => {
                 type={selectedCount > 0 ? "primary" : "dashed"}
                 icon={<BarcodeOutlined />}
                 onClick={() => {
+                  if (!record.batch_id && effectiveBatchIds.length > 0) {
+                    updateIssueItemFields(record.key, {
+                      batch_ids: effectiveBatchIds,
+                      batch_id: effectiveBatchIds[0],
+                    });
+                  }
                   setActiveRowKey(record.key);
                   setTreeModalOpen(true);
                 }}

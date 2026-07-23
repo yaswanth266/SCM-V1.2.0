@@ -2688,13 +2688,37 @@ async def acknowledge_package(
                             lock=True,
                         )
                         packed_qty = Decimal(str(pi.quantity_packed or 0))
-                        src_balance.transit_qty = max(Decimal("0"), (src_balance.transit_qty or Decimal("0")) - packed_qty)
+                        decremented_transit = min(src_balance.transit_qty or Decimal("0"), packed_qty)
+                        src_balance.transit_qty = max(Decimal("0"), (src_balance.transit_qty or Decimal("0")) - decremented_transit)
                         src_balance.available_qty = max(
                             Decimal("0"),
                             (src_balance.total_qty or Decimal("0"))
                             - (src_balance.reserved_qty or Decimal("0"))
                             - (src_balance.transit_qty or Decimal("0"))
                         )
+
+                        remaining_transit = packed_qty - decremented_transit
+                        if remaining_transit > Decimal("0"):
+                            stmt_other_t = select(StockBalance).where(
+                                StockBalance.item_id == pi.material_id,
+                                StockBalance.warehouse_id == src_wh_id,
+                                StockBalance.transit_qty > 0,
+                                StockBalance.id != src_balance.id
+                            ).with_for_update()
+                            res_other_t = await db.execute(stmt_other_t)
+                            for ob_t in res_other_t.scalars().all():
+                                if remaining_transit <= Decimal("0"):
+                                    break
+                                take_t = min(ob_t.transit_qty or Decimal("0"), remaining_transit)
+                                if take_t > Decimal("0"):
+                                    ob_t.transit_qty = (ob_t.transit_qty or Decimal("0")) - take_t
+                                    ob_t.available_qty = max(
+                                        Decimal("0"),
+                                        (ob_t.total_qty or Decimal("0"))
+                                        - (ob_t.reserved_qty or Decimal("0"))
+                                        - (ob_t.transit_qty or Decimal("0"))
+                                    )
+                                    remaining_transit -= take_t
 
                         # If direct dispatch, we did not deduct total_qty on dispatch, so deduct it now
                         is_direct = True
