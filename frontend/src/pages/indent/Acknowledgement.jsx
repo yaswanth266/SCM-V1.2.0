@@ -83,6 +83,7 @@ const Acknowledgement = () => {
         const count = v || (r.items ? r.items.length : 0);
         return count ? <Badge count={count} showZero color="#6366f1" /> : '-';
       },
+    },
     { title: 'Status', dataIndex: 'status', key: 'status', width: 120, render: (s) => <StatusTag status={s || 'received'} /> },
     {
       title: 'Actions',
